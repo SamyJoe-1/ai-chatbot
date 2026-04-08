@@ -11,7 +11,6 @@ module.exports = async function handler(req, res) {
     if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
     const { message, systemPrompt } = req.body;
-
     if (!message) return res.status(400).json({ error: "Message is required" });
 
     try {
@@ -20,12 +19,23 @@ module.exports = async function handler(req, res) {
             systemInstruction: systemPrompt || "You are a helpful assistant.",
         });
 
-        const result = await model.generateContent(message);
-        const response = result.response.text();
+        const result = await model.generateContentStream(message);
 
-        return res.status(200).json({ reply: response });
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+
+        for await (const chunk of result.stream) {
+            const text = chunk.text();
+            if (text) {
+                res.write(`data: ${JSON.stringify({ text })}\n\n`);
+            }
+        }
+
+        res.write("data: [DONE]\n\n");
+        res.end();
     } catch (error) {
         console.error(error);
-        return res.status(500).json({ error: error.message });
+        res.status(500).json({ error: error.message });
     }
 };

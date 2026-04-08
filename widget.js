@@ -109,7 +109,9 @@
         if (!text) return;
         input.value = "";
         addMessage(text, "user");
-        const typing = addMessage("Typing...", "bot typing");
+
+        const botDiv = addMessage("", "bot");
+        let fullText = "";
 
         try {
             const res = await fetch(BACKEND_URL, {
@@ -117,12 +119,32 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ message: text, systemPrompt })
             });
-            const data = await res.json();
-            typing.remove();
-            addMessage(data.reply, "bot");
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split("\n");
+
+                for (const line of lines) {
+                    if (line.startsWith("data: ")) {
+                        const data = line.replace("data: ", "").trim();
+                        if (data === "[DONE]") break;
+                        try {
+                            const parsed = JSON.parse(data);
+                            fullText += parsed.text;
+                            botDiv.textContent = fullText;
+                            messages.scrollTop = messages.scrollHeight;
+                        } catch {}
+                    }
+                }
+            }
         } catch {
-            typing.remove();
-            addMessage("Something went wrong. Try again.", "bot");
+            botDiv.textContent = "Something went wrong. Try again.";
         }
     }
 })();
