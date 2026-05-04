@@ -1,150 +1,501 @@
 (function () {
-    const BACKEND_URL = "https://ai-chatbot-two-neon-63.vercel.app/api/chat";
+  const script = document.currentScript;
+  if (!script) return;
 
-    const config = window.ChatbotConfig || {};
-    const systemPrompt = config.systemPrompt || "You are a helpful assistant.";
-    const primaryColor = config.primaryColor || "#6366f1";
-    const botName = config.botName || "AI Assistant";
+  const scriptUrl = new URL(script.src, window.location.href);
+  const config = window.ChatbotConfig || {};
+  const token = config.token || scriptUrl.searchParams.get('token');
+  const backendUrl = (config.backendUrl || scriptUrl.origin).replace(/\/$/, '');
+  const storageKey = `guest_chat:${token || 'missing'}`;
 
-    // Inject styles
-    const style = document.createElement("style");
-    style.innerHTML = `
-    #chatbot-bubble {
-      position: fixed; bottom: 24px; right: 24px;
-      width: 56px; height: 56px; border-radius: 50%;
-      background: ${primaryColor}; cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.2); z-index: 9999;
-      border: none; outline: none;
+  if (!token) return;
+
+  window.__eglotechWidgetLoaded = window.__eglotechWidgetLoaded || new Set();
+  if (window.__eglotechWidgetLoaded.has(token)) return;
+  window.__eglotechWidgetLoaded.add(token);
+
+  const state = {
+    sessionKey: null,
+    language: 'en',
+    cafe: null,
+    open: false,
+    typingEl: null,
+    hasHistory: false,
+  };
+
+  function loadStoredSession() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      if (parsed.session_key) state.sessionKey = parsed.session_key;
+    } catch {}
+  }
+
+  function persistSession() {
+    localStorage.setItem(storageKey, JSON.stringify({ session_key: state.sessionKey }));
+  }
+
+  function clearStoredSession() {
+    localStorage.removeItem(storageKey);
+    state.sessionKey = null;
+  }
+
+  async function postJson(path, body) {
+    const response = await fetch(`${backendUrl}${path}?token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(payload.error || 'request_failed');
+      error.payload = payload;
+      throw error;
     }
-    #chatbot-bubble svg { width: 28px; height: 28px; fill: white; }
-    #chatbot-box {
-      display: none; position: fixed; bottom: 90px; right: 24px;
-      width: 360px; height: 500px; border-radius: 16px;
-      background: #fff; box-shadow: 0 8px 32px rgba(0,0,0,0.18);
-      z-index: 9999; flex-direction: column; overflow: hidden;
-      font-family: sans-serif;
-    }
-    #chatbot-box.open { display: flex; }
-    #chatbot-header {
-      background: ${primaryColor}; color: white;
-      padding: 16px; font-weight: bold; font-size: 15px;
-      display: flex; justify-content: space-between; align-items: center;
-    }
-    #chatbot-close {
-      background: none; border: none; color: white;
-      font-size: 20px; cursor: pointer;
-    }
-    #chatbot-messages {
-      flex: 1; overflow-y: auto; padding: 16px;
-      display: flex; flex-direction: column; gap: 10px;
-    }
-    .cb-msg {
-      max-width: 80%; padding: 10px 14px;
-      border-radius: 12px; font-size: 14px; line-height: 1.5;
-    }
-    .cb-msg.user {
-      background: ${primaryColor}; color: white;
-      align-self: flex-end; border-bottom-right-radius: 4px;
-    }
-    .cb-msg.bot {
-      background: #f1f1f1; color: #333;
-      align-self: flex-start; border-bottom-left-radius: 4px;
-    }
-    .cb-msg.typing { color: #999; font-style: italic; }
-    #chatbot-input-area {
-      display: flex; padding: 12px; border-top: 1px solid #eee; gap: 8px;
-    }
-    #chatbot-input {
-      flex: 1; padding: 10px 14px; border-radius: 24px;
-      border: 1px solid #ddd; outline: none; font-size: 14px;
-    }
-    #chatbot-send {
-      background: ${primaryColor}; color: white;
-      border: none; border-radius: 50%; width: 40px; height: 40px;
-      cursor: pointer; font-size: 18px; display: flex;
-      align-items: center; justify-content: center;
-    }
-  `;
+
+    return payload;
+  }
+
+  function createStyles(colors) {
+    const style = document.createElement('style');
+    style.textContent = `
+      :root {
+        --cb-primary: ${colors.primary};
+        --cb-secondary: ${colors.secondary};
+        --cb-text: #16221f;
+        --cb-surface: #ffffff;
+        --cb-border: rgba(16, 24, 40, 0.08);
+      }
+      .cb-root, .cb-root * { box-sizing: border-box; }
+      .cb-root {
+        position: fixed;
+        right: 24px;
+        bottom: 24px;
+        z-index: 2147483000;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+      }
+      .cb-bubble {
+        width: 68px;
+        height: 68px;
+        border: 0;
+        border-radius: 999px;
+        background: linear-gradient(135deg, var(--cb-primary), #0e2f29);
+        color: #fff;
+        box-shadow: 0 20px 45px rgba(0, 0, 0, 0.22);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        transition: transform 180ms ease, box-shadow 180ms ease;
+      }
+      .cb-bubble:hover { transform: translateY(-2px); }
+      .cb-bubble::after {
+        content: "Ask us";
+        position: absolute;
+        right: 78px;
+        white-space: nowrap;
+        background: var(--cb-surface);
+        color: var(--cb-text);
+        border: 1px solid var(--cb-border);
+        padding: 10px 14px;
+        border-radius: 999px;
+        font-size: 13px;
+        opacity: 0.96;
+      }
+      .cb-panel {
+        position: absolute;
+        right: 0;
+        bottom: 88px;
+        width: min(390px, calc(100vw - 24px));
+        height: min(640px, calc(100vh - 120px));
+        background: linear-gradient(180deg, rgba(23, 68, 58, 0.07), rgba(255,255,255,0.92));
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--cb-border);
+        border-radius: 24px;
+        overflow: hidden;
+        box-shadow: 0 24px 60px rgba(10, 18, 16, 0.24);
+        transform: translateY(24px) scale(0.96);
+        opacity: 0;
+        pointer-events: none;
+        transition: transform 180ms ease, opacity 180ms ease;
+        display: flex;
+        flex-direction: column;
+      }
+      .cb-root.open .cb-panel {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .cb-root.open .cb-bubble::after { display: none; }
+      .cb-header {
+        padding: 18px 18px 14px;
+        background: linear-gradient(135deg, var(--cb-primary), #0e2f29);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .cb-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+      }
+      .cb-logo {
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+        object-fit: cover;
+        background: rgba(255,255,255,0.18);
+      }
+      .cb-brand-text { min-width: 0; }
+      .cb-brand-name {
+        font-size: 15px;
+        font-weight: 700;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .cb-brand-sub {
+        font-size: 12px;
+        opacity: 0.8;
+      }
+      .cb-close {
+        width: 38px;
+        height: 38px;
+        border-radius: 999px;
+        border: 0;
+        background: rgba(255,255,255,0.14);
+        color: #fff;
+        cursor: pointer;
+      }
+      .cb-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .cb-msg {
+        max-width: 86%;
+        padding: 12px 14px;
+        border-radius: 18px;
+        white-space: pre-wrap;
+        line-height: 1.45;
+        font-size: 14px;
+      }
+      .cb-msg.bot {
+        background: #ffffff;
+        color: var(--cb-text);
+        border-bottom-left-radius: 6px;
+        box-shadow: 0 10px 20px rgba(17, 24, 39, 0.07);
+      }
+      .cb-msg.user {
+        align-self: flex-end;
+        background: linear-gradient(135deg, var(--cb-primary), #0e2f29);
+        color: #fff;
+        border-bottom-right-radius: 6px;
+      }
+      .cb-typing {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .cb-typing span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #7f8b88;
+        animation: cb-bounce 900ms infinite ease-in-out;
+      }
+      .cb-typing span:nth-child(2) { animation-delay: 120ms; }
+      .cb-typing span:nth-child(3) { animation-delay: 240ms; }
+      @keyframes cb-bounce {
+        0%, 80%, 100% { transform: translateY(0); opacity: 0.45; }
+        40% { transform: translateY(-4px); opacity: 1; }
+      }
+      .cb-actions, .cb-suggestions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 2px;
+      }
+      .cb-action, .cb-chip {
+        border-radius: 999px;
+        padding: 10px 14px;
+        border: 1px solid rgba(23, 68, 58, 0.16);
+        background: rgba(255,255,255,0.92);
+        color: var(--cb-text);
+        cursor: pointer;
+        font-size: 13px;
+        text-decoration: none;
+      }
+      .cb-action:hover, .cb-chip:hover {
+        background: rgba(23, 68, 58, 0.08);
+      }
+      .cb-footer {
+        padding: 14px;
+        background: rgba(255,255,255,0.9);
+        border-top: 1px solid var(--cb-border);
+      }
+      .cb-form {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .cb-input {
+        flex: 1;
+        border: 1px solid var(--cb-border);
+        border-radius: 999px;
+        padding: 12px 14px;
+        font-size: 14px;
+        outline: none;
+      }
+      .cb-send {
+        width: 46px;
+        height: 46px;
+        border-radius: 999px;
+        border: 0;
+        background: var(--cb-primary);
+        color: #fff;
+        cursor: pointer;
+        font-size: 18px;
+      }
+      @media (max-width: 640px) {
+        .cb-root { right: 12px; bottom: 12px; left: 12px; }
+        .cb-panel { width: 100%; height: min(70vh, 620px); }
+        .cb-bubble::after { display: none; }
+      }
+    `;
     document.head.appendChild(style);
+  }
 
-    // HTML
-    document.body.insertAdjacentHTML("beforeend", `
-    <button id="chatbot-bubble">
-      <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12c0 1.85.5 3.58 1.37 5.07L2 22l5.07-1.36A9.94 9.94 0 0 0 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2z"/></svg>
-    </button>
-    <div id="chatbot-box">
-      <div id="chatbot-header">
-        <span>${botName}</span>
-        <button id="chatbot-close">✕</button>
-      </div>
-      <div id="chatbot-messages"></div>
-      <div id="chatbot-input-area">
-        <input id="chatbot-input" type="text" placeholder="Type a message..." />
-        <button id="chatbot-send">➤</button>
-      </div>
-    </div>
-  `);
+  function appendMessage(text, role, lang, allowAutoOpen) {
+    const message = document.createElement('div');
+    message.className = `cb-msg ${role}`;
+    message.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    message.textContent = text;
+    refs.messages.appendChild(message);
+    refs.messages.scrollTop = refs.messages.scrollHeight;
+    if (allowAutoOpen !== false && role === 'bot' && !state.open) openPanel(true);
+    return message;
+  }
 
-    const box = document.getElementById("chatbot-box");
-    const messages = document.getElementById("chatbot-messages");
-    const input = document.getElementById("chatbot-input");
+  function renderHistory(history, lang) {
+    refs.messages.innerHTML = '';
+    (history || []).forEach((message) => {
+      appendMessage(message.content, message.role, lang, false);
+    });
+    state.hasHistory = Boolean(history && history.length);
+  }
 
-    document.getElementById("chatbot-bubble").onclick = () => box.classList.toggle("open");
-    document.getElementById("chatbot-close").onclick = () => box.classList.remove("open");
-    document.getElementById("chatbot-send").onclick = sendMessage;
-    input.addEventListener("keydown", e => { if (e.key === "Enter") sendMessage(); });
+  function showTyping() {
+    removeTyping();
+    const wrapper = document.createElement('div');
+    wrapper.className = 'cb-msg bot';
+    wrapper.innerHTML = '<div class="cb-typing"><span></span><span></span><span></span></div>';
+    refs.messages.appendChild(wrapper);
+    refs.messages.scrollTop = refs.messages.scrollHeight;
+    state.typingEl = wrapper;
+  }
 
-    function addMessage(text, role) {
-        const div = document.createElement("div");
-        div.className = `cb-msg ${role}`;
-        div.textContent = text;
-        messages.appendChild(div);
-        messages.scrollTop = messages.scrollHeight;
-        return div;
+  function removeTyping() {
+    if (state.typingEl) {
+      state.typingEl.remove();
+      state.typingEl = null;
+    }
+  }
+
+  function renderButtons(buttons) {
+    if (!buttons || !buttons.length) return;
+    const row = document.createElement('div');
+    row.className = 'cb-actions';
+    buttons.forEach((button) => {
+      const link = document.createElement('a');
+      link.className = 'cb-action';
+      link.href = button.url;
+      link.target = button.target || '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = button.label;
+      row.appendChild(link);
+    });
+    refs.messages.appendChild(row);
+    refs.messages.scrollTop = refs.messages.scrollHeight;
+  }
+
+  function renderSuggestions(list) {
+    refs.suggestions.innerHTML = '';
+    (list || []).slice(0, 4).forEach((text) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cb-chip';
+      chip.textContent = text;
+      chip.addEventListener('click', () => sendMessage(text));
+      refs.suggestions.appendChild(chip);
+    });
+  }
+
+  function setInputPlaceholder() {
+    if (!refs || !refs.input) return;
+    refs.input.placeholder = state.language === 'ar' ? 'اكتب رسالتك...' : 'Type your message...';
+  }
+
+  function openPanel(force) {
+    state.open = force !== undefined ? force : !state.open;
+    refs.root.classList.toggle('open', state.open);
+    if (state.open) refs.input.focus();
+  }
+
+  async function sendMessage(forcedText) {
+    const text = (forcedText || refs.input.value || '').trim();
+    if (!text || refs.send.disabled) return;
+
+    refs.input.value = '';
+    appendMessage(text, 'user', state.language);
+    showTyping();
+    refs.send.disabled = true;
+
+    try {
+      const payload = await postJson('/api/message', {
+        session_key: state.sessionKey,
+        message: text,
+      });
+
+      state.language = payload.language || state.language;
+      removeTyping();
+      appendMessage(payload.response.text, 'bot', state.language);
+      renderButtons(payload.response.buttons);
+      renderSuggestions(payload.response.suggestions);
+      setInputPlaceholder();
+    } catch (_error) {
+      removeTyping();
+      const fallback = state.language === 'ar'
+        ? `حصل خطأ. تواصل معنا على ${state.cafe.phone || 'رقم التواصل'}.`
+        : `Something went wrong. Contact us at ${state.cafe.phone || 'our phone number'}.`;
+      appendMessage(fallback, 'bot', state.language);
+    } finally {
+      refs.send.disabled = false;
+      refs.input.focus();
+    }
+  }
+
+  function buildWidget(cafe) {
+    createStyles({
+      primary: cafe.primary_color || '#17443a',
+      secondary: cafe.secondary_color || '#f6efe4',
+    });
+
+    const root = document.createElement('div');
+    root.className = 'cb-root';
+    root.innerHTML = `
+      <button class="cb-bubble" type="button" aria-label="Open chatbot">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 3C6.477 3 2 6.91 2 11.733c0 2.143.904 4.106 2.41 5.622L3.3 21l4.575-1.527c1.228.46 2.567.705 3.995.705 5.523 0 10-3.91 10-8.445S17.523 3 12 3Z"></path>
+        </svg>
+      </button>
+      <section class="cb-panel" aria-label="Chatbot panel">
+        <header class="cb-header">
+          <div class="cb-brand">
+            ${cafe.logo_url ? `<img class="cb-logo" src="${cafe.logo_url}" alt="${cafe.name}">` : '<div class="cb-logo"></div>'}
+            <div class="cb-brand-text">
+              <div class="cb-brand-name">${cafe.name}</div>
+              <div class="cb-brand-sub">Instant support</div>
+            </div>
+          </div>
+          <div>
+            <button type="button" class="cb-close cb-new" aria-label="Start new chat">↺</button>
+            <button type="button" class="cb-close" aria-label="Close chatbot">×</button>
+          </div>
+        </header>
+        <div class="cb-messages"></div>
+        <footer class="cb-footer">
+          <div class="cb-suggestions"></div>
+          <div class="cb-form">
+            <input class="cb-input" type="text" placeholder="Type your message..." />
+            <button class="cb-send" type="button" aria-label="Send message">➜</button>
+          </div>
+        </footer>
+      </section>
+    `;
+
+    document.body.appendChild(root);
+
+    return {
+      root,
+      bubble: root.querySelector('.cb-bubble'),
+      newChat: root.querySelector('.cb-new'),
+      close: root.querySelector('.cb-close:not(.cb-new)'),
+      messages: root.querySelector('.cb-messages'),
+      suggestions: root.querySelector('.cb-suggestions'),
+      input: root.querySelector('.cb-input'),
+      send: root.querySelector('.cb-send'),
+    };
+  }
+
+  let refs;
+
+  async function initSession(forceNew) {
+    let payload;
+    try {
+      payload = await postJson('/api/init', { session_key: state.sessionKey, force_new: Boolean(forceNew) });
+    } catch (error) {
+      if (error && error.payload && error.payload.error === 'invalid_token') return;
+      return;
     }
 
-    async function sendMessage() {
-        const text = input.value.trim();
-        if (!text) return;
-        input.value = "";
-        addMessage(text, "user");
+    state.sessionKey = payload.session_key;
+    state.language = payload.language || 'en';
+    state.cafe = payload.cafe;
+    persistSession();
 
-        const botDiv = addMessage("", "bot");
-        let fullText = "";
+    return payload;
+  }
 
-        try {
-            const res = await fetch(BACKEND_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: text, systemPrompt })
-            });
+  async function startNewChat() {
+    clearStoredSession();
+    const payload = await initSession(true);
+    if (!payload) return;
+    renderHistory(payload.history, payload.language);
+    renderSuggestions(payload.suggestions);
+    setInputPlaceholder();
+    openPanel(true);
+  }
 
-            const reader = res.body.getReader();
-            const decoder = new TextDecoder();
+  async function init() {
+    loadStoredSession();
+    const payload = await initSession(false);
+    if (!payload) return;
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+    refs = buildWidget({
+      name: state.language === 'ar' ? payload.cafe.name_ar || payload.cafe.name : payload.cafe.name,
+      logo_url: payload.cafe.logo_url,
+      primary_color: payload.cafe.primary_color,
+      secondary_color: payload.cafe.secondary_color,
+    });
 
-                const chunk = decoder.decode(value);
-                const lines = chunk.split("\n");
+    refs.bubble.addEventListener('click', () => openPanel());
+    refs.newChat.addEventListener('click', () => startNewChat());
+    refs.close.addEventListener('click', () => openPanel(false));
+    refs.send.addEventListener('click', () => sendMessage());
+    refs.input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') sendMessage();
+    });
 
-                for (const line of lines) {
-                    if (line.startsWith("data: ")) {
-                        const data = line.replace("data: ", "").trim();
-                        if (data === "[DONE]") break;
-                        try {
-                            const parsed = JSON.parse(data);
-                            fullText += parsed.text;
-                            botDiv.textContent = fullText;
-                            messages.scrollTop = messages.scrollHeight;
-                        } catch {}
-                    }
-                }
-            }
-        } catch {
-            botDiv.textContent = "Something went wrong. Try again.";
-        }
+    renderHistory(payload.history, payload.language);
+    renderSuggestions(payload.suggestions);
+    setInputPlaceholder();
+
+    if (payload.is_new || !state.hasHistory) {
+      openPanel(true);
     }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 })();

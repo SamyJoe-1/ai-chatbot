@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chatbot Dashboard</title>
+  <link rel="stylesheet" href="/dashboard/css/app.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-kicker">E-Glotech</div>
+        <h1>Chatbot Dashboard</h1>
+      </div>
+
+      <section id="login-panel" class="panel">
+        <h2>Login</h2>
+        <form id="login-form" class="stack">
+          <input id="username" placeholder="Username" autocomplete="username">
+          <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+          <button type="submit">Sign in</button>
+        </form>
+        <p class="hint">Default admin: <code>admin</code> / <code>changeme123</code></p>
+        <p id="login-error" class="error"></p>
+      </section>
+
+      <section id="app-panel" class="panel hidden">
+        <div class="stack compact">
+          <div id="user-meta" class="muted"></div>
+          <button id="create-cafe" class="secondary hidden" type="button">Create cafe</button>
+          <button id="refresh-cafes" class="secondary" type="button">Refresh cafes</button>
+          <button id="logout" class="ghost" type="button">Logout</button>
+        </div>
+        <div id="cafes-list" class="cafe-list"></div>
+      </section>
+    </aside>
+
+    <main class="content">
+      <section id="empty-state" class="hero">
+        <h2>Select a cafe</h2>
+        <p>Once you log in, cafes will appear on the left. Pick one to edit branding, sync the menu sheet, and manage menu items.</p>
+      </section>
+
+      <section id="editor" class="hidden">
+        <div class="editor-header">
+          <div>
+            <h2 id="editor-title">Cafe</h2>
+            <p id="editor-subtitle" class="muted"></p>
+          </div>
+          <div class="actions">
+            <button id="copy-embed" class="secondary" type="button">Copy embed code</button>
+            <button id="save-cafe" type="button">Save cafe</button>
+          </div>
+        </div>
+        <div id="dashboard-status" class="status hidden"></div>
+
+        <div class="grid">
+          <label>Name<input id="cafe-name"></label>
+          <label>Name (AR)<input id="cafe-name-ar"></label>
+          <label>Phone<input id="cafe-phone"></label>
+          <label>Email<input id="cafe-email"></label>
+          <label>Primary color<input id="cafe-primary" type="color"></label>
+          <label>Secondary color<input id="cafe-secondary" type="color"></label>
+          <label>Logo URL<input id="cafe-logo"></label>
+          <label>Menu link<input id="cafe-menu-link"></label>
+          <label>Google Sheet ID<input id="cafe-sheet-id"></label>
+          <label>Drive folder ID<input id="cafe-drive-folder"></label>
+          <label>Suggestions EN<textarea id="cafe-suggestions-en" rows="3"></textarea></label>
+          <label>Suggestions AR<textarea id="cafe-suggestions-ar" rows="3"></textarea></label>
+          <label>About EN<textarea id="cafe-about-en" rows="4"></textarea></label>
+          <label>About AR<textarea id="cafe-about-ar" rows="4"></textarea></label>
+          <label>Address EN<textarea id="cafe-address-en" rows="3"></textarea></label>
+          <label>Address AR<textarea id="cafe-address-ar" rows="3"></textarea></label>
+          <label>Hours EN<textarea id="cafe-hours-en" rows="3"></textarea></label>
+          <label>Hours AR<textarea id="cafe-hours-ar" rows="3"></textarea></label>
+          <label>Welcome EN<textarea id="cafe-welcome-en" rows="3"></textarea></label>
+          <label>Welcome AR<textarea id="cafe-welcome-ar" rows="3"></textarea></label>
+          <label>Active
+            <select id="cafe-active">
+              <option value="1">Active</option>
+              <option value="0">Paused</option>
+            </select>
+          </label>
+        </div>
+
+        <section class="subpanel">
+          <div class="subpanel-header">
+            <h3>Menu</h3>
+            <div class="actions">
+              <button id="sync-menu" class="secondary" type="button">Sync from sheet</button>
+              <button id="add-menu-item" type="button">Add item</button>
+            </div>
+          </div>
+          <p class="panel-note">You can add items manually or sync them from the Google Sheet. Sync replaces the current menu items for this cafe.</p>
+          <div id="menu-list" class="table"></div>
+        </section>
+
+        <section class="subpanel">
+          <div class="subpanel-header">
+            <h3>Recent sessions</h3>
+            <button id="load-sessions" class="secondary" type="button">Load sessions</button>
+          </div>
+          <div id="sessions-list" class="sessions"></div>
+          <div id="session-messages" class="conversation muted">Select a session to view the full conversation.</div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script src="/dashboard/js/app.js"></script>
+</body>
+</html>

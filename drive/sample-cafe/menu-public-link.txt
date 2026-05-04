@@ -1,0 +1,9 @@
+If the cafe also has a PDF or image menu, put its public URL in the dashboard field:
+
+menu_link
+
+Example:
+
+https://example.com/roast-bloom-menu.pdf
+
+The chatbot uses this link when the customer asks to see the full menu.

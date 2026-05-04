@@ -1,0 +1,7 @@
+name_en,name_ar,category_en,category_ar,description_en,description_ar,price,currency,sizes,available
+Latte,لاتيه,Coffee,قهوة,Fresh milk coffee,قهوة بالحليب الطازج,95,EGP,"Small,Medium,Large",1
+Cappuccino,كابتشينو,Coffee,قهوة,Espresso with foamed milk,إسبريسو مع حليب رغوي,90,EGP,"Small,Medium",1
+Americano,أمريكانو,Coffee,قهوة,Diluted espresso,إسبريسو مخفف,70,EGP,"Regular",1
+Croissant,كرواسون,Bakery,مخبوزات,Butter croissant,كرواسون زبدة,55,EGP,"Regular",1
+Turkey Sandwich,ساندويتش تركي,Sandwiches,ساندويتشات,Turkey and cheese sandwich,ساندويتش ديك رومي وجبن,140,EGP,"Regular",1
+Cheesecake,تشيز كيك,Desserts,حلويات,Creamy baked cheesecake,تشيز كيك كريمي مخبوز,110,EGP,"Slice",1

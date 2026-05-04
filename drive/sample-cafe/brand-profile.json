@@ -1,0 +1,32 @@
+{
+  "name": "Roast & Bloom",
+  "name_ar": "روست آند بلوم",
+  "phone": "+201012345678",
+  "email": "hello@roastandbloom.com",
+  "primary_color": "#17443a",
+  "secondary_color": "#f6efe4",
+  "logo_url": "https://example.com/roast-bloom-logo.png",
+  "about_en": "Roast & Bloom is a modern neighborhood cafe serving specialty coffee, pastries, and light meals.",
+  "about_ar": "روست آند بلوم كافيه عصري يقدم قهوة مختصة ومعجنات ووجبات خفيفة.",
+  "address_en": "12 Nile View Street, Cairo, Egypt",
+  "address_ar": "١٢ شارع نايل فيو، القاهرة، مصر",
+  "working_hours_en": "Daily from 8:00 AM to 11:00 PM",
+  "working_hours_ar": "يومياً من ٨:٠٠ صباحاً إلى ١١:٠٠ مساءً",
+  "menu_link": "https://example.com/roast-bloom-menu.pdf",
+  "sheet_id": "PASTE_GOOGLE_SHEET_ID_HERE",
+  "drive_folder_id": "PASTE_GOOGLE_DRIVE_FOLDER_ID_HERE",
+  "welcome_en": "Welcome to Roast & Bloom. How can I help you today?",
+  "welcome_ar": "أهلاً بك في روست آند بلوم. كيف أساعدك اليوم؟",
+  "suggestions_en": [
+    "Show me the menu",
+    "What are your working hours?",
+    "Where are you located?",
+    "Do you have croissants?"
+  ],
+  "suggestions_ar": [
+    "اعرض القائمة",
+    "ما مواعيد العمل؟",
+    "أين موقعكم؟",
+    "هل لديكم كرواسون؟"
+  ]
+}
