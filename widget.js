@@ -200,6 +200,7 @@
         font-size: 14px;
       }
       .cb-msg.bot {
+        align-self: flex-start;
         background: #ffffff;
         color: var(--cb-text);
         border-bottom-left-radius: 6px;
