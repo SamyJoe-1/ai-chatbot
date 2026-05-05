@@ -103,7 +103,9 @@ function findScoredItems(text, lang, items, context = {}) {
       if (ratio >= 0.5) {
         score += ratio * 4;
       }
-      if (boostedCategory && category === boostedCategory) {
+      // Only use previous category context to break ties when the new message
+      // already matched something real about this item.
+      if (boostedCategory && category === boostedCategory && score > 0) {
         score += 5;
       }
     }

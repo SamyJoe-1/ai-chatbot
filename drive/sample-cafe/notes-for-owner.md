@@ -9,6 +9,12 @@ Only maintain these two things:
 2. Google Sheet:
    menu items and prices
 
+## Start from the sample workbook
+
+Use `menu-sheet-template.xlsx` for upload to Google Drive and open that file in Google Sheets.
+
+Do not rely on `menu-sheet-template.csv` alone unless you are importing it into a real Google Sheet first.
+
 ## Sheet columns
 
 Your menu sheet should use exactly these headers:
@@ -47,3 +53,4 @@ When the admin clicks `Sync from sheet`, the app imports the sheet rows into the
 
 - Use manual menu editing only for quick fixes.
 - Use sheet sync as the real source if the owner is comfortable with Google Sheets.
+- After upload, copy the Google Sheet URL and paste it into the dashboard field `Google Sheet ID or link`.

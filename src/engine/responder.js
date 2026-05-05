@@ -73,6 +73,7 @@ function buildResponse(intentResult, lang, cafe) {
       break;
     case 'item_not_found':
       payload.text = RESPONSES.item_not_found[locale]();
+      payload.suggestions = suggestions.slice(0, 3);
       if (cafe.menu_link) {
         payload.type = 'menu_button';
         payload.buttons.push({
