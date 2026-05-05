@@ -61,7 +61,6 @@
     style.textContent = `
       :root {
         --cb-primary: ${colors.primary};
-        --cb-secondary: ${colors.secondary};
         --cb-text: #16221f;
         --cb-surface: #ffffff;
         --cb-border: rgba(16, 24, 40, 0.08);
@@ -79,9 +78,9 @@
         height: 68px;
         border: 0;
         border-radius: 999px;
-        background: linear-gradient(135deg, var(--cb-primary), #0e2f29);
+        background: var(--cb-primary);
         color: #fff;
-        box-shadow: 0 20px 45px rgba(0, 0, 0, 0.22);
+        box-shadow: 0 20px 45px rgba(0, 0, 0, 0.2);
         cursor: pointer;
         display: flex;
         align-items: center;
@@ -90,6 +89,19 @@
         transition: transform 180ms ease, box-shadow 180ms ease;
       }
       .cb-bubble:hover { transform: translateY(-2px); }
+      .cb-bubble.has-unread::before {
+        content: "";
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        width: 14px;
+        height: 14px;
+        background: #ff3b30;
+        border: 2px solid #fff;
+        border-radius: 50%;
+        z-index: 10;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      }
       .cb-bubble::after {
         content: "Ask us";
         position: absolute;
@@ -108,13 +120,13 @@
         right: 0;
         bottom: 88px;
         width: min(390px, calc(100vw - 24px));
-        height: min(640px, calc(100vh - 120px));
-        background: linear-gradient(180deg, rgba(23, 68, 58, 0.07), rgba(255,255,255,0.92));
-        backdrop-filter: blur(10px);
+        height: min(560px, calc(100vh - 120px));
+        background: #ffffff;
+        backdrop-filter: blur(16px);
         border: 1px solid var(--cb-border);
         border-radius: 24px;
         overflow: hidden;
-        box-shadow: 0 24px 60px rgba(10, 18, 16, 0.24);
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
         transform: translateY(24px) scale(0.96);
         opacity: 0;
         pointer-events: none;
@@ -130,7 +142,7 @@
       .cb-root.open .cb-bubble::after { display: none; }
       .cb-header {
         padding: 18px 18px 14px;
-        background: linear-gradient(135deg, var(--cb-primary), #0e2f29);
+        background: var(--cb-primary);
         color: #fff;
         display: flex;
         align-items: center;
@@ -191,11 +203,11 @@
         background: #ffffff;
         color: var(--cb-text);
         border-bottom-left-radius: 6px;
-        box-shadow: 0 10px 20px rgba(17, 24, 39, 0.07);
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.08);
       }
       .cb-msg.user {
         align-self: flex-end;
-        background: linear-gradient(135deg, var(--cb-primary), #0e2f29);
+        background: var(--cb-primary);
         color: #fff;
         border-bottom-right-radius: 6px;
       }
@@ -225,8 +237,8 @@
       }
       .cb-action, .cb-chip {
         border-radius: 999px;
-        padding: 10px 14px;
-        border: 1px solid rgba(23, 68, 58, 0.16);
+        padding: 6px 12px;
+        border: 1px solid var(--cb-border);
         background: rgba(255,255,255,0.92);
         color: var(--cb-text);
         cursor: pointer;
@@ -234,7 +246,7 @@
         text-decoration: none;
       }
       .cb-action:hover, .cb-chip:hover {
-        background: rgba(23, 68, 58, 0.08);
+        background: rgba(0, 0, 0, 0.05);
       }
       .cb-footer {
         padding: 14px;
@@ -266,7 +278,7 @@
       }
       @media (max-width: 640px) {
         .cb-root { right: 12px; bottom: 12px; left: 12px; }
-        .cb-panel { width: 100%; height: min(70vh, 620px); }
+        .cb-panel { width: 100%; height: min(60vh, 540px); }
         .cb-bubble::after { display: none; }
       }
     `;
@@ -280,8 +292,36 @@
     message.textContent = text;
     refs.messages.appendChild(message);
     refs.messages.scrollTop = refs.messages.scrollHeight;
-    if (allowAutoOpen !== false && role === 'bot' && !state.open) openPanel(true);
+    if (allowAutoOpen !== false && role === 'bot' && !state.open) {
+      // openPanel(true); // Disable auto-open to show the badge instead
+      refs.root.querySelector('.cb-bubble').classList.add('has-unread');
+      playNotifySound();
+    }
     return message;
+  }
+
+  async function typeMessage(text, role, lang) {
+    const message = appendMessage('', role, lang, false);
+    for (let i = 0; i < text.length; i++) {
+      message.textContent += text[i];
+      refs.messages.scrollTop = refs.messages.scrollHeight;
+      await new Promise(r => setTimeout(r, 12));
+    }
+    if (!state.open) {
+      refs.bubble.classList.add('has-unread');
+      playNotifySound();
+    }
+    return message;
+  }
+
+  function playNotifySound() {
+    try {
+      const audio = new Audio('https://fonts.gstatic.com/s/i/productlogos/googleg/v6/web-24dp/logo_googleg_color_24dp.png'); // Placeholder or better sound
+      // Real sound link
+      const sfx = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
+      sfx.volume = 0.4;
+      sfx.play().catch(() => {});
+    } catch {}
   }
 
   function renderHistory(history, lang) {
@@ -346,7 +386,10 @@
   function openPanel(force) {
     state.open = force !== undefined ? force : !state.open;
     refs.root.classList.toggle('open', state.open);
-    if (state.open) refs.input.focus();
+    if (state.open) {
+      refs.bubble.classList.remove('has-unread');
+      refs.input.focus();
+    }
   }
 
   async function sendMessage(forcedText) {
@@ -359,14 +402,18 @@
     refs.send.disabled = true;
 
     try {
+      const startTime = Date.now();
       const payload = await postJson('/api/message', {
         session_key: state.sessionKey,
         message: text,
       });
 
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 800) await new Promise(r => setTimeout(r, 800 - elapsed));
+
       state.language = payload.language || state.language;
       removeTyping();
-      appendMessage(payload.response.text, 'bot', state.language);
+      await typeMessage(payload.response.text, 'bot', state.language);
       renderButtons(payload.response.buttons);
       renderSuggestions(payload.response.suggestions);
       setInputPlaceholder();
@@ -384,8 +431,7 @@
 
   function buildWidget(cafe) {
     createStyles({
-      primary: cafe.primary_color || '#17443a',
-      secondary: cafe.secondary_color || '#f6efe4',
+      primary: cafe.primary_color || '#17443a'
     });
 
     const root = document.createElement('div');
@@ -399,7 +445,18 @@
       <section class="cb-panel" aria-label="Chatbot panel">
         <header class="cb-header">
           <div class="cb-brand">
-            ${cafe.logo_url ? `<img class="cb-logo" src="${cafe.logo_url}" alt="${cafe.name}">` : '<div class="cb-logo"></div>'}
+            ${cafe.logo_url ? `<img class="cb-logo" src="${cafe.logo_url}" alt="${cafe.name}">` : `
+              <div class="cb-logo" style="display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.15);">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 8V4H8"></path>
+                  <rect width="16" height="12" x="4" y="8" rx="2"></rect>
+                  <path d="M2 14h2"></path>
+                  <path d="M20 14h2"></path>
+                  <path d="M15 13v2"></path>
+                  <path d="M9 13v2"></path>
+                </svg>
+              </div>
+            `}
             <div class="cb-brand-text">
               <div class="cb-brand-name">${cafe.name}</div>
               <div class="cb-brand-sub">Instant support</div>
@@ -473,7 +530,6 @@
       name: state.language === 'ar' ? payload.cafe.name_ar || payload.cafe.name : payload.cafe.name,
       logo_url: payload.cafe.logo_url,
       primary_color: payload.cafe.primary_color,
-      secondary_color: payload.cafe.secondary_color,
     });
 
     refs.bubble.addEventListener('click', () => openPanel());
