@@ -81,6 +81,7 @@ router.post('/', tokenValidator, (req, res) => {
     return res.json({
       session_key: session.session_key,
       is_new: isNew,
+      automated: Number(session.automated) !== 0,
       phase: session.phase,
       guest_name: session.guest_name,
       guest_phone: session.guest_phone,
@@ -97,7 +98,7 @@ router.post('/', tokenValidator, (req, res) => {
         suggestions_ar: parseSuggestions(cafe.suggestions_ar),
       },
       history,
-      suggestions,
+      suggestions: Number(session.automated) !== 0 ? suggestions : [],
     });
   } catch (error) {
     console.error('[init]', error);

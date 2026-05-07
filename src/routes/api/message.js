@@ -100,14 +100,26 @@ router.post('/', tokenValidator, (req, res) => {
 
     insertMessage.run(session.id, 'user', text, null);
 
+    if (Number(session.automated) === 0) {
+      db.prepare("UPDATE sessions SET last_active = datetime('now') WHERE id = ?").run(session.id);
+      return res.json({
+        automated: false,
+        response: null,
+        language: lang,
+        phase: session.phase,
+        suggestions: [],
+      });
+    }
+
     if (session.phase === 'collect_name') {
       if (!looksLikeName(text)) {
         const reply = RESPONSES.invalid_name[lang]();
         insertMessage.run(session.id, 'bot', reply, 'collect_name_retry');
-        return res.json({
-          response: { text: reply, type: 'text', buttons: [], suggestions: [] },
-          language: lang,
-          phase: session.phase,
+      return res.json({
+        automated: true,
+        response: { text: reply, type: 'text', buttons: [], suggestions: [] },
+        language: lang,
+        phase: session.phase,
         });
       }
 
@@ -117,6 +129,7 @@ router.post('/', tokenValidator, (req, res) => {
       insertMessage.run(session.id, 'bot', reply, 'collect_phone');
 
       return res.json({
+        automated: true,
         response: { text: reply, type: 'text', buttons: [], suggestions: [] },
         language: lang,
         phase: 'collect_phone',
@@ -129,6 +142,7 @@ router.post('/', tokenValidator, (req, res) => {
         const reply = RESPONSES.invalid_phone[lang]();
         insertMessage.run(session.id, 'bot', reply, 'invalid_phone');
         return res.json({
+          automated: true,
           response: { text: reply, type: 'text', buttons: [], suggestions: [] },
           language: lang,
           phase: 'collect_phone',
@@ -140,6 +154,7 @@ router.post('/', tokenValidator, (req, res) => {
       insertMessage.run(session.id, 'bot', reply, 'active_ready');
 
       return res.json({
+        automated: true,
         response: { text: reply, type: 'text', buttons: [], suggestions: parseSuggestions(cafe, lang) },
         language: lang,
         phase: 'active',
@@ -161,6 +176,7 @@ router.post('/', tokenValidator, (req, res) => {
     insertMessage.run(session.id, 'bot', payload.text, intentResult.intent);
 
     return res.json({
+      automated: true,
       response: {
         text: payload.text,
         type: payload.type,

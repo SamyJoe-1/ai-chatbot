@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   cafe_id INTEGER NOT NULL REFERENCES cafes(id) ON DELETE CASCADE,
   guest_name TEXT,
   guest_phone TEXT,
+  automated INTEGER NOT NULL DEFAULT 1,
   language TEXT DEFAULT 'en',
   ip TEXT,
   phase TEXT DEFAULT 'collect_name',

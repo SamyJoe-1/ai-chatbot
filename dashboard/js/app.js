@@ -240,9 +240,15 @@ function renderSessions() {
   slice.forEach(s => {
     const row = document.createElement('div');
     row.className = 'session-row';
+    const automated = Number(s.automated) !== 0;
+    const pendingHumanMessages = Number(s.pending_human_messages || 0);
     row.innerHTML = `
       <div class="session-info">
-        <div class="session-name"><i class="fas fa-user" style="color:var(--accent);margin-right:6px;font-size:11px"></i>${esc(s.guest_name || 'Guest')}</div>
+        <div class="session-name">
+          <span><i class="fas fa-user" style="color:var(--accent);margin-right:6px;font-size:11px"></i>${esc(s.guest_name || 'Guest')}</span>
+          <span class="session-mode-badge ${automated ? 'auto' : 'live'}">${automated ? 'Automated' : 'Human Joined'}</span>
+          ${!automated && pendingHumanMessages > 0 ? `<span class="session-pending-badge">${pendingHumanMessages}</span>` : ''}
+        </div>
         <div class="session-detail">
           <span><i class="fas fa-phone" style="font-size:10px"></i> ${esc(s.guest_phone || '-')}</span>
           <span><i class="fas fa-comments" style="font-size:10px"></i> ${s.message_count} msgs</span>
@@ -272,12 +278,18 @@ function getChatMessagesSignature(messages) {
 
 function renderSessionMessages(container, messages, { forceScroll = false } = {}) {
   const shouldStickToBottom = forceScroll || (container.scrollHeight - container.scrollTop - container.clientHeight < 60);
-  container.innerHTML = messages.map(m => `
-    <div class="chat-msg ${m.role === 'user' ? 'user' : 'bot'}">
-      ${esc(m.content)}
-      <div class="chat-msg-time">${m.created_at || ''}</div>
-    </div>
-  `).join('') || '<p style="color:var(--text-muted)">No messages yet</p>';
+  container.innerHTML = messages.map(m => {
+    if (m.intent === 'human_joined') {
+      return `<div class="chat-msg system">${esc(m.content)}</div>`;
+    }
+    const extraClass = m.intent === 'admin_manual' ? ' support' : '';
+    return `
+      <div class="chat-msg ${m.role === 'user' ? 'user' : 'bot'}${extraClass}">
+        ${esc(m.content)}
+        <div class="chat-msg-time">${m.created_at || ''}</div>
+      </div>
+    `;
+  }).join('') || '<p style="color:var(--text-muted)">No messages yet</p>';
   if (shouldStickToBottom) {
     container.scrollTop = container.scrollHeight;
   }
@@ -318,13 +330,18 @@ async function viewSession(session) {
   try {
     const result = await fetchSessionMessages(session.id);
     state.activeSessionChatSignature = getChatMessagesSignature(result.messages);
+    const automated = result.session.automated !== false;
 
     await Swal.fire({
       title: `Chat — ${esc(session.guest_name || 'Guest')}`,
       html: `
+        <div class="chat-status-banner ${automated ? 'auto' : ''}" id="chat-status-banner">
+          <span id="chat-status-text">${automated ? 'Bot is handling this chat right now.' : 'Customer support joined this chat.'}</span>
+          <span class="chat-status-pill" id="chat-status-pill">${automated ? 'Automated' : 'Human support'}</span>
+        </div>
         <div class="chat-modal-body" id="chat-scroll"></div>
         <div class="chat-input-row">
-          <input id="admin-msg-input" placeholder="Type admin message..." autocomplete="off">
+          <input id="admin-msg-input" placeholder="${automated ? 'Type reply to take over chat...' : 'Type support message...'}" autocomplete="off">
           <button class="btn btn-primary btn-sm" id="send-admin-msg" type="button"><i class="fas fa-paper-plane"></i></button>
         </div>`,
       width: 560,
@@ -347,6 +364,18 @@ async function viewSession(session) {
             const refreshed = await fetchSessionMessages(session.id);
             state.activeSessionChatSignature = getChatMessagesSignature(refreshed.messages);
             renderSessionMessages(scroll, refreshed.messages, { forceScroll: true });
+            const statusBanner = document.getElementById('chat-status-banner');
+            const statusText = document.getElementById('chat-status-text');
+            const statusPill = document.getElementById('chat-status-pill');
+            const adminInput = document.getElementById('admin-msg-input');
+            if (refreshed.session.automated === false && statusBanner && statusText && statusPill) {
+              statusBanner.classList.remove('auto');
+              statusText.textContent = 'Customer support joined this chat.';
+              statusPill.textContent = 'Human support';
+            }
+            if (refreshed.session.automated === false && adminInput) {
+              adminInput.placeholder = 'Type support message...';
+            }
             await loadSessions();
             toast('Message sent!');
           } catch (err) { toastErr(err.message); }

@@ -18,6 +18,7 @@
     sessionKey: null,
     language: 'en',
     cafe: null,
+    automated: true,
     open: false,
     typingEl: null,
     hasHistory: false,
@@ -178,6 +179,22 @@
         font-size: 12px;
         opacity: 0.8;
       }
+      .cb-status-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 6px;
+        padding: 5px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        background: rgba(255,255,255,0.16);
+      }
+      .cb-status-chip.live {
+        background: rgba(255,255,255,0.24);
+      }
       .cb-close {
         width: 38px;
         height: 38px;
@@ -215,6 +232,21 @@
         background: var(--cb-primary);
         color: #fff;
         border-bottom-right-radius: 6px;
+      }
+      .cb-msg.support {
+        background: #f3efe7;
+        color: #2d241b;
+        border-left: 4px solid #c9772b;
+      }
+      .cb-msg.system {
+        align-self: center;
+        max-width: 100%;
+        background: rgba(22, 34, 31, 0.08);
+        color: #40524e;
+        border-radius: 999px;
+        font-size: 12px;
+        padding: 8px 14px;
+        text-align: center;
       }
       .cb-typing {
         display: inline-flex;
@@ -257,6 +289,12 @@
         padding: 14px;
         background: rgba(255,255,255,0.9);
         border-top: 1px solid var(--cb-border);
+      }
+      .cb-footer.live-mode .cb-suggestions {
+        display: none;
+      }
+      .cb-root.live-mode .cb-actions {
+        display: none;
       }
       .cb-form {
         display: flex;
@@ -305,6 +343,28 @@
     return message;
   }
 
+  function renderMessageEntry(entry, lang, allowAutoOpen) {
+    if (entry.intent === 'human_joined') {
+      const notice = document.createElement('div');
+      notice.className = 'cb-msg system';
+      notice.dir = 'auto';
+      notice.textContent = entry.content;
+      refs.messages.appendChild(notice);
+      refs.messages.scrollTop = refs.messages.scrollHeight;
+      if (allowAutoOpen !== false && !state.open) {
+        refs.bubble.classList.add('has-unread');
+        playNotifySound();
+      }
+      return notice;
+    }
+
+    const message = appendMessage(entry.content, entry.role, lang, allowAutoOpen);
+    if (entry.intent === 'admin_manual') {
+      message.classList.add('support');
+    }
+    return message;
+  }
+
   async function typeMessage(text, role, lang) {
     const message = appendMessage('', role, lang, false);
     for (let i = 0; i < text.length; i++) {
@@ -333,7 +393,7 @@
     refs.messages.innerHTML = '';
     state.history = Array.isArray(history) ? history.map((message) => ({ ...message })) : [];
     state.history.forEach((message) => {
-      appendMessage(message.content, message.role, lang, false);
+      renderMessageEntry(message, lang, false);
     });
     state.hasHistory = Boolean(state.history.length);
   }
@@ -353,7 +413,7 @@
 
     const additions = nextHistory.slice(state.history.length);
     additions.forEach((message) => {
-      appendMessage(message.content, message.role, lang, !state.open);
+      renderMessageEntry(message, lang, !state.open);
     });
     state.history = nextHistory.map((message) => ({ ...message }));
     state.hasHistory = Boolean(state.history.length);
@@ -375,9 +435,11 @@
         if (!payload) return;
         if (state.isSending || state.isTypingReply) return;
         state.language = payload.language || state.language;
+        state.automated = payload.automated !== false;
         syncIncomingHistory(payload.history, state.language);
         renderSuggestions(payload.suggestions);
         setInputPlaceholder();
+        updateChatModeUi();
       } catch {}
     }, 3000);
   }
@@ -418,6 +480,7 @@
 
   function renderSuggestions(list) {
     refs.suggestions.innerHTML = '';
+    if (!state.automated) return;
     (list || []).slice(0, 4).forEach((text) => {
       const chip = document.createElement('button');
       chip.type = 'button';
@@ -431,6 +494,19 @@
   function setInputPlaceholder() {
     if (!refs || !refs.input) return;
     refs.input.placeholder = state.language === 'ar' ? 'اكتب رسالتك...' : 'Type your message...';
+  }
+
+  function updateChatModeUi() {
+    if (!refs) return;
+    refs.root.classList.toggle('live-mode', !state.automated);
+    refs.statusChip.textContent = state.automated
+      ? (state.language === 'ar' ? 'مساعد آلي' : 'Automated assistant')
+      : (state.language === 'ar' ? 'دعم بشري مباشر' : 'Live customer support');
+    refs.statusChip.classList.toggle('live', !state.automated);
+    refs.brandSub.textContent = state.automated
+      ? (state.language === 'ar' ? 'مساعدة فورية' : 'Instant support')
+      : (state.language === 'ar' ? 'تم تحويل المحادثة إلى خدمة العملاء' : 'Chat handed to customer support');
+    refs.footer.classList.toggle('live-mode', !state.automated);
   }
 
   function openPanel(force) {
@@ -449,7 +525,7 @@
     refs.input.value = '';
     appendMessage(text, 'user', state.language);
     state.history.push({ role: 'user', content: text });
-    showTyping();
+    if (state.automated) showTyping();
     refs.send.disabled = true;
     state.isSending = true;
 
@@ -466,8 +542,17 @@
       state.language = payload.language || state.language;
       removeTyping();
       if (payload.reset) {
+        state.automated = payload.automated !== false;
         renderHistory(payload.history || [], state.language);
         renderSuggestions(payload.response?.suggestions || []);
+        setInputPlaceholder();
+        updateChatModeUi();
+        return;
+      }
+      state.automated = payload.automated !== false;
+      updateChatModeUi();
+      if (!payload.response || !payload.response.text) {
+        renderSuggestions(payload.suggestions || []);
         setInputPlaceholder();
         return;
       }
@@ -523,6 +608,7 @@
             <div class="cb-brand-text">
               <div class="cb-brand-name">${cafe.name}</div>
               <div class="cb-brand-sub">Instant support</div>
+              <div class="cb-status-chip">Automated assistant</div>
             </div>
           </div>
           <div>
@@ -550,6 +636,9 @@
       close: root.querySelector('.cb-close:not(.cb-new)'),
       messages: root.querySelector('.cb-messages'),
       suggestions: root.querySelector('.cb-suggestions'),
+      brandSub: root.querySelector('.cb-brand-sub'),
+      statusChip: root.querySelector('.cb-status-chip'),
+      footer: root.querySelector('.cb-footer'),
       input: root.querySelector('.cb-input'),
       send: root.querySelector('.cb-send'),
     };
@@ -569,6 +658,7 @@
     state.sessionKey = payload.session_key;
     state.language = payload.language || 'en';
     state.cafe = payload.cafe;
+    state.automated = payload.automated !== false;
     persistSession();
 
     return payload;
@@ -581,6 +671,7 @@
     renderHistory(payload.history, payload.language);
     renderSuggestions(payload.suggestions);
     setInputPlaceholder();
+    updateChatModeUi();
     startPolling();
     openPanel(true);
   }
@@ -607,6 +698,7 @@
     renderHistory(payload.history, payload.language);
     renderSuggestions(payload.suggestions);
     setInputPlaceholder();
+    updateChatModeUi();
     startPolling();
 
     if (payload.is_new || !state.hasHistory) {

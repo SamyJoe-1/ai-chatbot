@@ -106,7 +106,25 @@ router.get('/:id/sessions', (req, res) => {
   }
 
   const sessions = db.prepare(`
-    SELECT s.*, COUNT(m.id) AS message_count
+    SELECT
+      s.*,
+      COUNT(m.id) AS message_count,
+      CASE
+        WHEN s.automated = 0 THEN (
+          SELECT COUNT(*)
+          FROM messages pending
+          WHERE pending.session_id = s.id
+            AND pending.role = 'user'
+            AND pending.id > COALESCE((
+              SELECT MAX(anchor.id)
+              FROM messages anchor
+              WHERE anchor.session_id = s.id
+                AND anchor.role != 'user'
+                AND anchor.intent IN ('human_joined', 'admin_manual')
+            ), 0)
+        )
+        ELSE 0
+      END AS pending_human_messages
     FROM sessions s
     LEFT JOIN messages m ON m.session_id = s.id
     WHERE s.cafe_id = ?
@@ -141,6 +159,7 @@ router.get('/:id/sessions/:sessionId/messages', (req, res) => {
       id: session.id,
       guest_name: session.guest_name,
       guest_phone: session.guest_phone,
+      automated: Number(session.automated) !== 0,
       phase: session.phase,
       last_active: session.last_active,
     },
@@ -282,6 +301,15 @@ router.post('/:id/sessions/:sessionId/messages', (req, res) => {
   if (!session) return res.status(404).json({ error: 'not_found' });
   const { content } = req.body || {};
   if (!content || !String(content).trim()) return res.status(400).json({ error: 'empty_message' });
+  if (Number(session.automated) !== 0) {
+    db.prepare('UPDATE sessions SET automated = 0, last_active = datetime(\'now\') WHERE id = ?').run(session.id);
+    db.prepare('INSERT INTO messages (session_id, role, content, intent) VALUES (?, ?, ?, ?)').run(
+      session.id,
+      'bot',
+      session.language === 'ar' ? 'انضم فريق خدمة العملاء إلى المحادثة.' : 'Customer support joined the chat.',
+      'human_joined'
+    );
+  }
   db.prepare('INSERT INTO messages (session_id, role, content, intent) VALUES (?, ?, ?, ?)').run(session.id, 'bot', String(content).trim(), 'admin_manual');
   db.prepare("UPDATE sessions SET last_active = datetime('now') WHERE id = ?").run(session.id);
   return res.json({ success: true });

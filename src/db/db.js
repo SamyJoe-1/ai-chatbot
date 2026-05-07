@@ -20,6 +20,15 @@ const schemaPath = path.join(__dirname, 'schema.sql');
 const schema = fs.readFileSync(schemaPath, 'utf8');
 rawDb.exec(schema);
 
+function ensureColumn(tableName, columnName, definitionSql) {
+  const columns = rawDb.prepare(`PRAGMA table_info(${tableName})`).all();
+  if (!columns.some((column) => column.name === columnName)) {
+    rawDb.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definitionSql}`);
+  }
+}
+
+ensureColumn('sessions', 'automated', 'automated INTEGER NOT NULL DEFAULT 1');
+
 const legacyAdminHash = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
 const defaultAdminHash = '$2a$10$kx69ZN/LvamVRScsPjB8aeDPF46oKClKAIsNFOXSw7bk6bSMle686';
 rawDb.prepare('UPDATE admins SET password = ? WHERE username = ? AND password = ?')
