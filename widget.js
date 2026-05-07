@@ -608,7 +608,6 @@
             <div class="cb-brand-text">
               <div class="cb-brand-name">${cafe.name}</div>
               <div class="cb-brand-sub">Instant support</div>
-              <div class="cb-status-chip">Automated assistant</div>
             </div>
           </div>
           <div>
