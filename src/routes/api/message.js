@@ -9,6 +9,7 @@ const { detectIntent } = require('../../engine/intent');
 const { buildResponse } = require('../../engine/responder');
 const { validatePhone } = require('../../engine/phoneValidator');
 const { RESPONSES } = require('../../engine/patterns');
+const { isSessionExpired, resetSessionState } = require('../../engine/sessionLifecycle');
 
 const router = express.Router();
 
@@ -38,10 +39,33 @@ function parseSuggestions(cafe, lang) {
 }
 
 function looksLikeName(text) {
-  const clean = normalizeArabicDigits(String(text || '').trim());
-  if (!clean) return false;
-  if (clean.replace(/\D/g, '').length >= 7) return false;
-  return clean.length >= 2;
+  const clean = normalizeArabicDigits(String(text || '').trim()).replace(/\s+/g, ' ');
+  if (!clean || /\d/.test(clean)) return false;
+
+  const latinOrArabicName = /^(?=.{2,40}$)[A-Za-z\u0600-\u06FF]+(?:[ '\-][A-Za-z\u0600-\u06FF]+){0,3}$/u;
+  if (!latinOrArabicName.test(clean)) return false;
+
+  const parts = clean.split(/[ '\-]+/).filter(Boolean);
+  const letterCount = (clean.match(/[A-Za-z\u0600-\u06FF]/gu) || []).length;
+  if (letterCount < 2 || parts.some((part) => part.length < 2 || part.length > 20)) return false;
+
+  const latinJoined = parts.join('').toLowerCase();
+  if (/^[a-z]+$/i.test(latinJoined)) {
+    if (!/[aeiou]/.test(latinJoined)) return false;
+    if (/[bcdfghjklmnpqrstvwxyz]{5,}/i.test(latinJoined)) return false;
+    if (/(.+)\1{2,}/i.test(latinJoined)) return false;
+    for (let size = 2; size <= 4; size += 1) {
+      if (latinJoined.length >= size * 3) {
+        const chunk = latinJoined.slice(0, size);
+        if (chunk.repeat(Math.floor(latinJoined.length / size)).startsWith(latinJoined.slice(0, size * 3))) {
+          const repeatedPrefix = chunk.repeat(Math.ceil(latinJoined.length / size)).slice(0, latinJoined.length);
+          if (repeatedPrefix === latinJoined) return false;
+        }
+      }
+    }
+  }
+
+  return true;
 }
 
 router.post('/', tokenValidator, (req, res) => {
@@ -60,13 +84,25 @@ router.post('/', tokenValidator, (req, res) => {
 
     const text = String(message).trim();
     const lang = detectLanguage(text);
+
+    if (isSessionExpired(session.last_active)) {
+      const freshMessages = resetSessionState(db, session.id, lang, cafe);
+      return res.json({
+        reset: true,
+        history: freshMessages,
+        response: { text: RESPONSES.collect_name[lang](), type: 'text', buttons: [], suggestions: [] },
+        language: lang,
+        phase: 'collect_name',
+      });
+    }
+
     const context = parseContext(session.context);
 
     insertMessage.run(session.id, 'user', text, null);
 
     if (session.phase === 'collect_name') {
       if (!looksLikeName(text)) {
-        const reply = RESPONSES.ask_name_again[lang]();
+        const reply = RESPONSES.invalid_name[lang]();
         insertMessage.run(session.id, 'bot', reply, 'collect_name_retry');
         return res.json({
           response: { text: reply, type: 'text', buttons: [], suggestions: [] },

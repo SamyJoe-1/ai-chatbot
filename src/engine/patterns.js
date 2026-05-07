@@ -62,6 +62,10 @@ const RESPONSES = {
     en: () => 'What is your phone number?',
     ar: () => 'ما رقم هاتفك؟',
   },
+  invalid_name: {
+    en: () => 'Please enter a valid name using letters only before choosing menu questions.',
+    ar: () => 'يرجى إدخال اسم صحيح باستخدام الأحرف فقط قبل اختيار أسئلة القائمة.',
+  },
   invalid_phone: {
     en: () => 'Please enter a valid phone number.',
     ar: () => 'من فضلك اكتب رقم هاتف صحيح.',

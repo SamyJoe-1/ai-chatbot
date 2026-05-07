@@ -4,6 +4,8 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 
 const db = require('../../db/db');
+const { detectLanguage } = require('../../engine/detector');
+const { isSessionExpired, resetSessionState } = require('../../engine/sessionLifecycle');
 const { tokenValidator } = require('../../middleware/tokenValidator');
 const { RESPONSES } = require('../../engine/patterns');
 
@@ -62,12 +64,19 @@ router.post('/', tokenValidator, (req, res) => {
       insertMessage.run(session.id, 'bot', RESPONSES.welcome[language](cafe), 'welcome');
       insertMessage.run(session.id, 'bot', RESPONSES.collect_name[language](), 'collect_name');
     } else {
-      touchSession.run(session.id);
+      if (isSessionExpired(session.last_active)) {
+        const language = session.guest_name ? detectLanguage(session.guest_name) : detectHeaderLanguage(req);
+        resetSessionState(db, session.id, language, cafe);
+        session = getSession.get(session.session_key, cafe.id);
+      } else {
+        touchSession.run(session.id);
+        session = getSession.get(session.session_key, cafe.id);
+      }
     }
 
     const language = session.language === 'ar' ? 'ar' : 'en';
     const history = getMessages.all(session.id);
-    const suggestions = parseSuggestions(cafe[`suggestions_${language}`]);
+    const suggestions = session.phase === 'active' ? parseSuggestions(cafe[`suggestions_${language}`]) : [];
 
     return res.json({
       session_key: session.session_key,

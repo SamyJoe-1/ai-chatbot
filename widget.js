@@ -23,6 +23,8 @@
     hasHistory: false,
     history: [],
     pollTimer: null,
+    isSending: false,
+    isTypingReply: false,
   };
 
   function loadStoredSession() {
@@ -367,10 +369,11 @@
   function startPolling() {
     stopPolling();
     state.pollTimer = setInterval(async () => {
-      if (!state.sessionKey || !refs) return;
+      if (!state.sessionKey || !refs || state.isSending || state.isTypingReply) return;
       try {
         const payload = await initSession(false);
         if (!payload) return;
+        if (state.isSending || state.isTypingReply) return;
         state.language = payload.language || state.language;
         syncIncomingHistory(payload.history, state.language);
         renderSuggestions(payload.suggestions);
@@ -448,6 +451,7 @@
     state.history.push({ role: 'user', content: text });
     showTyping();
     refs.send.disabled = true;
+    state.isSending = true;
 
     try {
       const startTime = Date.now();
@@ -461,8 +465,15 @@
 
       state.language = payload.language || state.language;
       removeTyping();
-      await typeMessage(payload.response.text, 'bot', state.language);
+      if (payload.reset) {
+        renderHistory(payload.history || [], state.language);
+        renderSuggestions(payload.response?.suggestions || []);
+        setInputPlaceholder();
+        return;
+      }
       state.history.push({ role: 'bot', content: payload.response.text });
+      state.isTypingReply = true;
+      await typeMessage(payload.response.text, 'bot', state.language);
       renderButtons(payload.response.buttons);
       renderSuggestions(payload.response.suggestions);
       setInputPlaceholder();
@@ -472,7 +483,10 @@
         ? `حصل خطأ. تواصل معنا على ${state.cafe.phone || 'رقم التواصل'}.`
         : `Something went wrong. Contact us at ${state.cafe.phone || 'our phone number'}.`;
       appendMessage(fallback, 'bot', state.language);
+      state.history.push({ role: 'bot', content: fallback });
     } finally {
+      state.isSending = false;
+      state.isTypingReply = false;
       refs.send.disabled = false;
       refs.input.focus();
     }
