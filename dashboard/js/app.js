@@ -3,8 +3,68 @@ async function loadMenu() {
   if (!state.selectedCafe) return;
   try {
     state.menu = await api(`/dashboard/menu/${state.selectedCafe.id}`);
+    syncMenuFilterControls();
+    syncMenuCategoryOptions();
     renderMenu();
   } catch (err) { toastErr('Failed to load menu'); }
+}
+
+function syncMenuFilterControls() {
+  const search = document.getElementById('menu-search');
+  const category = document.getElementById('menu-filter-category');
+  const availability = document.getElementById('menu-filter-availability');
+  if (search) search.value = state.menuFilter.search || '';
+  if (category) category.value = state.menuFilter.category || 'all';
+  if (availability) availability.value = state.menuFilter.availability || 'all';
+}
+
+function syncMenuCategoryOptions() {
+  const select = document.getElementById('menu-filter-category');
+  if (!select) return;
+
+  const previous = state.menuFilter.category || select.value || 'all';
+  const categories = [...new Set(
+    state.menu
+      .map(item => String(item.category_en || item.category_ar || '').trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+
+  select.innerHTML = '<option value="all">All Categories</option>';
+  categories.forEach(category => {
+    const option = document.createElement('option');
+    option.value = category;
+    option.textContent = category;
+    select.appendChild(option);
+  });
+
+  state.menuFilter.category = categories.includes(previous) ? previous : 'all';
+  select.value = state.menuFilter.category;
+}
+
+function getFilteredMenuItems() {
+  const search = (state.menuFilter.search || '').trim().toLowerCase();
+  const category = state.menuFilter.category || 'all';
+  const availability = state.menuFilter.availability || 'all';
+
+  return state.menu.filter(item => {
+    const haystack = [
+      item.name_en,
+      item.name_ar,
+      item.category_en,
+      item.category_ar,
+      item.description_en,
+      item.description_ar,
+    ].join(' ').toLowerCase();
+
+    if (search && !haystack.includes(search)) return false;
+    if (category !== 'all') {
+      const itemCategory = String(item.category_en || item.category_ar || '').trim();
+      if (itemCategory !== category) return false;
+    }
+    if (availability === 'available' && Number(item.available) === 0) return false;
+    if (availability === 'unavailable' && Number(item.available) !== 0) return false;
+    return true;
+  });
 }
 
 function renderMenu() {
@@ -18,11 +78,17 @@ function renderMenu() {
     return;
   }
 
+  const filteredMenu = getFilteredMenuItems();
+  if (!filteredMenu.length) {
+    list.innerHTML = '<div class="menu-filter-empty"><i class="fas fa-filter-circle-xmark"></i><p>No items match the current filters.</p></div>';
+    return;
+  }
+
   const perPage = state.MENU_PER_PAGE;
-  const total = Math.ceil(state.menu.length / perPage);
+  const total = Math.ceil(filteredMenu.length / perPage);
   if (state.menuPage > total) state.menuPage = total;
   const start = (state.menuPage - 1) * perPage;
-  const slice = state.menu.slice(start, start + perPage);
+  const slice = filteredMenu.slice(start, start + perPage);
 
   slice.forEach(item => {
     const row = document.createElement('div');
@@ -121,6 +187,24 @@ document.getElementById('add-menu-btn').addEventListener('click', () => {
   openMenuItemModal({ name_en: '', name_ar: '', category_en: '', category_ar: '', description_en: '', description_ar: '', price: '', currency: 'EGP', sizes: [], available: 1 });
 });
 
+document.getElementById('menu-search').addEventListener('input', e => {
+  state.menuFilter.search = e.target.value;
+  state.menuPage = 1;
+  renderMenu();
+});
+
+document.getElementById('menu-filter-category').addEventListener('change', e => {
+  state.menuFilter.category = e.target.value;
+  state.menuPage = 1;
+  renderMenu();
+});
+
+document.getElementById('menu-filter-availability').addEventListener('change', e => {
+  state.menuFilter.availability = e.target.value;
+  state.menuPage = 1;
+  renderMenu();
+});
+
 /* ═══════ SESSIONS ═══════ */
 async function loadSessions() {
   if (!state.selectedCafe) return;
@@ -177,20 +261,68 @@ function renderSessions() {
   if (total > 1) renderPagination(pagEl, state.sessionsPage, total, p => { state.sessionsPage = p; renderSessions(); });
 }
 
+async function fetchSessionMessages(sessionId) {
+  return api(`/dashboard/cafes/${state.selectedCafe.id}/sessions/${sessionId}/messages`);
+}
+
+function getChatMessagesSignature(messages) {
+  const last = messages[messages.length - 1];
+  return `${messages.length}:${last?.role || ''}:${last?.created_at || ''}:${last?.content || ''}`;
+}
+
+function renderSessionMessages(container, messages, { forceScroll = false } = {}) {
+  const shouldStickToBottom = forceScroll || (container.scrollHeight - container.scrollTop - container.clientHeight < 60);
+  container.innerHTML = messages.map(m => `
+    <div class="chat-msg ${m.role === 'user' ? 'user' : 'bot'}">
+      ${esc(m.content)}
+      <div class="chat-msg-time">${m.created_at || ''}</div>
+    </div>
+  `).join('') || '<p style="color:var(--text-muted)">No messages yet</p>';
+  if (shouldStickToBottom) {
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+function stopSessionChatPolling() {
+  if (state.sessionChatPollTimer) {
+    clearInterval(state.sessionChatPollTimer);
+    state.sessionChatPollTimer = null;
+  }
+  state.activeSessionChatId = null;
+  state.activeSessionChatSignature = '';
+}
+
+function startSessionChatPolling(session, scrollEl) {
+  stopSessionChatPolling();
+  state.activeSessionChatId = session.id;
+
+  state.sessionChatPollTimer = setInterval(async () => {
+    if (!Swal.isVisible() || state.activeSessionChatId !== session.id) {
+      stopSessionChatPolling();
+      return;
+    }
+
+    try {
+      const result = await fetchSessionMessages(session.id);
+      const signature = getChatMessagesSignature(result.messages);
+      if (signature !== state.activeSessionChatSignature) {
+        state.activeSessionChatSignature = signature;
+        renderSessionMessages(scrollEl, result.messages);
+        await loadSessions();
+      }
+    } catch {}
+  }, 2500);
+}
+
 async function viewSession(session) {
   try {
-    const result = await api(`/dashboard/cafes/${state.selectedCafe.id}/sessions/${session.id}/messages`);
-    let messagesHtml = result.messages.map(m =>
-      `<div class="chat-msg ${m.role === 'user' ? 'user' : 'bot'}">
-        ${esc(m.content)}
-        <div class="chat-msg-time">${m.created_at || ''}</div>
-      </div>`
-    ).join('');
+    const result = await fetchSessionMessages(session.id);
+    state.activeSessionChatSignature = getChatMessagesSignature(result.messages);
 
-    const { value } = await Swal.fire({
+    await Swal.fire({
       title: `Chat — ${esc(session.guest_name || 'Guest')}`,
       html: `
-        <div class="chat-modal-body" id="chat-scroll">${messagesHtml || '<p style="color:var(--text-muted)">No messages yet</p>'}</div>
+        <div class="chat-modal-body" id="chat-scroll"></div>
         <div class="chat-input-row">
           <input id="admin-msg-input" placeholder="Type admin message..." autocomplete="off">
           <button class="btn btn-primary btn-sm" id="send-admin-msg" type="button"><i class="fas fa-paper-plane"></i></button>
@@ -200,7 +332,8 @@ async function viewSession(session) {
       showCloseButton: true,
       didOpen: () => {
         const scroll = document.getElementById('chat-scroll');
-        scroll.scrollTop = scroll.scrollHeight;
+        renderSessionMessages(scroll, result.messages, { forceScroll: true });
+        startSessionChatPolling(session, scroll);
         document.getElementById('send-admin-msg').addEventListener('click', async () => {
           const inp = document.getElementById('admin-msg-input');
           const msg = inp.value.trim();
@@ -211,17 +344,19 @@ async function viewSession(session) {
               body: JSON.stringify({ content: msg }),
             });
             inp.value = '';
-            const div = document.createElement('div');
-            div.className = 'chat-msg bot';
-            div.innerHTML = `${esc(msg)}<div class="chat-msg-time">Just now (admin)</div>`;
-            scroll.appendChild(div);
-            scroll.scrollTop = scroll.scrollHeight;
+            const refreshed = await fetchSessionMessages(session.id);
+            state.activeSessionChatSignature = getChatMessagesSignature(refreshed.messages);
+            renderSessionMessages(scroll, refreshed.messages, { forceScroll: true });
+            await loadSessions();
             toast('Message sent!');
           } catch (err) { toastErr(err.message); }
         });
         document.getElementById('admin-msg-input').addEventListener('keydown', e => {
           if (e.key === 'Enter') document.getElementById('send-admin-msg').click();
         });
+      },
+      willClose: () => {
+        stopSessionChatPolling();
       },
     });
   } catch (err) { toastErr(err.message); }

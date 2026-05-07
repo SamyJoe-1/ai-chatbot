@@ -7,6 +7,11 @@ const state = {
   menu: [],
   sessions: [],
   menuPage: 1,
+  menuFilter: {
+    search: '',
+    category: 'all',
+    availability: 'all',
+  },
   sessionsPage: 1,
   sessionFilter: {},
   MENU_PER_PAGE: 15,
@@ -53,19 +58,95 @@ function toast(msg, icon = 'success') {
 function toastErr(msg) { toast(msg, 'error'); }
 
 /* ═══════ NAVIGATION ═══════ */
-function navigateTo(page) {
+function getCurrentPage() {
+  return document.querySelector('.page.active')?.id.replace('page-', '') || 'home';
+}
+
+function getCurrentRoute() {
+  const page = getCurrentPage();
+  return {
+    page,
+    cafeId: page === 'edit-cafe' ? Number(state.selectedCafe?.id || 0) || null : null,
+  };
+}
+
+function parseHashRoute() {
+  const raw = window.location.hash.replace(/^#\/?/, '').trim();
+  if (!raw) return { page: 'home', cafeId: null };
+
+  const [page, maybeId] = raw.split('/');
+  if (page === 'edit-cafe') {
+    const cafeId = Number(maybeId);
+    return {
+      page,
+      cafeId: Number.isFinite(cafeId) && cafeId > 0 ? cafeId : null,
+    };
+  }
+
+  if (['home', 'all-cafes', 'add-cafe'].includes(page)) {
+    return { page, cafeId: null };
+  }
+
+  return { page: 'home', cafeId: null };
+}
+
+function syncHashRoute(page, { cafeId = null, replace = false } = {}) {
+  const nextHash = page === 'edit-cafe' && cafeId ? `#/edit-cafe/${cafeId}` : `#/${page}`;
+  if (window.location.hash === nextHash) return;
+  if (replace) {
+    window.history.replaceState(null, '', nextHash);
+    return;
+  }
+  window.location.hash = nextHash;
+}
+
+async function applyRouteFromHash({ replace = false } = {}) {
+  if (!state.token || !state.user) return;
+
+  const route = parseHashRoute();
+  const current = getCurrentRoute();
+  if (route.page === current.page && Number(route.cafeId || 0) === Number(current.cafeId || 0)) return;
+
+  if (route.page === 'edit-cafe') {
+    if (route.cafeId) {
+      await selectCafe(route.cafeId, { updateHash: false });
+      return;
+    }
+    if (state.selectedCafe?.id) {
+      navigateTo('edit-cafe', { updateHash: false });
+      return;
+    }
+    navigateTo('all-cafes', { updateHash: false });
+    if (replace) syncHashRoute('all-cafes', { replace: true });
+    return;
+  }
+
+  navigateTo(route.page, { updateHash: false });
+  if (replace) syncHashRoute(route.page, { replace: true });
+}
+
+function navigateTo(page, { updateHash = true, replaceHash = false } = {}) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn[data-page]').forEach(b => b.classList.remove('active'));
   const el = document.getElementById('page-' + page);
   if (el) el.classList.add('active');
   const nb = document.querySelector(`.nav-btn[data-page="${page}"]`);
   if (nb) nb.classList.add('active');
-  // close mobile sidebar
   document.querySelector('.sidebar')?.classList.remove('open');
+  if (updateHash) {
+    syncHashRoute(page, {
+      cafeId: page === 'edit-cafe' ? state.selectedCafe?.id : null,
+      replace: replaceHash,
+    });
+  }
 }
 
 document.querySelectorAll('.nav-btn[data-page]').forEach(btn => {
   btn.addEventListener('click', () => navigateTo(btn.dataset.page));
+});
+
+window.addEventListener('hashchange', () => {
+  applyRouteFromHash();
 });
 
 // Mobile menu toggle
@@ -157,6 +238,7 @@ document.getElementById('login-form').addEventListener('submit', async e => {
     document.getElementById('user-meta').textContent = `${state.user.username} (${state.user.role})`;
     setLoggedIn(true);
     await refreshCafes();
+    await applyRouteFromHash({ replace: true });
     toast('Welcome back!');
   } catch (err) {
     toastErr(err.message || 'Login failed');
@@ -288,15 +370,16 @@ function parseTextareaList(v) {
   return String(v || '').split('\n').map(l => l.trim()).filter(Boolean);
 }
 
-async function selectCafe(id) {
+async function selectCafe(id, { updateHash = true } = {}) {
   showLoader();
   try {
     state.selectedCafe = await api(`/dashboard/cafes/${id}`);
     fillEditor();
-    navigateTo('edit-cafe');
+    navigateTo('edit-cafe', { updateHash: false });
     state.menuPage = 1;
     state.sessionsPage = 1;
     await Promise.all([loadMenu(), loadSessions()]);
+    if (updateHash) syncHashRoute('edit-cafe', { cafeId: state.selectedCafe.id });
   } catch (err) { toastErr(err.message); }
   finally { hideLoader(); }
 }
@@ -412,6 +495,7 @@ if (state.token) {
       document.getElementById('user-meta').textContent = `${user.username} (${user.role})`;
       setLoggedIn(true);
       await refreshCafes();
+      await applyRouteFromHash({ replace: true });
     })
     .catch(() => {
       localStorage.removeItem('eglotech_dashboard_token');

@@ -21,6 +21,8 @@
     open: false,
     typingEl: null,
     hasHistory: false,
+    history: [],
+    pollTimer: null,
   };
 
   function loadStoredSession() {
@@ -327,10 +329,54 @@
 
   function renderHistory(history, lang) {
     refs.messages.innerHTML = '';
-    (history || []).forEach((message) => {
+    state.history = Array.isArray(history) ? history.map((message) => ({ ...message })) : [];
+    state.history.forEach((message) => {
       appendMessage(message.content, message.role, lang, false);
     });
-    state.hasHistory = Boolean(history && history.length);
+    state.hasHistory = Boolean(state.history.length);
+  }
+
+  function isSameMessage(a, b) {
+    return a && b && a.role === b.role && a.content === b.content;
+  }
+
+  function syncIncomingHistory(history, lang) {
+    const nextHistory = Array.isArray(history) ? history : [];
+    const samePrefix = state.history.every((message, index) => isSameMessage(message, nextHistory[index]));
+
+    if (!samePrefix) {
+      renderHistory(nextHistory, lang);
+      return;
+    }
+
+    const additions = nextHistory.slice(state.history.length);
+    additions.forEach((message) => {
+      appendMessage(message.content, message.role, lang, !state.open);
+    });
+    state.history = nextHistory.map((message) => ({ ...message }));
+    state.hasHistory = Boolean(state.history.length);
+  }
+
+  function stopPolling() {
+    if (state.pollTimer) {
+      clearInterval(state.pollTimer);
+      state.pollTimer = null;
+    }
+  }
+
+  function startPolling() {
+    stopPolling();
+    state.pollTimer = setInterval(async () => {
+      if (!state.sessionKey || !refs) return;
+      try {
+        const payload = await initSession(false);
+        if (!payload) return;
+        state.language = payload.language || state.language;
+        syncIncomingHistory(payload.history, state.language);
+        renderSuggestions(payload.suggestions);
+        setInputPlaceholder();
+      } catch {}
+    }, 3000);
   }
 
   function showTyping() {
@@ -399,6 +445,7 @@
 
     refs.input.value = '';
     appendMessage(text, 'user', state.language);
+    state.history.push({ role: 'user', content: text });
     showTyping();
     refs.send.disabled = true;
 
@@ -415,6 +462,7 @@
       state.language = payload.language || state.language;
       removeTyping();
       await typeMessage(payload.response.text, 'bot', state.language);
+      state.history.push({ role: 'bot', content: payload.response.text });
       renderButtons(payload.response.buttons);
       renderSuggestions(payload.response.suggestions);
       setInputPlaceholder();
@@ -519,6 +567,7 @@
     renderHistory(payload.history, payload.language);
     renderSuggestions(payload.suggestions);
     setInputPlaceholder();
+    startPolling();
     openPanel(true);
   }
 
@@ -544,6 +593,7 @@
     renderHistory(payload.history, payload.language);
     renderSuggestions(payload.suggestions);
     setInputPlaceholder();
+    startPolling();
 
     if (payload.is_new || !state.hasHistory) {
       openPanel(true);

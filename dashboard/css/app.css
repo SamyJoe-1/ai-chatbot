@@ -123,6 +123,7 @@ img{max-width:100%}
 
 /* ═══════════ FILTER BAR ═══════════ */
 .filter-bar{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:center}
+.menu-filter-bar{margin-bottom:16px}
 .filter-select{background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;color:var(--text);font:inherit;font-size:13px;cursor:pointer}
 .filter-select:focus{outline:none;border-color:var(--accent)}
 
@@ -201,6 +202,7 @@ img{max-width:100%}
 .icon-btn-del{background:rgba(248,81,73,.1);color:var(--danger)}
 .icon-btn-del:hover{background:var(--danger);color:#fff}
 .menu-empty{padding:32px;text-align:center;color:var(--text-muted)}
+.menu-filter-empty{padding:32px;text-align:center;color:var(--text-muted)}
 
 /* ═══════════ PAGINATION ═══════════ */
 .pagination-bar{display:flex;align-items:center;justify-content:center;gap:4px;padding:10px 16px;border-top:1px solid var(--border)}
