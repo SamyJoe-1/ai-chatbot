@@ -58,6 +58,7 @@ app.use('/api/sync', require('./src/routes/api/sync'));
 app.use('/dashboard/auth', require('./src/routes/dashboard/auth'));
 app.use('/dashboard/cafes', require('./src/routes/dashboard/cafes'));
 app.use('/dashboard/menu', require('./src/routes/dashboard/menu'));
+app.use('/dashboard/db', require('./src/routes/dashboard/database'));
 app.use('/dashboard', express.static(path.join(__dirname, 'dashboard')));
 
 app.get('/dashboard/*', (_req, res) => {
