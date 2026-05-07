@@ -499,10 +499,7 @@
   function updateChatModeUi() {
     if (!refs) return;
     refs.root.classList.toggle('live-mode', !state.automated);
-    // refs.statusChip.textContent = state.automated
-    //   ? (state.language === 'ar' ? 'مساعد آلي' : 'Automated assistant')
-    //   : (state.language === 'ar' ? 'دعم بشري مباشر' : 'Live customer support');
-    refs.statusChip.classList.toggle('live', !state.automated);
+    if (refs.statusChip) refs.statusChip.classList.toggle('live', !state.automated);
     refs.brandSub.textContent = state.automated
       ? (state.language === 'ar' ? 'مساعدة فورية' : 'Instant support')
       : (state.language === 'ar' ? 'تم تحويل المحادثة إلى خدمة العملاء' : 'Chat handed to customer support');
@@ -608,6 +605,7 @@
             <div class="cb-brand-text">
               <div class="cb-brand-name">${cafe.name}</div>
               <div class="cb-brand-sub">Instant support</div>
+              <span class="cb-status-chip"></span>
             </div>
           </div>
           <div>
