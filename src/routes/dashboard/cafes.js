@@ -3,6 +3,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 
 const db = require('../../db/db');
 const { authMiddleware, adminOnly } = require('../../middleware/auth');
@@ -233,6 +234,56 @@ router.put('/:id', (req, res) => {
 
 router.delete('/:id', adminOnly, (req, res) => {
   deleteCafe.run(req.params.id);
+  return res.json({ success: true });
+});
+
+/* ── Toggle cafe active/inactive ───────────────────── */
+router.patch('/:id/toggle', (req, res) => {
+  const cafe = getCafe.get(req.params.id);
+  if (!cafe) return res.status(404).json({ error: 'not_found' });
+  if (!ensureAccess(req.admin, cafe.id)) return res.status(403).json({ error: 'forbidden' });
+  const newActive = cafe.active ? 0 : 1;
+  db.prepare('UPDATE cafes SET active = ? WHERE id = ?').run(newActive, cafe.id);
+  return res.json({ success: true, active: newActive });
+});
+
+/* ── Regenerate cafe token ─────────────────────────── */
+router.post('/:id/regenerate-token', adminOnly, (req, res) => {
+  const cafe = getCafe.get(req.params.id);
+  if (!cafe) return res.status(404).json({ error: 'not_found' });
+  const newToken = uuidv4().replace(/-/g, '');
+  db.prepare('UPDATE cafes SET token = ? WHERE id = ?').run(newToken, cafe.id);
+  return res.json({ success: true, token: newToken });
+});
+
+/* ── Delete a single session ───────────────────────── */
+router.delete('/:id/sessions/:sessionId', (req, res) => {
+  const cafeId = Number(req.params.id);
+  if (!ensureAccess(req.admin, cafeId)) return res.status(403).json({ error: 'forbidden' });
+  db.prepare('DELETE FROM messages WHERE session_id = (SELECT id FROM sessions WHERE id = ? AND cafe_id = ?)').run(req.params.sessionId, cafeId);
+  db.prepare('DELETE FROM sessions WHERE id = ? AND cafe_id = ?').run(req.params.sessionId, cafeId);
+  return res.json({ success: true });
+});
+
+/* ── Clear all sessions for a cafe ─────────────────── */
+router.delete('/:id/sessions', (req, res) => {
+  const cafeId = Number(req.params.id);
+  if (!ensureAccess(req.admin, cafeId)) return res.status(403).json({ error: 'forbidden' });
+  db.prepare('DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE cafe_id = ?)').run(cafeId);
+  db.prepare('DELETE FROM sessions WHERE cafe_id = ?').run(cafeId);
+  return res.json({ success: true });
+});
+
+/* ── Send manual admin message into a session ──────── */
+router.post('/:id/sessions/:sessionId/messages', (req, res) => {
+  const cafeId = Number(req.params.id);
+  if (!ensureAccess(req.admin, cafeId)) return res.status(403).json({ error: 'forbidden' });
+  const session = db.prepare('SELECT * FROM sessions WHERE id = ? AND cafe_id = ?').get(req.params.sessionId, cafeId);
+  if (!session) return res.status(404).json({ error: 'not_found' });
+  const { content } = req.body || {};
+  if (!content || !String(content).trim()) return res.status(400).json({ error: 'empty_message' });
+  db.prepare('INSERT INTO messages (session_id, role, content, intent) VALUES (?, ?, ?, ?)').run(session.id, 'bot', String(content).trim(), 'admin_manual');
+  db.prepare("UPDATE sessions SET last_active = datetime('now') WHERE id = ?").run(session.id);
   return res.json({ success: true });
 });
 

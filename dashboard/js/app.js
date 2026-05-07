@@ -1,399 +1,328 @@
-const state = {
-  token: localStorage.getItem('eglotech_dashboard_token') || '',
-  user: null,
-  cafes: [],
-  selectedCafe: null,
-  menu: [],
-};
-
-const refs = {
-  loginPanel: document.getElementById('login-panel'),
-  appPanel: document.getElementById('app-panel'),
-  loginForm: document.getElementById('login-form'),
-  loginError: document.getElementById('login-error'),
-  cafesList: document.getElementById('cafes-list'),
-  userMeta: document.getElementById('user-meta'),
-  createCafe: document.getElementById('create-cafe'),
-  refreshCafes: document.getElementById('refresh-cafes'),
-  logout: document.getElementById('logout'),
-  emptyState: document.getElementById('empty-state'),
-  editor: document.getElementById('editor'),
-  editorTitle: document.getElementById('editor-title'),
-  editorSubtitle: document.getElementById('editor-subtitle'),
-  saveCafe: document.getElementById('save-cafe'),
-  copyEmbed: document.getElementById('copy-embed'),
-  dashboardStatus: document.getElementById('dashboard-status'),
-  syncMenu: document.getElementById('sync-menu'),
-  addMenuItem: document.getElementById('add-menu-item'),
-  menuList: document.getElementById('menu-list'),
-  loadSessions: document.getElementById('load-sessions'),
-  sessionsList: document.getElementById('sessions-list'),
-  sessionMessages: document.getElementById('session-messages'),
-};
-
-const fields = {
-  name: document.getElementById('cafe-name'),
-  name_ar: document.getElementById('cafe-name-ar'),
-  phone: document.getElementById('cafe-phone'),
-  email: document.getElementById('cafe-email'),
-  primary_color: document.getElementById('cafe-primary'),
-  secondary_color: document.getElementById('cafe-secondary'),
-  logo_url: document.getElementById('cafe-logo'),
-  menu_link: document.getElementById('cafe-menu-link'),
-  sheet_id: document.getElementById('cafe-sheet-id'),
-  drive_folder_id: document.getElementById('cafe-drive-folder'),
-  suggestions_en: document.getElementById('cafe-suggestions-en'),
-  suggestions_ar: document.getElementById('cafe-suggestions-ar'),
-  about_en: document.getElementById('cafe-about-en'),
-  about_ar: document.getElementById('cafe-about-ar'),
-  address_en: document.getElementById('cafe-address-en'),
-  address_ar: document.getElementById('cafe-address-ar'),
-  working_hours_en: document.getElementById('cafe-hours-en'),
-  working_hours_ar: document.getElementById('cafe-hours-ar'),
-  welcome_en: document.getElementById('cafe-welcome-en'),
-  welcome_ar: document.getElementById('cafe-welcome-ar'),
-  active: document.getElementById('cafe-active'),
-};
-
-function parseTextareaList(value) {
-  return String(value || '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
-      ...(options.headers || {}),
-    },
-  });
-
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.error || 'request_failed');
-  }
-
-  return payload;
-}
-
-function showStatus(message, isError = false) {
-  refs.dashboardStatus.textContent = message;
-  refs.dashboardStatus.classList.remove('hidden', 'error');
-  if (isError) {
-    refs.dashboardStatus.classList.add('error');
-  }
-}
-
-function clearStatus() {
-  refs.dashboardStatus.textContent = '';
-  refs.dashboardStatus.classList.add('hidden');
-  refs.dashboardStatus.classList.remove('error');
-}
-
-function setLoggedIn(loggedIn) {
-  refs.loginPanel.classList.toggle('hidden', loggedIn);
-  refs.appPanel.classList.toggle('hidden', !loggedIn);
-}
-
-function renderCafeList() {
-  refs.cafesList.innerHTML = '';
-  state.cafes.forEach((cafe) => {
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = `cafe-item ${state.selectedCafe && state.selectedCafe.id === cafe.id ? 'active' : ''}`;
-    item.innerHTML = `
-      <strong>${cafe.name}</strong>
-      <div class="muted">${cafe.phone || 'No phone yet'}</div>
-      <div class="muted">Token: ${cafe.token}</div>
-    `;
-    item.addEventListener('click', () => selectCafe(cafe.id));
-    refs.cafesList.appendChild(item);
-  });
-}
-
-function fillEditor() {
+/* ═══════ MENU ═══════ */
+async function loadMenu() {
   if (!state.selectedCafe) return;
-  refs.emptyState.classList.add('hidden');
-  refs.editor.classList.remove('hidden');
-  refs.editorTitle.textContent = state.selectedCafe.name;
-  refs.editorSubtitle.textContent = `Token: ${state.selectedCafe.token}`;
+  try {
+    state.menu = await api(`/dashboard/menu/${state.selectedCafe.id}`);
+    renderMenu();
+  } catch (err) { toastErr('Failed to load menu'); }
+}
 
-  Object.entries(fields).forEach(([key, element]) => {
-    if (key === 'suggestions_en' || key === 'suggestions_ar') {
-      element.value = (state.selectedCafe[key] || []).join('\n');
-    } else {
-      element.value = state.selectedCafe[key] ?? '';
+function renderMenu() {
+  const list = document.getElementById('menu-list');
+  const pagEl = document.getElementById('menu-pagination');
+  list.innerHTML = '';
+  pagEl.innerHTML = '';
+
+  if (!state.menu.length) {
+    list.innerHTML = '<div class="menu-empty"><i class="fas fa-utensils"></i><p>No menu items yet.</p></div>';
+    return;
+  }
+
+  const perPage = state.MENU_PER_PAGE;
+  const total = Math.ceil(state.menu.length / perPage);
+  if (state.menuPage > total) state.menuPage = total;
+  const start = (state.menuPage - 1) * perPage;
+  const slice = state.menu.slice(start, start + perPage);
+
+  slice.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'menu-row';
+    row.innerHTML = `
+      <span class="mr-name">${esc(item.name_en || 'Untitled')}</span>
+      <span class="mr-cat">${esc(item.category_en || '-')}</span>
+      <span class="mr-price">${item.price != null ? item.price + ' ' + (item.currency || 'EGP') : '-'}</span>
+      <span class="mr-actions">
+        <button class="icon-btn icon-btn-edit" title="Edit"><i class="fas fa-pen-to-square"></i></button>
+        <button class="icon-btn icon-btn-del" title="Delete"><i class="fas fa-trash-can"></i></button>
+      </span>`;
+    row.querySelector('.icon-btn-edit').addEventListener('click', () => openMenuItemModal(item));
+    row.querySelector('.icon-btn-del').addEventListener('click', () => deleteMenuItem(item));
+    list.appendChild(row);
+  });
+
+  if (total > 1) renderPagination(pagEl, state.menuPage, total, p => { state.menuPage = p; renderMenu(); });
+}
+
+function openMenuItemModal(item) {
+  const isNew = !item.id;
+  Swal.fire({
+    title: isNew ? 'Add Menu Item' : 'Edit Menu Item',
+    html: `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:left;font-size:13px">
+        <div><label style="font-weight:600;display:block;margin-bottom:4px">Name EN</label><input id="swal-name-en" class="swal2-input" style="margin:0;width:100%" value="${esc(item.name_en || '')}"></div>
+        <div><label style="font-weight:600;display:block;margin-bottom:4px">Name AR</label><input id="swal-name-ar" class="swal2-input" style="margin:0;width:100%" dir="rtl" value="${esc(item.name_ar || '')}"></div>
+        <div><label style="font-weight:600;display:block;margin-bottom:4px">Category EN</label><input id="swal-cat-en" class="swal2-input" style="margin:0;width:100%" value="${esc(item.category_en || '')}"></div>
+        <div><label style="font-weight:600;display:block;margin-bottom:4px">Category AR</label><input id="swal-cat-ar" class="swal2-input" style="margin:0;width:100%" dir="rtl" value="${esc(item.category_ar || '')}"></div>
+        <div><label style="font-weight:600;display:block;margin-bottom:4px">Price</label><input id="swal-price" class="swal2-input" style="margin:0;width:100%" value="${item.price ?? ''}"></div>
+        <div><label style="font-weight:600;display:block;margin-bottom:4px">Currency</label><input id="swal-currency" class="swal2-input" style="margin:0;width:100%" value="${esc(item.currency || 'EGP')}"></div>
+        <div style="grid-column:1/-1"><label style="font-weight:600;display:block;margin-bottom:4px">Description EN</label><textarea id="swal-desc-en" class="swal2-textarea" style="margin:0;width:100%;min-height:50px">${esc(item.description_en || '')}</textarea></div>
+        <div style="grid-column:1/-1"><label style="font-weight:600;display:block;margin-bottom:4px">Description AR</label><textarea id="swal-desc-ar" class="swal2-textarea" style="margin:0;width:100%;min-height:50px" dir="rtl">${esc(item.description_ar || '')}</textarea></div>
+        <div><label style="font-weight:600;display:block;margin-bottom:4px">Sizes (comma sep)</label><input id="swal-sizes" class="swal2-input" style="margin:0;width:100%" value="${Array.isArray(item.sizes) ? item.sizes.join(', ') : ''}"></div>
+        <div><label style="font-weight:600;display:block;margin-bottom:4px">Available</label><select id="swal-avail" class="swal2-input" style="margin:0;width:100%;padding:8px"><option value="1" ${item.available !== 0 ? 'selected' : ''}>Yes</option><option value="0" ${item.available === 0 ? 'selected' : ''}>No</option></select></div>
+      </div>`,
+    width: 600,
+    showCancelButton: true,
+    confirmButtonText: isNew ? 'Create' : 'Save',
+    showLoaderOnConfirm: true,
+    preConfirm: async () => {
+      const payload = {
+        name_en: document.getElementById('swal-name-en').value,
+        name_ar: document.getElementById('swal-name-ar').value,
+        category_en: document.getElementById('swal-cat-en').value,
+        category_ar: document.getElementById('swal-cat-ar').value,
+        price: document.getElementById('swal-price').value,
+        currency: document.getElementById('swal-currency').value,
+        description_en: document.getElementById('swal-desc-en').value,
+        description_ar: document.getElementById('swal-desc-ar').value,
+        sizes: document.getElementById('swal-sizes').value,
+        available: Number(document.getElementById('swal-avail').value),
+      };
+      try {
+        if (item.id) {
+          await api(`/dashboard/menu/${state.selectedCafe.id}/${item.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+        } else {
+          await api(`/dashboard/menu/${state.selectedCafe.id}`, { method: 'POST', body: JSON.stringify(payload) });
+        }
+        return true;
+      } catch (err) { Swal.showValidationMessage(err.message); }
+    },
+    allowOutsideClick: () => !Swal.isLoading(),
+  }).then(r => {
+    if (r.isConfirmed) {
+      toast(isNew ? 'Item created!' : 'Item updated!');
+      loadMenu();
     }
   });
 }
 
-function collectCafePayload() {
-  return {
-    name: fields.name.value.trim(),
-    name_ar: fields.name_ar.value.trim(),
-    phone: fields.phone.value.trim(),
-    email: fields.email.value.trim(),
-    primary_color: fields.primary_color.value,
-    secondary_color: fields.secondary_color.value,
-    logo_url: fields.logo_url.value.trim(),
-    menu_link: fields.menu_link.value.trim(),
-    sheet_id: fields.sheet_id.value.trim(),
-    drive_folder_id: fields.drive_folder_id.value.trim(),
-    suggestions_en: parseTextareaList(fields.suggestions_en.value),
-    suggestions_ar: parseTextareaList(fields.suggestions_ar.value),
-    about_en: fields.about_en.value.trim(),
-    about_ar: fields.about_ar.value.trim(),
-    address_en: fields.address_en.value.trim(),
-    address_ar: fields.address_ar.value.trim(),
-    working_hours_en: fields.working_hours_en.value.trim(),
-    working_hours_ar: fields.working_hours_ar.value.trim(),
-    welcome_en: fields.welcome_en.value.trim(),
-    welcome_ar: fields.welcome_ar.value.trim(),
-    active: Number(fields.active.value),
-  };
+async function deleteMenuItem(item) {
+  if (!item.id) { state.menu = state.menu.filter(i => i !== item); renderMenu(); return; }
+  const { isConfirmed } = await Swal.fire({ title: 'Delete item?', text: item.name_en, icon: 'warning', showCancelButton: true, confirmButtonText: 'Delete' });
+  if (!isConfirmed) return;
+  try {
+    await api(`/dashboard/menu/${state.selectedCafe.id}/${item.id}`, { method: 'DELETE' });
+    toast('Item deleted');
+    await loadMenu();
+  } catch (err) { toastErr(err.message); }
 }
 
-async function refreshCafes(selectId) {
-  state.cafes = await api('/dashboard/cafes');
-  renderCafeList();
+document.getElementById('sync-menu-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('sync-menu-btn');
+  btnLoad(btn, true);
+  try {
+    const r = await api(`/dashboard/menu/${state.selectedCafe.id}/sync`, { method: 'POST', body: JSON.stringify({}) });
+    toast(`Synced ${r.synced || 0} items from sheet!`);
+    await loadMenu();
+  } catch (err) { toastErr('Sync failed: ' + err.message); }
+  finally { btnLoad(btn, false); }
+});
 
-  if (!state.cafes.length) {
-    state.selectedCafe = null;
-    refs.editor.classList.add('hidden');
-    refs.emptyState.classList.remove('hidden');
-    return;
-  }
+document.getElementById('add-menu-btn').addEventListener('click', () => {
+  openMenuItemModal({ name_en: '', name_ar: '', category_en: '', category_ar: '', description_en: '', description_ar: '', price: '', currency: 'EGP', sizes: [], available: 1 });
+});
 
-  const nextId = selectId || state.selectedCafe?.id || state.cafes[0].id;
-  await selectCafe(nextId);
-}
-
-async function selectCafe(id) {
-  state.selectedCafe = await api(`/dashboard/cafes/${id}`);
-  renderCafeList();
-  fillEditor();
-  clearStatus();
-  refs.sessionMessages.textContent = 'Select a session to view the full conversation.';
-  refs.sessionsList.innerHTML = '';
-  await loadMenu();
-}
-
-function renderMenu() {
-  refs.menuList.innerHTML = '';
-  if (!state.menu.length) {
-    refs.menuList.innerHTML = '<div class="muted">No menu items yet.</div>';
-    return;
-  }
-
-  state.menu.forEach((item) => {
-    const row = document.createElement('div');
-    row.className = 'menu-row';
-    row.innerHTML = `
-      <div class="menu-summary">${item.name_en || 'New item'}${item.category_en ? ` • ${item.category_en}` : ''}${item.price ? ` • ${item.price} ${item.currency || 'EGP'}` : ''}</div>
-      <div class="menu-grid">
-        <label>Name EN<input data-key="name_en" value="${item.name_en || ''}"></label>
-        <label>Name AR<input data-key="name_ar" value="${item.name_ar || ''}"></label>
-        <label>Category EN<input data-key="category_en" value="${item.category_en || ''}"></label>
-        <label>Category AR<input data-key="category_ar" value="${item.category_ar || ''}"></label>
-        <label>Price<input data-key="price" value="${item.price ?? ''}"></label>
-        <label>Currency<input data-key="currency" value="${item.currency || 'EGP'}"></label>
-        <label>Description EN<textarea data-key="description_en" rows="2">${item.description_en || ''}</textarea></label>
-        <label>Description AR<textarea data-key="description_ar" rows="2">${item.description_ar || ''}</textarea></label>
-        <label>Sizes (comma separated)<input data-key="sizes" value="${Array.isArray(item.sizes) ? item.sizes.join(', ') : ''}"></label>
-        <label>Available
-          <select data-key="available">
-            <option value="1" ${item.available ? 'selected' : ''}>Yes</option>
-            <option value="0" ${item.available ? '' : 'selected'}>No</option>
-          </select>
-        </label>
-      </div>
-      <div class="row-actions">
-        <button type="button" data-action="save">Save item</button>
-        <button type="button" class="secondary" data-action="delete">Delete item</button>
-      </div>
-    `;
-
-    row.querySelector('[data-action="save"]').addEventListener('click', async () => {
-      const payload = {};
-      row.querySelectorAll('[data-key]').forEach((field) => {
-        payload[field.dataset.key] = field.value;
-      });
-      payload.available = Number(payload.available);
-      payload.sizes = payload.sizes;
-      if (item.id) {
-        await api(`/dashboard/menu/${state.selectedCafe.id}/${item.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(payload),
-        });
-        showStatus('Menu item updated.');
-      } else {
-        await api(`/dashboard/menu/${state.selectedCafe.id}`, {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        });
-        showStatus('Menu item created.');
-      }
-      await loadMenu();
-    });
-
-    row.querySelector('[data-action="delete"]').addEventListener('click', async () => {
-      if (!item.id) {
-        state.menu = state.menu.filter((entry) => entry !== item);
-        renderMenu();
-        return;
-      }
-      await api(`/dashboard/menu/${state.selectedCafe.id}/${item.id}`, { method: 'DELETE' });
-      showStatus('Menu item deleted.');
-      await loadMenu();
-    });
-
-    refs.menuList.appendChild(row);
-  });
-}
-
-async function loadMenu() {
-  state.menu = await api(`/dashboard/menu/${state.selectedCafe.id}`);
-  renderMenu();
-}
-
+/* ═══════ SESSIONS ═══════ */
 async function loadSessions() {
-  const sessions = await api(`/dashboard/cafes/${state.selectedCafe.id}/sessions`);
-  refs.sessionsList.innerHTML = '';
-  if (!sessions.length) {
-    refs.sessionsList.innerHTML = '<div class="muted">No sessions yet.</div>';
+  if (!state.selectedCafe) return;
+  try {
+    state.sessions = await api(`/dashboard/cafes/${state.selectedCafe.id}/sessions`);
+    renderSessions();
+  } catch (err) { toastErr('Failed to load sessions'); }
+}
+
+function renderSessions() {
+  const list = document.getElementById('sessions-list');
+  const pagEl = document.getElementById('sessions-pagination');
+  list.innerHTML = '';
+  pagEl.innerHTML = '';
+
+  let filtered = state.sessions;
+  const f = state.sessionFilter;
+  if (f.name) filtered = filtered.filter(s => (s.guest_name || '').toLowerCase().includes(f.name.toLowerCase()));
+  if (f.phone) filtered = filtered.filter(s => (s.guest_phone || '').includes(f.phone));
+  if (f.date) filtered = filtered.filter(s => (s.last_active || '').startsWith(f.date));
+
+  if (!filtered.length) {
+    list.innerHTML = '<div class="sessions-empty"><i class="fas fa-comments"></i><p>No sessions found.</p></div>';
     return;
   }
-  sessions.forEach((session) => {
+
+  const perPage = state.SESSIONS_PER_PAGE;
+  const total = Math.ceil(filtered.length / perPage);
+  if (state.sessionsPage > total) state.sessionsPage = total;
+  const start = (state.sessionsPage - 1) * perPage;
+  const slice = filtered.slice(start, start + perPage);
+
+  slice.forEach(s => {
     const row = document.createElement('div');
     row.className = 'session-row';
     row.innerHTML = `
-      <strong>${session.guest_name || 'Guest without name yet'}</strong>
-      <div>Phone: ${session.guest_phone || '-'}</div>
-      <div>Phase: ${session.phase}</div>
-      <div>Messages: ${session.message_count}</div>
-      <div>Last active: ${session.last_active}</div>
-      <div class="row-actions">
-        <button type="button" data-action="view">View conversation</button>
+      <div class="session-info">
+        <div class="session-name"><i class="fas fa-user" style="color:var(--accent);margin-right:6px;font-size:11px"></i>${esc(s.guest_name || 'Guest')}</div>
+        <div class="session-detail">
+          <span><i class="fas fa-phone" style="font-size:10px"></i> ${esc(s.guest_phone || '-')}</span>
+          <span><i class="fas fa-comments" style="font-size:10px"></i> ${s.message_count} msgs</span>
+          <span><i class="fas fa-clock" style="font-size:10px"></i> ${s.last_active || '-'}</span>
+        </div>
       </div>
-    `;
-    row.querySelector('[data-action="view"]').addEventListener('click', async () => {
-      const result = await api(`/dashboard/cafes/${state.selectedCafe.id}/sessions/${session.id}/messages`);
-      refs.sessionMessages.innerHTML = '';
-      result.messages.forEach((message) => {
-        const div = document.createElement('div');
-        div.className = `msg ${message.role}`;
-        div.textContent = `${message.role.toUpperCase()}: ${message.content}`;
-        refs.sessionMessages.appendChild(div);
-      });
-    });
-    refs.sessionsList.appendChild(row);
+      <div class="session-actions">
+        <button class="icon-btn icon-btn-edit" title="View chat"><i class="fas fa-eye"></i></button>
+        <button class="icon-btn icon-btn-del" title="Delete session"><i class="fas fa-trash-can"></i></button>
+      </div>`;
+    row.querySelector('.icon-btn-edit').addEventListener('click', e => { e.stopPropagation(); viewSession(s); });
+    row.querySelector('.icon-btn-del').addEventListener('click', e => { e.stopPropagation(); deleteSession(s); });
+    list.appendChild(row);
   });
+
+  if (total > 1) renderPagination(pagEl, state.sessionsPage, total, p => { state.sessionsPage = p; renderSessions(); });
 }
 
-refs.loginForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  refs.loginError.textContent = '';
+async function viewSession(session) {
   try {
-    const result = await api('/dashboard/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({
-        username: document.getElementById('username').value.trim(),
-        password: document.getElementById('password').value,
-      }),
+    const result = await api(`/dashboard/cafes/${state.selectedCafe.id}/sessions/${session.id}/messages`);
+    let messagesHtml = result.messages.map(m =>
+      `<div class="chat-msg ${m.role === 'user' ? 'user' : 'bot'}">
+        ${esc(m.content)}
+        <div class="chat-msg-time">${m.created_at || ''}</div>
+      </div>`
+    ).join('');
+
+    const { value } = await Swal.fire({
+      title: `Chat — ${esc(session.guest_name || 'Guest')}`,
+      html: `
+        <div class="chat-modal-body" id="chat-scroll">${messagesHtml || '<p style="color:var(--text-muted)">No messages yet</p>'}</div>
+        <div class="chat-input-row">
+          <input id="admin-msg-input" placeholder="Type admin message..." autocomplete="off">
+          <button class="btn btn-primary btn-sm" id="send-admin-msg" type="button"><i class="fas fa-paper-plane"></i></button>
+        </div>`,
+      width: 560,
+      showConfirmButton: false,
+      showCloseButton: true,
+      didOpen: () => {
+        const scroll = document.getElementById('chat-scroll');
+        scroll.scrollTop = scroll.scrollHeight;
+        document.getElementById('send-admin-msg').addEventListener('click', async () => {
+          const inp = document.getElementById('admin-msg-input');
+          const msg = inp.value.trim();
+          if (!msg) return;
+          try {
+            await api(`/dashboard/cafes/${state.selectedCafe.id}/sessions/${session.id}/messages`, {
+              method: 'POST',
+              body: JSON.stringify({ content: msg }),
+            });
+            inp.value = '';
+            const div = document.createElement('div');
+            div.className = 'chat-msg bot';
+            div.innerHTML = `${esc(msg)}<div class="chat-msg-time">Just now (admin)</div>`;
+            scroll.appendChild(div);
+            scroll.scrollTop = scroll.scrollHeight;
+            toast('Message sent!');
+          } catch (err) { toastErr(err.message); }
+        });
+        document.getElementById('admin-msg-input').addEventListener('keydown', e => {
+          if (e.key === 'Enter') document.getElementById('send-admin-msg').click();
+        });
+      },
     });
-    state.token = result.token;
-    state.user = result.user;
-    localStorage.setItem('eglotech_dashboard_token', state.token);
-    refs.userMeta.textContent = `${state.user.username} (${state.user.role})`;
-    refs.createCafe.classList.toggle('hidden', state.user.role !== 'admin');
-    setLoggedIn(true);
-    await refreshCafes();
-    showStatus('Logged in successfully.');
-  } catch (error) {
-    refs.loginError.textContent = error.message;
-  }
-});
+  } catch (err) { toastErr(err.message); }
+}
 
-refs.logout.addEventListener('click', () => {
-  localStorage.removeItem('eglotech_dashboard_token');
-  window.location.reload();
-});
-
-refs.refreshCafes.addEventListener('click', () => refreshCafes());
-
-refs.createCafe.addEventListener('click', async () => {
-  const name = window.prompt('Cafe name');
-  if (!name) return;
-  const result = await api('/dashboard/cafes', {
-    method: 'POST',
-    body: JSON.stringify({ name }),
+async function deleteSession(session) {
+  const { isConfirmed } = await Swal.fire({
+    title: 'Delete session?',
+    text: `${session.guest_name || 'Guest'} — ${session.message_count} messages`,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Delete',
   });
-  await refreshCafes(result.id);
-  window.alert(`New token: ${result.token}`);
-});
-
-refs.saveCafe.addEventListener('click', async () => {
-  await api(`/dashboard/cafes/${state.selectedCafe.id}`, {
-    method: 'PUT',
-    body: JSON.stringify(collectCafePayload()),
-  });
-  await refreshCafes(state.selectedCafe.id);
-  showStatus('Cafe settings saved.');
-});
-
-refs.copyEmbed.addEventListener('click', async () => {
-  const snippet = `<script src="${window.location.origin}/widget.js?token=${state.selectedCafe.token}"></script>`;
-  await navigator.clipboard.writeText(snippet);
-  window.alert('Embed code copied.');
-});
-
-refs.syncMenu.addEventListener('click', async () => {
+  if (!isConfirmed) return;
   try {
-    const result = await api(`/dashboard/menu/${state.selectedCafe.id}/sync`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
-    await loadMenu();
-    showStatus(`Menu sync finished. Imported ${result.synced || 0} items.`);
-  } catch (error) {
-    showStatus(`Menu sync failed: ${error.message}`, true);
-  }
-});
+    await api(`/dashboard/cafes/${state.selectedCafe.id}/sessions/${session.id}`, { method: 'DELETE' });
+    toast('Session deleted');
+    await loadSessions();
+  } catch (err) { toastErr(err.message); }
+}
 
-refs.addMenuItem.addEventListener('click', () => {
-  state.menu.unshift({
-    name_en: '',
-    name_ar: '',
-    category_en: '',
-    category_ar: '',
-    description_en: '',
-    description_ar: '',
-    price: '',
-    currency: 'EGP',
-    sizes: [],
-    available: 1,
+document.getElementById('filter-sessions-btn').addEventListener('click', () => {
+  Swal.fire({
+    title: 'Filter Sessions',
+    html: `
+      <div style="text-align:left;display:flex;flex-direction:column;gap:10px">
+        <div><label style="font-weight:600;display:block;margin-bottom:4px;font-size:12px">Client Name</label><input id="swal-f-name" class="swal2-input" style="margin:0;width:100%" value="${state.sessionFilter.name || ''}"></div>
+        <div><label style="font-weight:600;display:block;margin-bottom:4px;font-size:12px">Phone</label><input id="swal-f-phone" class="swal2-input" style="margin:0;width:100%" value="${state.sessionFilter.phone || ''}"></div>
+        <div><label style="font-weight:600;display:block;margin-bottom:4px;font-size:12px">Date (YYYY-MM-DD)</label><input id="swal-f-date" class="swal2-input" style="margin:0;width:100%" value="${state.sessionFilter.date || ''}" placeholder="2026-05-07"></div>
+      </div>`,
+    showCancelButton: true,
+    confirmButtonText: 'Apply',
+    cancelButtonText: 'Clear Filters',
+  }).then(r => {
+    if (r.isConfirmed) {
+      state.sessionFilter = {
+        name: document.getElementById('swal-f-name').value.trim(),
+        phone: document.getElementById('swal-f-phone').value.trim(),
+        date: document.getElementById('swal-f-date').value.trim(),
+      };
+    } else if (r.dismiss === Swal.DismissReason.cancel) {
+      state.sessionFilter = {};
+    }
+    state.sessionsPage = 1;
+    renderSessions();
   });
-  renderMenu();
-  showStatus('New menu row added. Fill it and click Save item.');
 });
 
-refs.loadSessions.addEventListener('click', loadSessions);
+document.getElementById('clear-sessions-btn').addEventListener('click', async () => {
+  if (!state.selectedCafe) return;
+  const btn = document.getElementById('clear-sessions-btn');
+  const { isConfirmed } = await Swal.fire({
+    title: 'Clear ALL sessions?',
+    text: 'This will permanently delete all chat sessions and messages for this cafe.',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Clear All',
+  });
+  if (!isConfirmed) return;
+  btnLoad(btn, true);
+  try {
+    await api(`/dashboard/cafes/${state.selectedCafe.id}/sessions`, { method: 'DELETE' });
+    toast('All sessions cleared');
+    await loadSessions();
+  } catch (err) { toastErr(err.message); }
+  finally { btnLoad(btn, false); }
+});
 
-if (state.token) {
-  api('/dashboard/auth/me')
-    .then(async (user) => {
-      state.user = user;
-      refs.userMeta.textContent = `${state.user.username} (${state.user.role})`;
-      refs.createCafe.classList.toggle('hidden', state.user.role !== 'admin');
-      setLoggedIn(true);
-      await refreshCafes();
-    })
-    .catch(() => {
-      localStorage.removeItem('eglotech_dashboard_token');
-      setLoggedIn(false);
-    });
+/* ═══════ PAGINATION HELPER ═══════ */
+function renderPagination(container, current, total, onChange) {
+  container.innerHTML = '';
+  const prev = document.createElement('button');
+  prev.className = 'page-btn';
+  prev.innerHTML = '<i class="fas fa-chevron-left"></i>';
+  prev.disabled = current <= 1;
+  prev.addEventListener('click', () => onChange(current - 1));
+  container.appendChild(prev);
+
+  for (let i = 1; i <= total; i++) {
+    if (total > 7 && i > 3 && i < total - 1 && Math.abs(i - current) > 1) {
+      if (i === 4 || i === total - 2) {
+        const dots = document.createElement('span');
+        dots.className = 'page-btn';
+        dots.textContent = '…';
+        dots.style.cursor = 'default';
+        dots.style.border = 'none';
+        container.appendChild(dots);
+      }
+      continue;
+    }
+    const btn = document.createElement('button');
+    btn.className = 'page-btn' + (i === current ? ' active' : '');
+    btn.textContent = i;
+    btn.addEventListener('click', () => onChange(i));
+    container.appendChild(btn);
+  }
+
+  const next = document.createElement('button');
+  next.className = 'page-btn';
+  next.innerHTML = '<i class="fas fa-chevron-right"></i>';
+  next.disabled = current >= total;
+  next.addEventListener('click', () => onChange(current + 1));
+  container.appendChild(next);
 }
