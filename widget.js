@@ -499,9 +499,9 @@
   function updateChatModeUi() {
     if (!refs) return;
     refs.root.classList.toggle('live-mode', !state.automated);
-    refs.statusChip.textContent = state.automated
-      ? (state.language === 'ar' ? 'مساعد آلي' : 'Automated assistant')
-      : (state.language === 'ar' ? 'دعم بشري مباشر' : 'Live customer support');
+    // refs.statusChip.textContent = state.automated
+    //   ? (state.language === 'ar' ? 'مساعد آلي' : 'Automated assistant')
+    //   : (state.language === 'ar' ? 'دعم بشري مباشر' : 'Live customer support');
     refs.statusChip.classList.toggle('live', !state.automated);
     refs.brandSub.textContent = state.automated
       ? (state.language === 'ar' ? 'مساعدة فورية' : 'Instant support')
