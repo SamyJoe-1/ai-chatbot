@@ -179,22 +179,6 @@
         font-size: 12px;
         opacity: 0.8;
       }
-      .cb-status-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        margin-top: 6px;
-        padding: 5px 10px;
-        border-radius: 999px;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        background: rgba(255,255,255,0.16);
-      }
-      .cb-status-chip.live {
-        background: rgba(255,255,255,0.24);
-      }
       .cb-close {
         width: 38px;
         height: 38px;
@@ -499,7 +483,6 @@
   function updateChatModeUi() {
     if (!refs) return;
     refs.root.classList.toggle('live-mode', !state.automated);
-    if (refs.statusChip) refs.statusChip.classList.toggle('live', !state.automated);
     refs.brandSub.textContent = state.automated
       ? (state.language === 'ar' ? 'مساعدة فورية' : 'Instant support')
       : (state.language === 'ar' ? 'تم تحويل المحادثة إلى خدمة العملاء' : 'Chat handed to customer support');
@@ -605,7 +588,6 @@
             <div class="cb-brand-text">
               <div class="cb-brand-name">${cafe.name}</div>
               <div class="cb-brand-sub">Instant support</div>
-              <span class="cb-status-chip"></span>
             </div>
           </div>
           <div>
@@ -634,7 +616,6 @@
       messages: root.querySelector('.cb-messages'),
       suggestions: root.querySelector('.cb-suggestions'),
       brandSub: root.querySelector('.cb-brand-sub'),
-      statusChip: root.querySelector('.cb-status-chip'),
       footer: root.querySelector('.cb-footer'),
       input: root.querySelector('.cb-input'),
       send: root.querySelector('.cb-send'),
