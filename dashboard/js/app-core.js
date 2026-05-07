@@ -73,6 +73,31 @@ document.getElementById('mobile-menu-toggle')?.addEventListener('click', () => {
   document.querySelector('.sidebar').classList.toggle('open');
 });
 
+const mobileNavMedia = window.matchMedia('(max-width: 1100px)');
+
+function syncSidebarState(e = mobileNavMedia) {
+  if (!e.matches) {
+    document.querySelector('.sidebar')?.classList.remove('open');
+  }
+}
+
+if (typeof mobileNavMedia.addEventListener === 'function') {
+  mobileNavMedia.addEventListener('change', syncSidebarState);
+} else if (typeof mobileNavMedia.addListener === 'function') {
+  mobileNavMedia.addListener(syncSidebarState);
+}
+
+document.addEventListener('click', e => {
+  if (!mobileNavMedia.matches) return;
+  const sidebar = document.querySelector('.sidebar');
+  const toggle = document.getElementById('mobile-menu-toggle');
+  if (!sidebar?.classList.contains('open')) return;
+  if (sidebar.contains(e.target) || toggle?.contains(e.target)) return;
+  sidebar.classList.remove('open');
+});
+
+syncSidebarState();
+
 /* ═══════ ACCORDION ═══════ */
 document.querySelectorAll('.accordion-header').forEach(header => {
   header.addEventListener('click', () => {
