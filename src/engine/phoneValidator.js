@@ -13,19 +13,29 @@ function validatePhone(input) {
     return { valid: false, normalized: null };
   }
 
-  let result = phone(clean);
-  if (result.isValid) {
-    return { valid: true, normalized: result.phoneNumber };
-  }
-
-  result = phone(clean, { country: 'EGY' });
-  if (result.isValid) {
-    return { valid: true, normalized: result.phoneNumber };
-  }
-
   const digits = clean.replace(/\D/g, '');
-  if (clean.startsWith('+') && digits.length >= 10 && digits.length <= 15) {
-    return { valid: true, normalized: clean };
+  if (digits.length < 8 || /^(\d)\1+$/.test(digits)) {
+    return { valid: false, normalized: null };
+  }
+
+  if (clean.startsWith('+')) {
+    const intlResult = phone(clean);
+    if (intlResult.isValid) {
+      return { valid: true, normalized: intlResult.phoneNumber };
+    }
+    return { valid: false, normalized: null };
+  }
+
+  if (digits.startsWith('20')) {
+    const egyptIntlResult = phone(`+${digits}`);
+    if (egyptIntlResult.isValid) {
+      return { valid: true, normalized: egyptIntlResult.phoneNumber };
+    }
+  }
+
+  const egyptResult = phone(clean, { country: 'EGY' });
+  if (egyptResult.isValid) {
+    return { valid: true, normalized: egyptResult.phoneNumber };
   }
 
   return { valid: false, normalized: null };
