@@ -259,8 +259,19 @@ function renderSessions() {
         <button class="icon-btn icon-btn-edit" title="View chat"><i class="fas fa-eye"></i></button>
         <button class="icon-btn icon-btn-del" title="Delete session"><i class="fas fa-trash-can"></i></button>
       </div>`;
-    row.querySelector('.icon-btn-edit').addEventListener('click', e => { e.stopPropagation(); viewSession(s); });
-    row.querySelector('.icon-btn-del').addEventListener('click', e => { e.stopPropagation(); deleteSession(s); });
+
+    // Make the entire row clickable to view session
+    row.addEventListener('click', () => viewSession(s));
+
+    // Prevent row click when clicking action buttons
+    row.querySelector('.icon-btn-edit').addEventListener('click', e => {
+      e.stopPropagation();
+      viewSession(s);
+    });
+    row.querySelector('.icon-btn-del').addEventListener('click', e => {
+      e.stopPropagation();
+      deleteSession(s);
+    });
     list.appendChild(row);
   });
 
