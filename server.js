@@ -34,7 +34,7 @@ const chatLimiter = rateLimit({
 app.get('/', (_req, res) => {
   res.json({
     ok: true,
-    service: 'chatbot-e-glotech',
+    service: 'multi-service-chatbot-e-glotech',
     dashboard: '/dashboard',
     health: '/health',
     widget: '/widget.js?token=YOUR_TOKEN',
@@ -56,8 +56,10 @@ app.use('/api/message', chatLimiter, require('./src/routes/api/message'));
 app.use('/api/sync', require('./src/routes/api/sync'));
 
 app.use('/dashboard/auth', require('./src/routes/dashboard/auth'));
-app.use('/dashboard/cafes', require('./src/routes/dashboard/cafes'));
-app.use('/dashboard/menu', require('./src/routes/dashboard/menu'));
+app.use('/dashboard/businesses', require('./src/routes/dashboard/businesses'));
+app.use('/dashboard/cafes', require('./src/routes/dashboard/businesses'));
+app.use('/dashboard/catalog', require('./src/routes/dashboard/catalog'));
+app.use('/dashboard/menu', require('./src/routes/dashboard/catalog'));
 app.use('/dashboard/db', require('./src/routes/dashboard/database'));
 app.use('/dashboard', express.static(path.join(__dirname, 'dashboard')));
 

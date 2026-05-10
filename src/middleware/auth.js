@@ -12,6 +12,9 @@ function authMiddleware(req, res, next) {
 
   try {
     req.admin = jwt.verify(header.slice(7), SECRET);
+    if (req.admin && req.admin.business_id === undefined && req.admin.cafe_id !== undefined) {
+      req.admin.business_id = req.admin.cafe_id;
+    }
     return next();
   } catch {
     return res.status(401).json({ error: 'invalid_token' });

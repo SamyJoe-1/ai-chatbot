@@ -266,12 +266,12 @@ document.getElementById('logout-btn').addEventListener('click', () => {
 async function refreshCafes(selectId) {
   showLoader();
   try {
-    state.cafes = await api('/dashboard/cafes');
+    state.cafes = await api('/dashboard/businesses');
     renderCafesTable();
     updateHomeStats();
     if (selectId) await selectCafe(selectId);
   } catch (err) {
-    toastErr('Failed to load cafes');
+    toastErr('Failed to load businesses');
   } finally {
     hideLoader();
   }
@@ -330,8 +330,8 @@ document.getElementById('refresh-cafes-btn').addEventListener('click', () => ref
 
 async function toggleCafe(id) {
   try {
-    const r = await api(`/dashboard/cafes/${id}/toggle`, { method: 'PATCH' });
-    toast(r.active ? 'Cafe activated' : 'Cafe paused');
+    const r = await api(`/dashboard/businesses/${id}/toggle`, { method: 'PATCH' });
+    toast(r.active ? 'Business activated' : 'Business paused');
     await refreshCafes();
   } catch (err) { toastErr(err.message); }
 }
@@ -340,20 +340,21 @@ async function toggleCafe(id) {
 document.getElementById('create-cafe-btn').addEventListener('click', async () => {
   const btn = document.getElementById('create-cafe-btn');
   const name = document.getElementById('new-cafe-name').value.trim();
-  if (!name) return toastErr('Cafe name is required');
+  if (!name) return toastErr('Business name is required');
   btnLoad(btn, true);
   try {
-    const result = await api('/dashboard/cafes', {
+    const result = await api('/dashboard/businesses', {
       method: 'POST',
       body: JSON.stringify({
         name,
+        service_type: document.getElementById('new-business-service-type').value,
         name_ar: document.getElementById('new-cafe-name-ar').value.trim(),
         phone: document.getElementById('new-cafe-phone').value.trim(),
         email: document.getElementById('new-cafe-email').value.trim(),
         primary_color: document.getElementById('new-cafe-color').value,
       }),
     });
-    toast('Cafe created successfully!');
+    toast('Business created successfully!');
     // Clear form
     document.getElementById('new-cafe-name').value = '';
     document.getElementById('new-cafe-name-ar').value = '';
@@ -373,7 +374,7 @@ function parseTextareaList(v) {
 async function selectCafe(id, { updateHash = true } = {}) {
   showLoader();
   try {
-    state.selectedCafe = await api(`/dashboard/cafes/${id}`);
+    state.selectedCafe = await api(`/dashboard/businesses/${id}`);
     fillEditor();
     navigateTo('edit-cafe', { updateHash: false });
     state.menuPage = 1;
@@ -388,6 +389,7 @@ function fillEditor() {
   const c = state.selectedCafe;
   if (!c) return;
   document.getElementById('edit-cafe-title').textContent = 'Edit: ' + c.name;
+  document.getElementById('business-service-type').value = c.service_type || 'cafe';
   document.getElementById('cafe-name').value = c.name || '';
   document.getElementById('cafe-name-ar').value = c.name_ar || '';
   document.getElementById('cafe-phone').value = c.phone || '';
@@ -396,8 +398,9 @@ function fillEditor() {
   const hex = document.getElementById('cafe-primary-hex');
   if (hex) hex.textContent = c.primary_color || '#d66020';
   document.getElementById('cafe-logo').value = c.logo_url || '';
-  document.getElementById('cafe-menu-link').value = c.menu_link || '';
+  document.getElementById('cafe-menu-link').value = c.catalog_link || '';
   document.getElementById('cafe-sheet-id').value = c.sheet_id || '';
+  document.getElementById('business-sheet-name').value = c.sheet_name || '';
   document.getElementById('cafe-drive-folder').value = c.drive_folder_id || '';
   document.getElementById('cafe-suggestions-en').value = (Array.isArray(c.suggestions_en) ? c.suggestions_en : []).join('\n');
   document.getElementById('cafe-suggestions-ar').value = (Array.isArray(c.suggestions_ar) ? c.suggestions_ar : []).join('\n');
@@ -415,14 +418,16 @@ function fillEditor() {
 function collectCafePayload() {
   return {
     name: document.getElementById('cafe-name').value.trim(),
+    service_type: document.getElementById('business-service-type').value,
     name_ar: document.getElementById('cafe-name-ar').value.trim(),
     phone: document.getElementById('cafe-phone').value.trim(),
     email: document.getElementById('cafe-email').value.trim(),
     primary_color: document.getElementById('cafe-primary').value,
     secondary_color: state.selectedCafe?.secondary_color || '#f6efe4',
     logo_url: document.getElementById('cafe-logo').value.trim(),
-    menu_link: document.getElementById('cafe-menu-link').value.trim(),
+    catalog_link: document.getElementById('cafe-menu-link').value.trim(),
     sheet_id: document.getElementById('cafe-sheet-id').value.trim(),
+    sheet_name: document.getElementById('business-sheet-name').value.trim(),
     drive_folder_id: document.getElementById('cafe-drive-folder').value.trim(),
     suggestions_en: parseTextareaList(document.getElementById('cafe-suggestions-en').value),
     suggestions_ar: parseTextareaList(document.getElementById('cafe-suggestions-ar').value),
@@ -442,11 +447,11 @@ document.getElementById('save-cafe-btn').addEventListener('click', async () => {
   const btn = document.getElementById('save-cafe-btn');
   btnLoad(btn, true);
   try {
-    await api(`/dashboard/cafes/${state.selectedCafe.id}`, {
+    await api(`/dashboard/businesses/${state.selectedCafe.id}`, {
       method: 'PUT',
       body: JSON.stringify(collectCafePayload()),
     });
-    toast('Cafe settings saved!');
+    toast('Business settings saved!');
     await refreshCafes(state.selectedCafe.id);
     fillEditor();
   } catch (err) { toastErr(err.message); }
@@ -479,7 +484,7 @@ document.getElementById('regenerate-token-btn').addEventListener('click', async 
   if (!isConfirmed) return;
   btnLoad(btn, true);
   try {
-    const r = await api(`/dashboard/cafes/${state.selectedCafe.id}/regenerate-token`, { method: 'POST' });
+    const r = await api(`/dashboard/businesses/${state.selectedCafe.id}/regenerate-token`, { method: 'POST' });
     state.selectedCafe.token = r.token;
     toast('Token regenerated!');
   } catch (err) { toastErr(err.message); }

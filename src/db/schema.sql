@@ -3,13 +3,14 @@ CREATE TABLE IF NOT EXISTS admins (
   username TEXT UNIQUE NOT NULL,
   password TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user',
-  cafe_id INTEGER,
+  business_id INTEGER,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS cafes (
+CREATE TABLE IF NOT EXISTS businesses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   token TEXT UNIQUE NOT NULL,
+  service_type TEXT NOT NULL DEFAULT 'cafe',
   name TEXT NOT NULL,
   name_ar TEXT,
   primary_color TEXT DEFAULT '#17443a',
@@ -23,9 +24,10 @@ CREATE TABLE IF NOT EXISTS cafes (
   address_ar TEXT,
   working_hours_en TEXT,
   working_hours_ar TEXT,
-  menu_link TEXT,
+  catalog_link TEXT,
   drive_folder_id TEXT,
   sheet_id TEXT,
+  sheet_name TEXT DEFAULT 'Catalog',
   welcome_en TEXT DEFAULT 'Welcome! How can I help you today?',
   welcome_ar TEXT DEFAULT 'أهلاً! كيف يمكنني مساعدتك اليوم؟',
   suggestions_en TEXT DEFAULT '[]',
@@ -34,18 +36,19 @@ CREATE TABLE IF NOT EXISTS cafes (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS menu_items (
+CREATE TABLE IF NOT EXISTS service_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  cafe_id INTEGER NOT NULL REFERENCES cafes(id) ON DELETE CASCADE,
-  name_en TEXT NOT NULL,
-  name_ar TEXT,
+  business_id INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  service_type TEXT NOT NULL DEFAULT 'cafe',
+  title_en TEXT NOT NULL,
+  title_ar TEXT,
   category_en TEXT,
   category_ar TEXT,
   description_en TEXT,
   description_ar TEXT,
   price REAL,
   currency TEXT DEFAULT 'EGP',
-  sizes TEXT DEFAULT '[]',
+  metadata TEXT DEFAULT '{}',
   available INTEGER DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -53,7 +56,7 @@ CREATE TABLE IF NOT EXISTS menu_items (
 CREATE TABLE IF NOT EXISTS sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_key TEXT UNIQUE NOT NULL,
-  cafe_id INTEGER NOT NULL REFERENCES cafes(id) ON DELETE CASCADE,
+  business_id INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
   guest_name TEXT,
   guest_phone TEXT,
   automated INTEGER NOT NULL DEFAULT 1,

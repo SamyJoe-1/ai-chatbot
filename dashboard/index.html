@@ -65,10 +65,10 @@
           <i class="fas fa-house"></i><span>Home</span>
         </button>
         <button class="nav-btn" data-page="all-cafes" type="button">
-          <i class="fas fa-store"></i><span>All Cafes</span>
+          <i class="fas fa-store"></i><span>All Businesses</span>
         </button>
         <button class="nav-btn" data-page="add-cafe" type="button">
-          <i class="fas fa-circle-plus"></i><span>Add Cafe</span>
+          <i class="fas fa-circle-plus"></i><span>Add Business</span>
         </button>
       </nav>
 
@@ -102,30 +102,30 @@
             <div class="stat-icon"><i class="fas fa-store"></i></div>
             <div class="stat-info">
               <div class="stat-number" id="stat-cafes">0</div>
-              <div class="stat-label">Total Cafes</div>
+              <div class="stat-label">Total Businesses</div>
             </div>
           </div>
           <div class="stat-card">
             <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
             <div class="stat-info">
               <div class="stat-number" id="stat-active">0</div>
-              <div class="stat-label">Active Cafes</div>
+              <div class="stat-label">Active Businesses</div>
             </div>
           </div>
           <div class="stat-card">
             <div class="stat-icon"><i class="fas fa-pause-circle"></i></div>
             <div class="stat-info">
               <div class="stat-number" id="stat-inactive">0</div>
-              <div class="stat-label">Paused Cafes</div>
+              <div class="stat-label">Paused Businesses</div>
             </div>
           </div>
         </div>
         <div class="home-welcome-card">
           <h3>Quick Actions</h3>
-          <p>Manage your chatbot cafes, menus, and conversations from this dashboard.</p>
+          <p>Manage your chatbot businesses, catalogs, and conversations from this dashboard.</p>
           <div class="quick-actions">
-            <button class="btn btn-primary" onclick="navigateTo('all-cafes')"><i class="fas fa-store"></i> View Cafes</button>
-            <button class="btn btn-outline" onclick="navigateTo('add-cafe')"><i class="fas fa-plus"></i> Add New Cafe</button>
+            <button class="btn btn-primary" onclick="navigateTo('all-cafes')"><i class="fas fa-store"></i> View Businesses</button>
+            <button class="btn btn-outline" onclick="navigateTo('add-cafe')"><i class="fas fa-plus"></i> Add New Business</button>
           </div>
         </div>
       </section>
@@ -133,7 +133,7 @@
       <!-- ── PAGE: ALL CAFES ── -->
       <section id="page-all-cafes" class="page">
         <div class="page-header">
-          <h2><i class="fas fa-store"></i> All Cafes</h2>
+          <h2><i class="fas fa-store"></i> All Businesses</h2>
           <button class="btn btn-outline btn-sm" id="refresh-cafes-btn" type="button">
             <i class="fas fa-arrows-rotate"></i> Refresh
           </button>
@@ -141,7 +141,7 @@
         <div class="filter-bar">
           <div class="input-group search-group">
             <i class="fas fa-search"></i>
-            <input type="text" id="cafe-search" placeholder="Search cafes...">
+            <input type="text" id="cafe-search" placeholder="Search businesses...">
           </div>
           <select id="cafe-filter-status" class="filter-select">
             <option value="all">All Status</option>
@@ -165,24 +165,32 @@
         </div>
         <div class="empty-state hidden" id="cafes-empty">
           <i class="fas fa-store-slash"></i>
-          <p>No cafes found</p>
+          <p>No businesses found</p>
         </div>
       </section>
 
       <!-- ── PAGE: ADD CAFE ── -->
       <section id="page-add-cafe" class="page">
         <div class="page-header">
-          <h2><i class="fas fa-circle-plus"></i> Create New Cafe</h2>
+          <h2><i class="fas fa-circle-plus"></i> Create New Business</h2>
         </div>
         <div class="form-card">
           <div class="form-grid">
             <div class="form-field">
-              <label for="new-cafe-name">Cafe Name (EN) <span class="req">*</span></label>
+              <label for="new-cafe-name">Business Name (EN) <span class="req">*</span></label>
               <input type="text" id="new-cafe-name" placeholder="e.g. Coffee House">
             </div>
             <div class="form-field">
-              <label for="new-cafe-name-ar">Cafe Name (AR)</label>
+              <label for="new-cafe-name-ar">Business Name (AR)</label>
               <input type="text" id="new-cafe-name-ar" placeholder="e.g. بيت القهوة" dir="rtl">
+            </div>
+            <div class="form-field">
+              <label for="new-business-service-type">Service Type</label>
+              <select id="new-business-service-type" class="filter-select">
+                <option value="cafe">Cafe</option>
+                <option value="real_estate">Real Estate</option>
+                <option value="clinic">Clinic</option>
+              </select>
             </div>
             <div class="form-field">
               <label for="new-cafe-phone">Phone</label>
@@ -202,7 +210,7 @@
           </div>
           <div class="form-actions">
             <button id="create-cafe-btn" class="btn btn-primary" type="button">
-              <span class="btn-text"><i class="fas fa-plus"></i> Create Cafe</span>
+              <span class="btn-text"><i class="fas fa-plus"></i> Create Business</span>
               <span class="btn-loader hidden"><i class="fas fa-circle-notch fa-spin"></i></span>
             </button>
           </div>
@@ -216,7 +224,7 @@
             <button class="btn btn-ghost btn-sm" onclick="navigateTo('all-cafes')" type="button">
               <i class="fas fa-arrow-left"></i> Back
             </button>
-            <h2 id="edit-cafe-title">Edit Cafe</h2>
+            <h2 id="edit-cafe-title">Edit Business</h2>
           </div>
           <div class="page-header-actions">
             <button id="copy-embed-btn" class="btn btn-outline btn-sm" type="button">
@@ -241,11 +249,19 @@
             <div class="accordion-body">
               <div class="form-grid">
                 <div class="form-field">
-                  <label>Name (EN)</label>
+                  <label>Business Name (EN)</label>
                   <div class="field-with-ar">
                     <input type="text" id="cafe-name">
                     <button class="btn-ar-toggle" type="button" data-ar-target="cafe-name-ar" title="Set Arabic"><span>ع</span></button>
                   </div>
+                </div>
+                <div class="form-field">
+                  <label>Service Type</label>
+                  <select id="business-service-type" class="filter-select">
+                    <option value="cafe">Cafe</option>
+                    <option value="real_estate">Real Estate</option>
+                    <option value="clinic">Clinic</option>
+                  </select>
                 </div>
                 <div class="form-field">
                   <label>Phone</label>
@@ -267,7 +283,7 @@
                   <input type="text" id="cafe-logo">
                 </div>
                 <div class="form-field">
-                  <label>Menu Link</label>
+                  <label>Catalog Link</label>
                   <input type="text" id="cafe-menu-link">
                 </div>
               </div>
@@ -285,6 +301,10 @@
                 <div class="form-field">
                   <label>Google Sheet ID or Link</label>
                   <input type="text" id="cafe-sheet-id">
+                </div>
+                <div class="form-field">
+                  <label>Sheet Tab Name</label>
+                  <input type="text" id="business-sheet-name" placeholder="Menu / Properties / Services">
                 </div>
                 <div class="form-field">
                   <label>Drive Folder ID</label>
@@ -401,10 +421,10 @@
             </div>
           </div>
 
-          <!-- Section: Menu -->
+          <!-- Section: Catalog -->
           <div class="accordion-section">
             <button class="accordion-header" type="button">
-              <span><i class="fas fa-utensils"></i> Menu Items</span>
+              <span><i class="fas fa-box-open"></i> Catalog Items</span>
               <i class="fas fa-chevron-down accordion-arrow"></i>
             </button>
             <div class="accordion-body">
@@ -414,19 +434,19 @@
                   <span class="btn-loader hidden"><i class="fas fa-circle-notch fa-spin"></i></span>
                 </button>
                 <button id="add-menu-btn" class="btn btn-primary btn-sm" type="button">
-                  <i class="fas fa-plus"></i> Add Item
+                  <i class="fas fa-plus"></i> Add Catalog Item
                 </button>
               </div>
               <div class="filter-bar menu-filter-bar">
                 <div class="input-group search-group">
                   <i class="fas fa-search"></i>
-                  <input type="text" id="menu-search" placeholder="Search items or categories...">
+                  <input type="text" id="menu-search" placeholder="Search catalog items or categories...">
                 </div>
                 <select id="menu-filter-category" class="filter-select">
                   <option value="all">All Categories</option>
                 </select>
                 <select id="menu-filter-availability" class="filter-select">
-                  <option value="all">All Items</option>
+                  <option value="all">All Catalog Items</option>
                   <option value="available">Available</option>
                   <option value="unavailable">Unavailable</option>
                 </select>

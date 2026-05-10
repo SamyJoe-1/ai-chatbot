@@ -29,7 +29,8 @@ router.post('/login', async (req, res) => {
     id: user.id,
     username: user.username,
     role: user.role,
-    cafe_id: user.cafe_id,
+    business_id: user.business_id,
+    cafe_id: user.business_id,
   });
 
   return res.json({
@@ -38,7 +39,8 @@ router.post('/login', async (req, res) => {
       id: user.id,
       username: user.username,
       role: user.role,
-      cafe_id: user.cafe_id,
+      business_id: user.business_id,
+      cafe_id: user.business_id,
     },
   });
 });

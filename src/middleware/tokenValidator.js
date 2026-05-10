@@ -2,7 +2,7 @@
 
 const db = require('../db/db');
 
-const getCafe = db.prepare('SELECT * FROM cafes WHERE token = ? AND active = 1');
+const getBusiness = db.prepare('SELECT * FROM businesses WHERE token = ? AND active = 1');
 
 function tokenValidator(req, res, next) {
   const token = req.query.token || req.headers['x-bot-token'] || req.body?.token;
@@ -11,12 +11,12 @@ function tokenValidator(req, res, next) {
     return res.status(401).json({ error: 'missing_token' });
   }
 
-  const cafe = getCafe.get(token);
-  if (!cafe) {
+  const business = getBusiness.get(token);
+  if (!business) {
     return res.status(401).json({ error: 'invalid_token' });
   }
 
-  req.cafe = cafe;
+  req.business = business;
   return next();
 }
 

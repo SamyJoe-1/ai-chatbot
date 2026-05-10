@@ -1,12 +1,12 @@
-/* ═══════ MENU ═══════ */
+/* ═══════ CATALOG ═══════ */
 async function loadMenu() {
   if (!state.selectedCafe) return;
   try {
-    state.menu = await api(`/dashboard/menu/${state.selectedCafe.id}`);
+    state.menu = await api(`/dashboard/catalog/${state.selectedCafe.id}`);
     syncMenuFilterControls();
     syncMenuCategoryOptions();
     renderMenu();
-  } catch (err) { toastErr('Failed to load menu'); }
+  } catch (err) { toastErr('Failed to load catalog'); }
 }
 
 function syncMenuFilterControls() {
@@ -48,12 +48,13 @@ function getFilteredMenuItems() {
 
   return state.menu.filter(item => {
     const haystack = [
-      item.name_en,
-      item.name_ar,
+      item.title_en,
+      item.title_ar,
       item.category_en,
       item.category_ar,
       item.description_en,
       item.description_ar,
+      JSON.stringify(item.metadata || {}),
     ].join(' ').toLowerCase();
 
     if (search && !haystack.includes(search)) return false;
@@ -74,13 +75,13 @@ function renderMenu() {
   pagEl.innerHTML = '';
 
   if (!state.menu.length) {
-    list.innerHTML = '<div class="menu-empty"><i class="fas fa-utensils"></i><p>No menu items yet.</p></div>';
+    list.innerHTML = '<div class="menu-empty"><i class="fas fa-box-open"></i><p>No catalog items yet.</p></div>';
     return;
   }
 
   const filteredMenu = getFilteredMenuItems();
   if (!filteredMenu.length) {
-    list.innerHTML = '<div class="menu-filter-empty"><i class="fas fa-filter-circle-xmark"></i><p>No items match the current filters.</p></div>';
+    list.innerHTML = '<div class="menu-filter-empty"><i class="fas fa-filter-circle-xmark"></i><p>No catalog items match the current filters.</p></div>';
     return;
   }
 
@@ -94,8 +95,8 @@ function renderMenu() {
     const row = document.createElement('div');
     row.className = 'menu-row';
     row.innerHTML = `
-      <span class="mr-name">${esc(item.name_en || 'Untitled')}</span>
-      <span class="mr-cat">${esc(item.category_en || '-')}</span>
+      <span class="mr-name">${esc(item.title_en || item.title_ar || 'Untitled')}</span>
+      <span class="mr-cat">${esc(item.category_en || item.category_ar || '-')}</span>
       <span class="mr-price">${item.price != null ? item.price + ' ' + (item.currency || 'EGP') : '-'}</span>
       <span class="mr-actions">
         <button class="icon-btn icon-btn-edit" title="Edit"><i class="fas fa-pen-to-square"></i></button>
@@ -109,65 +110,105 @@ function renderMenu() {
   if (total > 1) renderPagination(pagEl, state.menuPage, total, p => { state.menuPage = p; renderMenu(); });
 }
 
+function normalizeMetadataForForm(item) {
+  try {
+    return JSON.stringify(item.metadata || {}, null, 2);
+  } catch {
+    return '{}';
+  }
+}
+
+function parseMetadataInput(value) {
+  if (!String(value || '').trim()) return {};
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error('Metadata must be valid JSON');
+  }
+}
+
 function openMenuItemModal(item) {
   const isNew = !item.id;
   Swal.fire({
-    title: isNew ? 'Add Menu Item' : 'Edit Menu Item',
+    title: isNew ? 'Add Catalog Item' : 'Edit Catalog Item',
     html: `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:left;font-size:13px">
-        <div><label style="font-weight:600;display:block;margin-bottom:4px">Name EN</label><input id="swal-name-en" class="swal2-input" style="margin:0;width:100%" value="${esc(item.name_en || '')}"></div>
-        <div><label style="font-weight:600;display:block;margin-bottom:4px">Name AR</label><input id="swal-name-ar" class="swal2-input" style="margin:0;width:100%" dir="rtl" value="${esc(item.name_ar || '')}"></div>
+        <div><label style="font-weight:600;display:block;margin-bottom:4px">Title EN</label><input id="swal-title-en" class="swal2-input" style="margin:0;width:100%" value="${esc(item.title_en || '')}"></div>
+        <div><label style="font-weight:600;display:block;margin-bottom:4px">Title AR</label><input id="swal-title-ar" class="swal2-input" style="margin:0;width:100%" dir="rtl" value="${esc(item.title_ar || '')}"></div>
         <div><label style="font-weight:600;display:block;margin-bottom:4px">Category EN</label><input id="swal-cat-en" class="swal2-input" style="margin:0;width:100%" value="${esc(item.category_en || '')}"></div>
         <div><label style="font-weight:600;display:block;margin-bottom:4px">Category AR</label><input id="swal-cat-ar" class="swal2-input" style="margin:0;width:100%" dir="rtl" value="${esc(item.category_ar || '')}"></div>
         <div><label style="font-weight:600;display:block;margin-bottom:4px">Price</label><input id="swal-price" class="swal2-input" style="margin:0;width:100%" value="${item.price ?? ''}"></div>
         <div><label style="font-weight:600;display:block;margin-bottom:4px">Currency</label><input id="swal-currency" class="swal2-input" style="margin:0;width:100%" value="${esc(item.currency || 'EGP')}"></div>
         <div style="grid-column:1/-1"><label style="font-weight:600;display:block;margin-bottom:4px">Description EN</label><textarea id="swal-desc-en" class="swal2-textarea" style="margin:0;width:100%;min-height:50px">${esc(item.description_en || '')}</textarea></div>
         <div style="grid-column:1/-1"><label style="font-weight:600;display:block;margin-bottom:4px">Description AR</label><textarea id="swal-desc-ar" class="swal2-textarea" style="margin:0;width:100%;min-height:50px" dir="rtl">${esc(item.description_ar || '')}</textarea></div>
-        <div><label style="font-weight:600;display:block;margin-bottom:4px">Sizes (comma sep)</label><input id="swal-sizes" class="swal2-input" style="margin:0;width:100%" value="${Array.isArray(item.sizes) ? item.sizes.join(', ') : ''}"></div>
+        <div style="grid-column:1/-1"><label style="font-weight:600;display:block;margin-bottom:4px">Metadata JSON</label><textarea id="swal-metadata" class="swal2-textarea" style="margin:0;width:100%;min-height:120px">${esc(normalizeMetadataForForm(item))}</textarea></div>
         <div><label style="font-weight:600;display:block;margin-bottom:4px">Available</label><select id="swal-avail" class="swal2-input" style="margin:0;width:100%;padding:8px"><option value="1" ${item.available !== 0 ? 'selected' : ''}>Yes</option><option value="0" ${item.available === 0 ? 'selected' : ''}>No</option></select></div>
       </div>`,
-    width: 600,
+    width: 640,
     showCancelButton: true,
     confirmButtonText: isNew ? 'Create' : 'Save',
     showLoaderOnConfirm: true,
     preConfirm: async () => {
+      let metadata;
+      try {
+        metadata = parseMetadataInput(document.getElementById('swal-metadata').value);
+      } catch (error) {
+        Swal.showValidationMessage(error.message);
+        return false;
+      }
+
       const payload = {
-        name_en: document.getElementById('swal-name-en').value,
-        name_ar: document.getElementById('swal-name-ar').value,
+        title_en: document.getElementById('swal-title-en').value,
+        title_ar: document.getElementById('swal-title-ar').value,
         category_en: document.getElementById('swal-cat-en').value,
         category_ar: document.getElementById('swal-cat-ar').value,
         price: document.getElementById('swal-price').value,
         currency: document.getElementById('swal-currency').value,
         description_en: document.getElementById('swal-desc-en').value,
         description_ar: document.getElementById('swal-desc-ar').value,
-        sizes: document.getElementById('swal-sizes').value,
+        metadata,
         available: Number(document.getElementById('swal-avail').value),
       };
+
       try {
         if (item.id) {
-          await api(`/dashboard/menu/${state.selectedCafe.id}/${item.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+          await api(`/dashboard/catalog/${state.selectedCafe.id}/${item.id}`, { method: 'PUT', body: JSON.stringify(payload) });
         } else {
-          await api(`/dashboard/menu/${state.selectedCafe.id}`, { method: 'POST', body: JSON.stringify(payload) });
+          await api(`/dashboard/catalog/${state.selectedCafe.id}`, { method: 'POST', body: JSON.stringify(payload) });
         }
         return true;
-      } catch (err) { Swal.showValidationMessage(err.message); }
+      } catch (err) {
+        Swal.showValidationMessage(err.message);
+      }
     },
     allowOutsideClick: () => !Swal.isLoading(),
   }).then(r => {
     if (r.isConfirmed) {
-      toast(isNew ? 'Item created!' : 'Item updated!');
+      toast(isNew ? 'Catalog item created!' : 'Catalog item updated!');
       loadMenu();
     }
   });
 }
 
 async function deleteMenuItem(item) {
-  if (!item.id) { state.menu = state.menu.filter(i => i !== item); renderMenu(); return; }
-  const { isConfirmed } = await Swal.fire({ title: 'Delete item?', text: item.name_en, icon: 'warning', showCancelButton: true, confirmButtonText: 'Delete' });
+  if (!item.id) {
+    state.menu = state.menu.filter(i => i !== item);
+    renderMenu();
+    return;
+  }
+
+  const { isConfirmed } = await Swal.fire({
+    title: 'Delete catalog item?',
+    text: item.title_en || item.title_ar || 'Untitled',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Delete',
+  });
   if (!isConfirmed) return;
+
   try {
-    await api(`/dashboard/menu/${state.selectedCafe.id}/${item.id}`, { method: 'DELETE' });
-    toast('Item deleted');
+    await api(`/dashboard/catalog/${state.selectedCafe.id}/${item.id}`, { method: 'DELETE' });
+    toast('Catalog item deleted');
     await loadMenu();
   } catch (err) { toastErr(err.message); }
 }
@@ -176,15 +217,26 @@ document.getElementById('sync-menu-btn').addEventListener('click', async () => {
   const btn = document.getElementById('sync-menu-btn');
   btnLoad(btn, true);
   try {
-    const r = await api(`/dashboard/menu/${state.selectedCafe.id}/sync`, { method: 'POST', body: JSON.stringify({}) });
-    toast(`Synced ${r.synced || 0} items from sheet!`);
+    const r = await api(`/dashboard/catalog/${state.selectedCafe.id}/sync`, { method: 'POST', body: JSON.stringify({}) });
+    toast(`Synced ${r.synced || 0} catalog items from sheet!`);
     await loadMenu();
   } catch (err) { toastErr('Sync failed: ' + err.message); }
   finally { btnLoad(btn, false); }
 });
 
 document.getElementById('add-menu-btn').addEventListener('click', () => {
-  openMenuItemModal({ name_en: '', name_ar: '', category_en: '', category_ar: '', description_en: '', description_ar: '', price: '', currency: 'EGP', sizes: [], available: 1 });
+  openMenuItemModal({
+    title_en: '',
+    title_ar: '',
+    category_en: '',
+    category_ar: '',
+    description_en: '',
+    description_ar: '',
+    price: '',
+    currency: 'EGP',
+    metadata: {},
+    available: 1,
+  });
 });
 
 document.getElementById('menu-search').addEventListener('input', e => {
@@ -209,7 +261,7 @@ document.getElementById('menu-filter-availability').addEventListener('change', e
 async function loadSessions() {
   if (!state.selectedCafe) return;
   try {
-    state.sessions = await api(`/dashboard/cafes/${state.selectedCafe.id}/sessions`);
+    state.sessions = await api(`/dashboard/businesses/${state.selectedCafe.id}/sessions`);
     renderSessions();
   } catch (err) { toastErr('Failed to load sessions'); }
 }
@@ -260,10 +312,7 @@ function renderSessions() {
         <button class="icon-btn icon-btn-del" title="Delete session"><i class="fas fa-trash-can"></i></button>
       </div>`;
 
-    // Make the entire row clickable to view session
     row.addEventListener('click', () => viewSession(s));
-
-    // Prevent row click when clicking action buttons
     row.querySelector('.icon-btn-edit').addEventListener('click', e => {
       e.stopPropagation();
       viewSession(s);
@@ -279,7 +328,7 @@ function renderSessions() {
 }
 
 async function fetchSessionMessages(sessionId) {
-  return api(`/dashboard/cafes/${state.selectedCafe.id}/sessions/${sessionId}/messages`);
+  return api(`/dashboard/businesses/${state.selectedCafe.id}/sessions/${sessionId}/messages`);
 }
 
 function getChatMessagesSignature(messages) {
@@ -367,7 +416,7 @@ async function viewSession(session) {
           const msg = inp.value.trim();
           if (!msg) return;
           try {
-            await api(`/dashboard/cafes/${state.selectedCafe.id}/sessions/${session.id}/messages`, {
+            await api(`/dashboard/businesses/${state.selectedCafe.id}/sessions/${session.id}/messages`, {
               method: 'POST',
               body: JSON.stringify({ content: msg }),
             });
@@ -412,7 +461,7 @@ async function deleteSession(session) {
   });
   if (!isConfirmed) return;
   try {
-    await api(`/dashboard/cafes/${state.selectedCafe.id}/sessions/${session.id}`, { method: 'DELETE' });
+    await api(`/dashboard/businesses/${state.selectedCafe.id}/sessions/${session.id}`, { method: 'DELETE' });
     toast('Session deleted');
     await loadSessions();
   } catch (err) { toastErr(err.message); }
@@ -450,7 +499,7 @@ document.getElementById('clear-sessions-btn').addEventListener('click', async ()
   const btn = document.getElementById('clear-sessions-btn');
   const { isConfirmed } = await Swal.fire({
     title: 'Clear ALL sessions?',
-    text: 'This will permanently delete all chat sessions and messages for this cafe.',
+    text: 'This will permanently delete all chat sessions and messages for this business.',
     icon: 'warning',
     showCancelButton: true,
     confirmButtonText: 'Clear All',
@@ -458,7 +507,7 @@ document.getElementById('clear-sessions-btn').addEventListener('click', async ()
   if (!isConfirmed) return;
   btnLoad(btn, true);
   try {
-    await api(`/dashboard/cafes/${state.selectedCafe.id}/sessions`, { method: 'DELETE' });
+    await api(`/dashboard/businesses/${state.selectedCafe.id}/sessions`, { method: 'DELETE' });
     toast('All sessions cleared');
     await loadSessions();
   } catch (err) { toastErr(err.message); }

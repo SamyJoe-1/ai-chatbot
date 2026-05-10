@@ -5,15 +5,14 @@ const express = require('express');
 const db = require('../../db/db');
 const { tokenValidator } = require('../../middleware/tokenValidator');
 const { detectLanguage, normalizeArabicDigits } = require('../../engine/detector');
-const { detectIntent } = require('../../engine/intent');
-const { buildResponse } = require('../../engine/responder');
 const { validatePhone } = require('../../engine/phoneValidator');
-const { RESPONSES } = require('../../engine/patterns');
 const { isSessionExpired, resetSessionState } = require('../../engine/sessionLifecycle');
+const { COMMON_RESPONSES } = require('../../brains/shared/commonResponses');
+const { getBrain } = require('../../brains');
 
 const router = express.Router();
 
-const getSession = db.prepare('SELECT * FROM sessions WHERE session_key = ? AND cafe_id = ?');
+const getSession = db.prepare('SELECT * FROM sessions WHERE session_key = ? AND business_id = ?');
 const updateSession = db.prepare(`
   UPDATE sessions
   SET phase = ?, language = ?, guest_name = ?, guest_phone = ?, context = ?, last_active = datetime('now')
@@ -29,9 +28,9 @@ function parseContext(value) {
   }
 }
 
-function parseSuggestions(cafe, lang) {
+function parseSuggestions(business, lang) {
   try {
-    const parsed = JSON.parse(cafe[`suggestions_${lang}`] || '[]');
+    const parsed = JSON.parse(business[`suggestions_${lang}`] || '[]');
     return Array.isArray(parsed) ? parsed.slice(0, 4) : [];
   } catch {
     return [];
@@ -54,22 +53,14 @@ function looksLikeName(text) {
     if (!/[aeiou]/.test(latinJoined)) return false;
     if (/[bcdfghjklmnpqrstvwxyz]{5,}/i.test(latinJoined)) return false;
     if (/(.+)\1{2,}/i.test(latinJoined)) return false;
-    for (let size = 2; size <= 4; size += 1) {
-      if (latinJoined.length >= size * 3) {
-        const chunk = latinJoined.slice(0, size);
-        if (chunk.repeat(Math.floor(latinJoined.length / size)).startsWith(latinJoined.slice(0, size * 3))) {
-          const repeatedPrefix = chunk.repeat(Math.ceil(latinJoined.length / size)).slice(0, latinJoined.length);
-          if (repeatedPrefix === latinJoined) return false;
-        }
-      }
-    }
   }
 
   return true;
 }
 
 router.post('/', tokenValidator, (req, res) => {
-  const cafe = req.cafe;
+  const business = req.business;
+  const brain = getBrain(business.service_type);
 
   try {
     const { session_key: sessionKey, message } = req.body || {};
@@ -77,7 +68,7 @@ router.post('/', tokenValidator, (req, res) => {
       return res.status(400).json({ error: 'missing_fields' });
     }
 
-    const session = getSession.get(sessionKey, cafe.id);
+    const session = getSession.get(sessionKey, business.id);
     if (!session) {
       return res.status(404).json({ error: 'session_not_found' });
     }
@@ -86,18 +77,17 @@ router.post('/', tokenValidator, (req, res) => {
     const lang = detectLanguage(text);
 
     if (isSessionExpired(session.last_active)) {
-      const freshMessages = resetSessionState(db, session.id, lang, cafe);
+      const freshMessages = resetSessionState(db, session.id, lang, business);
       return res.json({
         reset: true,
         history: freshMessages,
-        response: { text: RESPONSES.collect_name[lang](), type: 'text', buttons: [], suggestions: [] },
+        response: { text: COMMON_RESPONSES.collect_name[lang](), type: 'text', buttons: [], suggestions: [] },
         language: lang,
         phase: 'collect_name',
       });
     }
 
     const context = parseContext(session.context);
-
     insertMessage.run(session.id, 'user', text, null);
 
     if (Number(session.automated) === 0) {
@@ -113,18 +103,18 @@ router.post('/', tokenValidator, (req, res) => {
 
     if (session.phase === 'collect_name') {
       if (!looksLikeName(text)) {
-        const reply = RESPONSES.invalid_name[lang]();
+        const reply = COMMON_RESPONSES.invalid_name[lang]();
         insertMessage.run(session.id, 'bot', reply, 'collect_name_retry');
-      return res.json({
-        automated: true,
-        response: { text: reply, type: 'text', buttons: [], suggestions: [] },
-        language: lang,
-        phase: session.phase,
+        return res.json({
+          automated: true,
+          response: { text: reply, type: 'text', buttons: [], suggestions: [] },
+          language: lang,
+          phase: session.phase,
         });
       }
 
       const name = text.slice(0, 60);
-      const reply = RESPONSES.collect_phone[lang](name);
+      const reply = COMMON_RESPONSES.collect_phone[lang]();
       updateSession.run('collect_phone', lang, name, session.guest_phone, JSON.stringify(context), session.id);
       insertMessage.run(session.id, 'bot', reply, 'collect_phone');
 
@@ -139,7 +129,7 @@ router.post('/', tokenValidator, (req, res) => {
     if (session.phase === 'collect_phone') {
       const phoneResult = validatePhone(text);
       if (!phoneResult.valid) {
-        const reply = RESPONSES.invalid_phone[lang]();
+        const reply = COMMON_RESPONSES.invalid_phone[lang]();
         insertMessage.run(session.id, 'bot', reply, 'invalid_phone');
         return res.json({
           automated: true,
@@ -149,20 +139,20 @@ router.post('/', tokenValidator, (req, res) => {
         });
       }
 
-      const reply = RESPONSES.active_ready[lang](session.guest_name || (lang === 'ar' ? 'صديقي' : 'there'));
+      const reply = COMMON_RESPONSES.active_ready[lang](session.guest_name || (lang === 'ar' ? 'صديقي' : 'there'));
       updateSession.run('active', lang, session.guest_name, phoneResult.normalized, JSON.stringify(context), session.id);
       insertMessage.run(session.id, 'bot', reply, 'active_ready');
 
       return res.json({
         automated: true,
-        response: { text: reply, type: 'text', buttons: [], suggestions: parseSuggestions(cafe, lang) },
+        response: { text: reply, type: 'text', buttons: [], suggestions: parseSuggestions(business, lang) },
         language: lang,
         phase: 'active',
       });
     }
 
-    const intentResult = detectIntent(text, lang, cafe.id, context);
-    const payload = buildResponse(intentResult, lang, cafe);
+    const intentResult = brain.detectIntent({ text, lang, business, context });
+    const payload = brain.buildResponse(intentResult, lang, business);
     const nextContext = { ...context, ...payload.context_update };
 
     updateSession.run(
@@ -192,7 +182,7 @@ router.post('/', tokenValidator, (req, res) => {
     const lang = detectLanguage(req.body?.message || '');
     return res.status(500).json({
       response: {
-        text: RESPONSES.error[lang](cafe),
+        text: COMMON_RESPONSES.error[lang](business),
         type: 'text',
         buttons: [],
         suggestions: [],

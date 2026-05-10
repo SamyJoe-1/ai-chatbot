@@ -1,7 +1,7 @@
 {
   "name": "chatbot-e-glotech",
   "version": "1.0.0",
-  "description": "Multi-tenant zero-AI cafe chatbot with embeddable widget and admin dashboard",
+  "description": "Multi-tenant multi-service chatbot platform with embeddable widget and admin dashboard",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
