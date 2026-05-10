@@ -57,10 +57,12 @@ function migrateLegacyCafeData() {
 
   if (tableExists('admins') && hasColumn('admins', 'cafe_id')) {
     rawDb.prepare('UPDATE admins SET business_id = COALESCE(business_id, cafe_id) WHERE business_id IS NULL').run();
+    try { rawDb.exec('ALTER TABLE admins DROP COLUMN cafe_id'); } catch (e) { console.warn('Could not drop cafe_id from admins:', e.message); }
   }
 
   if (tableExists('sessions') && hasColumn('sessions', 'cafe_id')) {
     rawDb.prepare('UPDATE sessions SET business_id = COALESCE(business_id, cafe_id) WHERE business_id IS NULL').run();
+    try { rawDb.exec('ALTER TABLE sessions DROP COLUMN cafe_id'); } catch (e) { console.warn('Could not drop cafe_id from sessions:', e.message); }
   }
 
   if (tableExists('cafes')) {
