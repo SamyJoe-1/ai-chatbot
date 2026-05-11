@@ -23,6 +23,7 @@
     typingEl: null,
     hasHistory: false,
     history: [],
+    currentSuggestions: [],
     pollTimer: null,
     isSending: false,
     isTypingReply: false,
@@ -392,7 +393,7 @@
 
     if (!samePrefix) {
       renderHistory(nextHistory, lang);
-      return;
+      return { changed: true, additions: nextHistory.length };
     }
 
     const additions = nextHistory.slice(state.history.length);
@@ -401,6 +402,7 @@
     });
     state.history = nextHistory.map((message) => ({ ...message }));
     state.hasHistory = Boolean(state.history.length);
+    return { changed: additions.length > 0, additions: additions.length };
   }
 
   function stopPolling() {
@@ -420,8 +422,10 @@
         if (state.isSending || state.isTypingReply) return;
         state.language = payload.language || state.language;
         state.automated = payload.automated !== false;
-        syncIncomingHistory(payload.history, state.language);
-        renderSuggestions(payload.suggestions);
+        const historySync = syncIncomingHistory(payload.history, state.language);
+        if (historySync.changed || !state.currentSuggestions.length) {
+          renderSuggestions(payload.suggestions);
+        }
         setInputPlaceholder();
         updateChatModeUi();
       } catch {}
@@ -463,9 +467,10 @@
   }
 
   function renderSuggestions(list) {
+    state.currentSuggestions = Array.isArray(list) ? list.slice(0, 4) : [];
     refs.suggestions.innerHTML = '';
     if (!state.automated) return;
-    (list || []).slice(0, 4).forEach((text) => {
+    state.currentSuggestions.forEach((text) => {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'cb-chip';

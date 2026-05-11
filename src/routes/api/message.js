@@ -37,6 +37,10 @@ function parseSuggestions(business, lang) {
   }
 }
 
+function normalizeSuggestions(value) {
+  return Array.isArray(value) ? value.slice(0, 4).filter(Boolean) : [];
+}
+
 function looksLikeName(text) {
   const clean = normalizeArabicDigits(String(text || '').trim()).replace(/\s+/g, ' ');
   if (!clean || /\d/.test(clean)) return false;
@@ -140,7 +144,11 @@ router.post('/', tokenValidator, (req, res) => {
       }
 
       const reply = COMMON_RESPONSES.active_ready[lang](session.guest_name || (lang === 'ar' ? 'صديقي' : 'there'));
-      updateSession.run('active', lang, session.guest_name, phoneResult.normalized, JSON.stringify(context), session.id);
+      const nextContext = {
+        ...context,
+        last_suggestions: parseSuggestions(business, lang),
+      };
+      updateSession.run('active', lang, session.guest_name, phoneResult.normalized, JSON.stringify(nextContext), session.id);
       insertMessage.run(session.id, 'bot', reply, 'active_ready');
 
       return res.json({
@@ -153,7 +161,11 @@ router.post('/', tokenValidator, (req, res) => {
 
     const intentResult = brain.detectIntent({ text, lang, business, context });
     const payload = brain.buildResponse(intentResult, lang, business);
-    const nextContext = { ...context, ...payload.context_update };
+    const nextContext = {
+      ...context,
+      ...payload.context_update,
+      last_suggestions: normalizeSuggestions(payload.suggestions),
+    };
 
     updateSession.run(
       session.phase,

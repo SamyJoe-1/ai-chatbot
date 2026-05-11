@@ -40,6 +40,15 @@ function parseSuggestions(value) {
   }
 }
 
+function parseContext(value) {
+  try {
+    const parsed = JSON.parse(value || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 router.post('/', tokenValidator, (req, res) => {
   try {
     const { session_key: sessionKey, force_new: forceNew } = req.body || {};
@@ -76,7 +85,12 @@ router.post('/', tokenValidator, (req, res) => {
 
     const language = session.language === 'ar' ? 'ar' : 'en';
     const history = getMessages.all(session.id);
-    const suggestions = session.phase === 'active' ? parseSuggestions(business[`suggestions_${language}`]) : [];
+    const context = parseContext(session.context);
+    const suggestions = session.phase === 'active'
+      ? (parseSuggestions(context.last_suggestions).length
+        ? parseSuggestions(context.last_suggestions)
+        : parseSuggestions(business[`suggestions_${language}`]))
+      : [];
 
     const payloadBusiness = {
       id: business.id,

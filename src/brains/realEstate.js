@@ -9,22 +9,32 @@ const PATTERNS = {
     greeting: [/^(hi|hello|hey)\b/i],
     thanks: [/\b(thanks|thank you|thx)\b/i],
     help: [/\bhelp\b/i, /\bwhat can you do\b/i],
-    catalog_general: [/\bproperties?\b/i, /\blistings?\b/i, /\bunits?\b/i, /\bshow me.*(properties|listings|units)\b/i],
+    catalog_general: [
+      /\bprojects?\b/i,
+      /\bproperties?\b/i,
+      /\blistings?\b/i,
+      /\bunits?\b/i,
+      /\bshow me.*(projects|properties|listings|units)\b/i,
+      /\bwhat projects\b/i,
+      /\ball projects\b/i,
+    ],
     item_price: [/\bprice\b/i, /\bcost\b/i, /\bhow much\b/i],
-    item_location: [/\blocation\b/i, /\bwhere is\b/i, /\barea\b/i],
-    item_specs: [/\bbed(room)?s?\b/i, /\bbath(room)?s?\b/i, /\barea\b/i, /\bsquare\b/i, /\bmeter\b/i],
+    item_location: [/\blocation\b/i, /\bwhere is\b/i, /\baddress\b/i, /\bdistrict\b/i],
+    item_specs: [/\bbed(room)?s?\b/i, /\bbath(room)?s?\b/i, /\barea\b/i, /\bsquare\b/i, /\bmeter\b/i, /\bsize\b/i],
+    item_finance: [/\bpayment\b/i, /\binstallment\b/i, /\bdown payment\b/i, /\bdeposit\b/i, /\broi\b/i, /\brental\b/i, /\brent\b/i, /\binvest(ment)?\b/i],
     appointment: [/\bvisit\b/i, /\bviewing\b/i, /\bappointment\b/i, /\bbook\b/i],
     contact: [/\bcontact\b/i, /\bphone\b/i, /\bwhatsapp\b/i, /\bcall\b/i, /\bemail\b/i],
     brand_info: [/\bwho are you\b/i, /\babout you\b/i, /\bagency\b/i, /\bdeveloper\b/i],
   },
   ar: {
     greeting: [/^(مرحبا|اهلا|أهلا|هلا)/],
-    thanks: [/(شكرا|شكراً|تسلم)/],
+    thanks: [/(شكرا|شكرًا|تسلم)/],
     help: [/(مساعدة|ساعدني|ماذا يمكنك)/],
-    catalog_general: [/(عقارات|عقار|وحدات|شقق|فلل|عروض|قائمة العقارات)/],
+    catalog_general: [/(مشروعات|مشروع|عقارات|عقار|وحدات|شقق|فلل|عروض|قائمة العقارات|اعرض.*مشروعات)/],
     item_price: [/(سعر|بكام|كم السعر|الثمن)/],
-    item_location: [/(الموقع|العنوان|فين|وين|المنطقة)/],
-    item_specs: [/(غرف|غرفة|حمام|حمامات|مساحة|متر|امتار)/],
+    item_location: [/(الموقع|العنوان|فين|وين|المنطقة|الحي)/],
+    item_specs: [/(غرف|غرفة|حمام|حمامات|مساحة|متر|امتار|الأمتار|القياس)/],
+    item_finance: [/(السداد|تقسيط|المقدم|دفعة|عائد|استثمار|إيجار|إيجاري|الإيجار)/],
     appointment: [/(معاينة|زيارة|موعد|احجز|أحجز)/],
     contact: [/(تواصل|اتصال|رقم|واتساب|هاتف|ايميل|إيميل)/],
     brand_info: [/(من انتم|مين انتم|عن الشركة|عن المكتب|عن المطور)/],
@@ -43,8 +53,22 @@ function getDisplayCategory(item, lang) {
   return lang === 'ar' ? item.category_ar || item.category_en : item.category_en || item.category_ar;
 }
 
+function joinUnique(values) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  );
+}
+
 function getLocation(item) {
-  return item.metadata?.location || item.metadata?.district || item.metadata?.compound || '';
+  return joinUnique([
+    item.metadata?.district,
+    item.metadata?.compound,
+    item.metadata?.location,
+  ]).join(', ');
 }
 
 function getSpecs(item) {
@@ -53,7 +77,48 @@ function getSpecs(item) {
     bathrooms: item.metadata?.bathrooms,
     area: item.metadata?.area_sqm || item.metadata?.area,
     listingType: item.metadata?.listing_type || item.metadata?.purpose,
+    assetType: item.metadata?.asset_type || item.metadata?.unit_type || '',
+    offerType: item.metadata?.offer_type || item.metadata?.sale_type || '',
+    projectName: item.metadata?.project_name || '',
+    finishing: item.metadata?.finishing || '',
+    delivery: item.metadata?.delivery_status || item.metadata?.delivery_date || item.metadata?.handover || '',
+    paymentPlan: item.metadata?.payment_plan || '',
+    downPayment: item.metadata?.down_payment || '',
+    installmentYears: item.metadata?.installment_years || '',
+    roi: item.metadata?.roi || item.metadata?.expected_roi || '',
+    rentFrequency: item.metadata?.rent_frequency || '',
   };
+}
+
+function getExtraVariants(item) {
+  return [
+    item.description_en,
+    item.description_ar,
+    item.metadata?.location,
+    item.metadata?.district,
+    item.metadata?.compound,
+    item.metadata?.listing_type,
+    item.metadata?.purpose,
+    item.metadata?.bedrooms,
+    item.metadata?.bathrooms,
+    item.metadata?.area_sqm,
+    item.metadata?.area,
+    item.metadata?.asset_type,
+    item.metadata?.unit_type,
+    item.metadata?.offer_type,
+    item.metadata?.sale_type,
+    item.metadata?.project_name,
+    item.metadata?.finishing,
+    item.metadata?.delivery_status,
+    item.metadata?.delivery_date,
+    item.metadata?.handover,
+    item.metadata?.payment_plan,
+    item.metadata?.down_payment,
+    item.metadata?.installment_years,
+    item.metadata?.roi,
+    item.metadata?.expected_roi,
+    item.metadata?.rent_frequency,
+  ];
 }
 
 function findProperties(text, lang, businessId, context = {}) {
@@ -65,19 +130,7 @@ function findProperties(text, lang, businessId, context = {}) {
     context,
     getItemVariants: (item) => [item.title_en, item.title_ar],
     getCategoryVariants: (item) => [item.category_en, item.category_ar],
-    getExtraVariants: (item) => [
-      item.description_en,
-      item.description_ar,
-      item.metadata?.location,
-      item.metadata?.district,
-      item.metadata?.compound,
-      item.metadata?.listing_type,
-      item.metadata?.purpose,
-      item.metadata?.bedrooms,
-      item.metadata?.bathrooms,
-      item.metadata?.area_sqm,
-      item.metadata?.area,
-    ],
+    getExtraVariants,
   });
 
   return {
@@ -111,19 +164,22 @@ function detectIntent({ text, lang, business, context = {} }) {
   const asksPrice = matchesAny(normalizedText, patterns.item_price);
   const asksLocation = matchesAny(normalizedText, patterns.item_location);
   const asksSpecs = matchesAny(normalizedText, patterns.item_specs);
+  const asksFinance = matchesAny(normalizedText, patterns.item_finance);
 
   if (matchedItems.length === 1 && foundItem) {
     if (asksPrice) return { intent: 'item_price', item: foundItem };
-    if (asksLocation) return { intent: 'item_location', item: foundItem };
     if (asksSpecs) return { intent: 'item_specs', item: foundItem };
+    if (asksFinance) return { intent: 'item_finance', item: foundItem };
+    if (asksLocation) return { intent: 'item_location', item: foundItem };
     return { intent: 'item_found', item: foundItem };
   }
 
   if (matchedItems.length > 1) {
     if (topScore >= secondScore + 3) {
       if (asksPrice) return { intent: 'item_price', item: foundItem };
-      if (asksLocation) return { intent: 'item_location', item: foundItem };
       if (asksSpecs) return { intent: 'item_specs', item: foundItem };
+      if (asksFinance) return { intent: 'item_finance', item: foundItem };
+      if (asksLocation) return { intent: 'item_location', item: foundItem };
       return { intent: 'item_found', item: foundItem };
     }
     return { intent: 'item_disambiguation', items: matchedItems };
@@ -138,9 +194,10 @@ function detectIntent({ text, lang, business, context = {} }) {
   }
 
   if (asksPrice && lastItem) return { intent: 'item_price', item: lastItem };
-  if (asksLocation && lastItem) return { intent: 'item_location', item: lastItem };
   if (asksSpecs && lastItem) return { intent: 'item_specs', item: lastItem };
-  if (asksPrice || asksLocation || asksSpecs) return { intent: 'need_item_context' };
+  if (asksFinance && lastItem) return { intent: 'item_finance', item: lastItem };
+  if (asksLocation && lastItem) return { intent: 'item_location', item: lastItem };
+  if (asksPrice || asksLocation || asksSpecs || asksFinance) return { intent: 'need_item_context' };
 
   if (matchesAny(normalizedText, patterns.catalog_general)) return { intent: 'catalog_general' };
   if (matchesAny(normalizedText, patterns.contact)) return { intent: 'contact' };
@@ -156,14 +213,97 @@ function buildPropertySummary(item, lang) {
   const specs = getSpecs(item);
   const lines = [getDisplayTitle(item, locale)];
   const description = locale === 'ar' ? item.description_ar || item.description_en : item.description_en || item.description_ar;
+
   if (description) lines.push(description);
   if (item.price !== null && item.price !== undefined) lines.push(locale === 'ar' ? `السعر: ${item.price} ${item.currency}` : `Price: ${item.price} ${item.currency}`);
   if (getLocation(item)) lines.push(locale === 'ar' ? `الموقع: ${getLocation(item)}` : `Location: ${getLocation(item)}`);
   if (specs.listingType) lines.push(locale === 'ar' ? `النوع: ${specs.listingType}` : `Type: ${specs.listingType}`);
+  if (specs.assetType) lines.push(locale === 'ar' ? `نوع الوحدة: ${specs.assetType}` : `Asset: ${specs.assetType}`);
+  if (specs.offerType) lines.push(locale === 'ar' ? `طريقة الطرح: ${specs.offerType}` : `Offer: ${specs.offerType}`);
+  if (specs.projectName) lines.push(locale === 'ar' ? `المشروع: ${specs.projectName}` : `Project: ${specs.projectName}`);
   if (specs.bedrooms !== undefined && specs.bedrooms !== '') lines.push(locale === 'ar' ? `غرف النوم: ${specs.bedrooms}` : `Bedrooms: ${specs.bedrooms}`);
   if (specs.bathrooms !== undefined && specs.bathrooms !== '') lines.push(locale === 'ar' ? `الحمامات: ${specs.bathrooms}` : `Bathrooms: ${specs.bathrooms}`);
   if (specs.area !== undefined && specs.area !== '') lines.push(locale === 'ar' ? `المساحة: ${specs.area} م²` : `Area: ${specs.area} sqm`);
+  if (specs.finishing) lines.push(locale === 'ar' ? `التشطيب: ${specs.finishing}` : `Finishing: ${specs.finishing}`);
+  if (specs.delivery) lines.push(locale === 'ar' ? `التسليم: ${specs.delivery}` : `Delivery: ${specs.delivery}`);
+
   return lines.join('\n');
+}
+
+function buildFinanceSummary(item, lang) {
+  const locale = lang === 'ar' ? 'ar' : 'en';
+  const specs = getSpecs(item);
+  const parts = [];
+
+  if (item.price !== null && item.price !== undefined) parts.push(locale === 'ar' ? `السعر: ${item.price} ${item.currency}` : `Price: ${item.price} ${item.currency}`);
+  if (specs.downPayment) parts.push(locale === 'ar' ? `المقدم: ${specs.downPayment}` : `Down payment: ${specs.downPayment}`);
+  if (specs.installmentYears) parts.push(locale === 'ar' ? `فترة التقسيط: ${specs.installmentYears}` : `Installments: ${specs.installmentYears}`);
+  if (specs.paymentPlan) parts.push(locale === 'ar' ? `نظام السداد: ${specs.paymentPlan}` : `Payment plan: ${specs.paymentPlan}`);
+  if (specs.roi) parts.push(locale === 'ar' ? `العائد المتوقع: ${specs.roi}` : `Expected ROI: ${specs.roi}`);
+  if (specs.rentFrequency) parts.push(locale === 'ar' ? `نظام الإيجار: ${specs.rentFrequency}` : `Rental term: ${specs.rentFrequency}`);
+
+  if (!parts.length) {
+    return locale === 'ar'
+      ? 'لا توجد تفاصيل مالية مسجلة لهذا العنصر حاليًا.'
+      : 'There are no payment or investment details listed for this item yet.';
+  }
+
+  return `${getDisplayTitle(item, locale)}\n${parts.join('\n')}`;
+}
+
+function hasPrice(item) {
+  return item.price !== null && item.price !== undefined;
+}
+
+function hasLocation(item) {
+  return Boolean(getLocation(item));
+}
+
+function hasSpecs(item) {
+  const specs = getSpecs(item);
+  return Boolean(
+    specs.assetType
+    || specs.offerType
+    || specs.bedrooms !== undefined && specs.bedrooms !== ''
+    || specs.bathrooms !== undefined && specs.bathrooms !== ''
+    || specs.area !== undefined && specs.area !== ''
+    || specs.finishing
+    || specs.delivery
+  );
+}
+
+function hasFinance(item) {
+  const specs = getSpecs(item);
+  return Boolean(
+    hasPrice(item)
+    || specs.downPayment
+    || specs.installmentYears
+    || specs.paymentPlan
+    || specs.roi
+    || specs.rentFrequency
+  );
+}
+
+function buildItemSuggestions(item, locale) {
+  const suggestions = [];
+
+  if (hasPrice(item)) {
+    suggestions.push(locale === 'ar' ? 'السعر' : 'Price');
+  }
+
+  if (hasLocation(item)) {
+    suggestions.push(locale === 'ar' ? 'الموقع' : 'Location');
+  }
+
+  if (hasSpecs(item)) {
+    suggestions.push(locale === 'ar' ? 'المواصفات' : 'Specs');
+  }
+
+  if (hasFinance(item)) {
+    suggestions.push(locale === 'ar' ? 'السداد' : 'Payment');
+  }
+
+  return suggestions.slice(0, 4);
 }
 
 function buildResponse(intentResult, lang, business) {
@@ -189,33 +329,39 @@ function buildResponse(intentResult, lang, business) {
   switch (intentResult.intent) {
     case 'greeting':
       payload.text = locale === 'ar'
-        ? `أهلاً بك في ${business.name_ar || business.name}. كيف أساعدك في العقارات اليوم؟`
-        : `Hello from ${business.name}. How can I help you with properties today?`;
+        ? `أهلًا بك في ${business.name_ar || business.name}. كيف أساعدك في المشروعات أو الوحدات اليوم؟`
+        : `Hello from ${business.name}. How can I help you with projects or units today?`;
       payload.suggestions = suggestions.slice(0, 4);
       break;
     case 'thanks':
-      payload.text = locale === 'ar' ? 'على الرحب والسعة. إذا احتجت عقاراً آخر فقط اسأل.' : 'You are welcome. If you need another property, just ask.';
+      payload.text = locale === 'ar' ? 'على الرحب والسعة. إذا احتجت أي مشروع أو وحدة أخرى فقط اسأل.' : 'You are welcome. If you need another project or unit, just ask.';
       payload.suggestions = suggestions.slice(0, 3);
       break;
     case 'help':
       payload.text = locale === 'ar'
-        ? 'أقدر أساعدك في العقارات المتاحة، الأسعار، الموقع، المواصفات الأساسية، ومعلومات التواصل.'
-        : 'I can help with available properties, pricing, location, key specs, and contact details.';
+        ? 'أقدر أساعدك في المشروعات والوحدات والأسعار والموقع والمواصفات وتفاصيل السداد وبيانات التواصل.'
+        : 'I can help with projects, units, pricing, location, specs, payment details, and contact information.';
       payload.suggestions = suggestions.slice(0, 4);
       break;
-    case 'catalog_general':
-      payload.text = locale === 'ar' ? 'هذه بعض العقارات المتاحة.' : 'Here are the available properties.';
+    case 'catalog_general': {
+      const items = getBusinessItems(business.id);
+      payload.text = [
+        locale === 'ar' ? 'هذه بعض المشروعات المتاحة:' : 'Here are the available projects:',
+        ...items.slice(0, 8).map((item) => `- ${getDisplayTitle(item, locale)}`),
+      ].join('\n');
       if (business.catalog_link) {
         payload.buttons.push({
-          label: locale === 'ar' ? 'فتح العروض' : 'Open listings',
+          label: locale === 'ar' ? 'فتح المشروعات' : 'Open projects',
           url: business.catalog_link,
           target: '_blank',
         });
       }
+      payload.suggestions = items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       break;
+    }
     case 'item_found':
       payload.text = buildPropertySummary(intentResult.item, locale);
-      payload.suggestions = locale === 'ar' ? ['السعر', 'الموقع', 'المواصفات'] : ['Price', 'Location', 'Specs'];
+      payload.suggestions = buildItemSuggestions(intentResult.item, locale);
       payload.context_update.last_item = intentResult.item.id;
       payload.context_update.last_category = getDisplayCategory(intentResult.item, locale) || null;
       break;
@@ -225,7 +371,7 @@ function buildResponse(intentResult, lang, business) {
           ? `${getDisplayTitle(intentResult.item, locale)} سعره ${intentResult.item.price} ${intentResult.item.currency}.`
           : `${getDisplayTitle(intentResult.item, locale)} is listed for ${intentResult.item.price} ${intentResult.item.currency}.`)
         : (locale === 'ar'
-          ? `سعر ${getDisplayTitle(intentResult.item, locale)} غير مضاف حالياً.`
+          ? `سعر ${getDisplayTitle(intentResult.item, locale)} غير مضاف حاليًا.`
           : `The price for ${getDisplayTitle(intentResult.item, locale)} is not listed yet.`);
       payload.context_update.last_item = intentResult.item.id;
       break;
@@ -235,25 +381,33 @@ function buildResponse(intentResult, lang, business) {
           ? `${getDisplayTitle(intentResult.item, locale)} موجود في ${getLocation(intentResult.item)}.`
           : `${getDisplayTitle(intentResult.item, locale)} is located in ${getLocation(intentResult.item)}.`)
         : (locale === 'ar'
-          ? `موقع ${getDisplayTitle(intentResult.item, locale)} غير مضاف حالياً.`
+          ? `موقع ${getDisplayTitle(intentResult.item, locale)} غير مضاف حاليًا.`
           : `The location for ${getDisplayTitle(intentResult.item, locale)} is not listed yet.`);
       payload.context_update.last_item = intentResult.item.id;
       break;
     case 'item_specs': {
       const specs = getSpecs(intentResult.item);
       const parts = [];
+      if (specs.assetType) parts.push(locale === 'ar' ? `نوع الوحدة: ${specs.assetType}` : `Asset: ${specs.assetType}`);
+      if (specs.offerType) parts.push(locale === 'ar' ? `طريقة الطرح: ${specs.offerType}` : `Offer: ${specs.offerType}`);
       if (specs.bedrooms !== undefined && specs.bedrooms !== '') parts.push(locale === 'ar' ? `غرف النوم: ${specs.bedrooms}` : `Bedrooms: ${specs.bedrooms}`);
       if (specs.bathrooms !== undefined && specs.bathrooms !== '') parts.push(locale === 'ar' ? `الحمامات: ${specs.bathrooms}` : `Bathrooms: ${specs.bathrooms}`);
       if (specs.area !== undefined && specs.area !== '') parts.push(locale === 'ar' ? `المساحة: ${specs.area} م²` : `Area: ${specs.area} sqm`);
+      if (specs.finishing) parts.push(locale === 'ar' ? `التشطيب: ${specs.finishing}` : `Finishing: ${specs.finishing}`);
+      if (specs.delivery) parts.push(locale === 'ar' ? `التسليم: ${specs.delivery}` : `Delivery: ${specs.delivery}`);
       payload.text = parts.length
         ? `${getDisplayTitle(intentResult.item, locale)}\n${parts.join('\n')}`
-        : (locale === 'ar' ? 'لا توجد مواصفات إضافية مسجلة لهذا العقار حالياً.' : 'There are no extra specs listed for this property yet.');
+        : (locale === 'ar' ? 'لا توجد مواصفات إضافية مسجلة لهذا العنصر حاليًا.' : 'There are no extra specs listed for this item yet.');
       payload.context_update.last_item = intentResult.item.id;
       break;
     }
+    case 'item_finance':
+      payload.text = buildFinanceSummary(intentResult.item, locale);
+      payload.context_update.last_item = intentResult.item.id;
+      break;
     case 'category_items':
       payload.text = [
-        locale === 'ar' ? `هذه العقارات ضمن ${intentResult.category}:` : `Here are the listings in ${intentResult.category}:`,
+        locale === 'ar' ? `هذه العناصر ضمن ${intentResult.category}:` : `Here are the listings in ${intentResult.category}:`,
         ...intentResult.items.slice(0, 8).map((item) => {
           const price = item.price !== null && item.price !== undefined ? ` - ${item.price} ${item.currency}` : '';
           return `- ${getDisplayTitle(item, locale)}${price}`;
@@ -264,21 +418,21 @@ function buildResponse(intentResult, lang, business) {
       break;
     case 'item_disambiguation':
       payload.text = [
-        locale === 'ar' ? 'وجدت أكثر من عقار مطابق. أي واحد تقصد؟' : 'I found more than one matching listing. Which one do you mean?',
+        locale === 'ar' ? 'وجدت أكثر من عنصر مطابق. أي واحد تقصد؟' : 'I found more than one matching listing. Which one do you mean?',
         ...intentResult.items.slice(0, 6).map((item) => `- ${getDisplayTitle(item, locale)}`),
       ].join('\n');
       payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       break;
     case 'need_item_context':
-      payload.text = locale === 'ar' ? 'تقصد أي عقار؟' : 'Which property do you mean?';
+      payload.text = locale === 'ar' ? 'تقصد أي مشروع أو وحدة؟' : 'Which project or unit do you mean?';
       break;
     case 'item_not_found':
       payload.text = locale === 'ar'
-        ? 'لم أجد هذا العقار ضمن العروض الحالية.'
-        : 'I could not find that property in the current listings.';
+        ? 'لم أجد هذا العنصر ضمن البيانات الحالية.'
+        : 'I could not find that item in the current catalog.';
       if (business.catalog_link) {
         payload.buttons.push({
-          label: locale === 'ar' ? 'عرض كل العقارات' : 'View all listings',
+          label: locale === 'ar' ? 'عرض كل المشروعات' : 'View all projects',
           url: business.catalog_link,
           target: '_blank',
         });
@@ -287,12 +441,12 @@ function buildResponse(intentResult, lang, business) {
     case 'appointment':
       payload.text = locale === 'ar'
         ? `لحجز معاينة تواصل معنا مباشرة على ${business.phone || 'رقم الهاتف'}.`
-        : `For a property viewing, please contact us directly at ${business.phone || 'our phone number'}.`;
+        : `For a viewing, please contact us directly at ${business.phone || 'our phone number'}.`;
       break;
     case 'brand_info':
       payload.text = locale === 'ar'
-        ? (business.about_ar || `نحن ${business.name_ar || business.name}. تواصل معنا لمعرفة المزيد عن العروض.`)
-        : (business.about_en || `We are ${business.name}. Contact us to learn more about our listings.`);
+        ? (business.about_ar || `نحن ${business.name_ar || business.name}. تواصل معنا لمعرفة المزيد عن المشروعات والوحدات.`)
+        : (business.about_en || `We are ${business.name}. Contact us to learn more about our projects and units.`);
       break;
     case 'contact':
       payload.text = [
@@ -304,8 +458,8 @@ function buildResponse(intentResult, lang, business) {
     case 'unknown':
     default:
       payload.text = locale === 'ar'
-        ? `لا أملك إجابة دقيقة على هذا السؤال حالياً. تواصل معنا على ${business.phone || 'رقم التواصل'}، وما زلت أقدر أساعدك في الأسعار أو المواقع أو المواصفات.`
-        : `I do not have an exact answer for that yet. Please contact us at ${business.phone || 'our contact number'}, and I can still help with pricing, location, or specs.`;
+        ? `لا أملك إجابة دقيقة على هذا السؤال حاليًا. تواصل معنا على ${business.phone || 'رقم التواصل'}، وما زلت أقدر أساعدك في الأسعار أو المواقع أو المواصفات أو السداد.`
+        : `I do not have an exact answer for that yet. Please contact us at ${business.phone || 'our contact number'}, and I can still help with pricing, location, specs, or payment details.`;
       payload.suggestions = suggestions.slice(0, 3);
       break;
   }
@@ -333,6 +487,21 @@ function mapSheetRecords(records) {
         bathrooms: record.bathrooms || '',
         area_sqm: record.area_sqm || record.area || '',
         listing_type: record.listing_type || record.purpose || '',
+        asset_type: record.asset_type || record.unit_type || '',
+        unit_type: record.unit_type || '',
+        offer_type: record.offer_type || record.sale_type || '',
+        sale_type: record.sale_type || '',
+        project_name: record.project_name || '',
+        finishing: record.finishing || '',
+        delivery_status: record.delivery_status || '',
+        delivery_date: record.delivery_date || record.handover || '',
+        handover: record.handover || '',
+        payment_plan: record.payment_plan || '',
+        down_payment: record.down_payment || '',
+        installment_years: record.installment_years || '',
+        roi: record.roi || record.expected_roi || '',
+        expected_roi: record.expected_roi || '',
+        rent_frequency: record.rent_frequency || '',
       }),
       available: ['0', 'false', 'no'].includes(String(record.available || '').toLowerCase()) ? 0 : 1,
     }));
@@ -346,8 +515,8 @@ module.exports = {
   buildResponse,
   getWelcomeMessage(business, lang) {
     return lang === 'ar'
-      ? (business.welcome_ar || `أهلاً بك في ${business.name_ar || business.name}! كيف أساعدك في العقارات؟`)
-      : (business.welcome_en || `Welcome to ${business.name}! How can I help you with properties?`);
+      ? (business.welcome_ar || `أهلًا بك في ${business.name_ar || business.name}! كيف أساعدك في المشروعات أو الوحدات؟`)
+      : (business.welcome_en || `Welcome to ${business.name}! How can I help you with projects or units?`);
   },
   mapSheetRecords,
 };

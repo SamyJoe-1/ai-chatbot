@@ -1,0 +1,35 @@
+{
+  "service_type": "real_estate",
+  "name": "Pyramids Developments",
+  "name_ar": "بيراميدز للتطوير العقاري",
+  "phone": "15102",
+  "email": "info@pyramidsdevelopments.com",
+  "primary_color": "#0f2343",
+  "secondary_color": "#c6a04d",
+  "logo_url": "",
+  "about_en": "Pyramids Developments says its investment portfolio includes 10 projects across residential, commercial, administrative, hotel, and tourism uses in Egypt, including 9 projects in the New Administrative Capital and 1 project in El Galala.",
+  "about_ar": "تذكر شركة بيراميدز للتطوير العقاري أن محفظتها الاستثمارية تضم 10 مشروعات متنوعة بين السكني والتجاري والإداري والفندقي والسياحي داخل مصر، منها 9 مشروعات في العاصمة الإدارية الجديدة ومشروع واحد في الجلالة.",
+  "address_en": "",
+  "address_ar": "",
+  "working_hours_en": "Saturday to Thursday, 10:00 AM to 6:00 PM",
+  "working_hours_ar": "من السبت إلى الخميس، من 10:00 صباحًا إلى 6:00 مساءً",
+  "catalog_link": "https://site.pyramidsdevelopments.com/projects/",
+  "sheet_id": "PASTE_GOOGLE_SHEET_ID_HERE",
+  "sheet_name": "Properties",
+  "drive_folder_id": "PASTE_GOOGLE_DRIVE_FOLDER_ID_HERE",
+  "welcome_en": "Welcome to Pyramids Developments. I can help you with our projects, locations, unit types, and contact details.",
+  "welcome_ar": "أهلًا بك في بيراميدز للتطوير العقاري. أقدر أساعدك في المشروعات والمواقع وأنواع الوحدات وبيانات التواصل.",
+  "suggestions_en": [
+    "Show me all projects",
+    "What projects are in the New Capital?",
+    "Tell me about Pyramids City",
+    "How can I contact you?"
+  ],
+  "suggestions_ar": [
+    "اعرض كل المشروعات",
+    "ما هي مشروعات العاصمة الإدارية؟",
+    "احكي لي عن بيراميدز سيتي",
+    "كيف أتواصل معكم؟"
+  ],
+  "active": 1
+}
