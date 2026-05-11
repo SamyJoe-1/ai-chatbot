@@ -6,6 +6,7 @@ const db = require('../../db/db');
 const { tokenValidator } = require('../../middleware/tokenValidator');
 const { detectLanguage, normalizeArabicDigits } = require('../../engine/detector');
 const { validatePhone } = require('../../engine/phoneValidator');
+const { recoverUserQuery } = require('../../engine/queryRecovery');
 const { isSessionExpired, resetSessionState } = require('../../engine/sessionLifecycle');
 const { COMMON_RESPONSES } = require('../../brains/shared/commonResponses');
 const { getBrain } = require('../../brains');
@@ -39,6 +40,10 @@ function parseSuggestions(business, lang) {
 
 function normalizeSuggestions(value) {
   return Array.isArray(value) ? value.slice(0, 4).filter(Boolean) : [];
+}
+
+function shouldRetryWithRecovery(intent) {
+  return intent === 'unknown' || intent === 'item_not_found';
 }
 
 function looksLikeName(text) {
@@ -159,13 +164,29 @@ router.post('/', tokenValidator, (req, res) => {
       });
     }
 
-    const intentResult = brain.detectIntent({ text, lang, business, context });
+    let resolvedText = text;
+    let intentResult = brain.detectIntent({ text: resolvedText, lang, business, context });
+
+    if (shouldRetryWithRecovery(intentResult.intent)) {
+      const recoveredText = recoverUserQuery(text, lang, business.id);
+      if (recoveredText && recoveredText.trim() && recoveredText.trim() !== text) {
+        const recoveredIntent = brain.detectIntent({ text: recoveredText, lang, business, context });
+        if (!shouldRetryWithRecovery(recoveredIntent.intent)) {
+          resolvedText = recoveredText;
+          intentResult = recoveredIntent;
+        }
+      }
+    }
+
     const payload = brain.buildResponse(intentResult, lang, business);
     const nextContext = {
       ...context,
       ...payload.context_update,
       last_suggestions: normalizeSuggestions(payload.suggestions),
     };
+    if (resolvedText !== text) {
+      nextContext.last_recovered_query = resolvedText;
+    }
 
     updateSession.run(
       session.phase,
