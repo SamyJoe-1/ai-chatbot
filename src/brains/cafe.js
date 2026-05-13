@@ -264,7 +264,7 @@ function buildResponse(intentResult, lang, business) {
       break;
     case 'item_disambiguation':
       payload.text = [
-        locale === 'ar' ? 'وجدت أكثر من صنف مطابق. أي واحد تقصد؟' : 'I found more than one matching item. Which one do you mean?',
+        locale === 'ar' ? 'وجدت أكثر من صنف مطابق. أي واحد تقصد؟' : 'I found more than one matching item. Which would you like?',
         ...intentResult.items.slice(0, 6).map((item) => {
           const price = item.price !== null && item.price !== undefined ? ` - ${item.price} ${item.currency}` : '';
           return `- ${getDisplayTitle(item, locale)}${price}`;

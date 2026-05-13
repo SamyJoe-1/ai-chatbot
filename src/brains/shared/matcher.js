@@ -2,10 +2,10 @@
 
 const { normalize, tokenize } = require('../../engine/detector');
 
-function overlapScore(messageTokens, itemTokens) {
-  if (!itemTokens.length) return 0;
-  const matches = itemTokens.filter((token) => messageTokens.includes(token));
-  return matches.length / itemTokens.length;
+function overlapScore(messageTokens, targetTokens) {
+  if (!targetTokens.length) return 0;
+  const matches = targetTokens.filter((token) => messageTokens.includes(token));
+  return matches.length / targetTokens.length;
 }
 
 function uniqueById(items) {
@@ -42,8 +42,14 @@ function findScoredItems({ text, lang, items, context = {}, getItemVariants, get
       }
 
       const itemTokens = tokenize(variant).filter((token) => token.length > 1);
-      if (messageTokens.length > 1 && messageTokens.every((token) => itemTokens.includes(token))) {
-        score += 12;
+      
+      const matches = messageTokens.filter((token) => itemTokens.includes(token));
+      if (matches.length > 0) {
+        if (matches.length === messageTokens.length) {
+          score += 12; // All user words match item words
+        } else {
+          score += matches.length * 3; // Partial match
+        }
       }
 
       const ratio = overlapScore(messageTokens, itemTokens);
@@ -70,9 +76,12 @@ function findScoredItems({ text, lang, items, context = {}, getItemVariants, get
 
     for (const extra of extras) {
       const extraTokens = tokenize(extra).filter((token) => token.length > 2);
-      const ratio = overlapScore(messageTokens, extraTokens);
-      if (ratio >= 0.4) {
-        score += ratio * 4;
+      const matches = messageTokens.filter((token) => extraTokens.includes(token));
+      if (matches.length > 0) {
+        const ratio = matches.length / Math.max(extraTokens.length, 1);
+        if (ratio >= 0.4) {
+          score += ratio * 4;
+        }
       }
     }
 

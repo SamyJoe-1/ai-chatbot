@@ -152,7 +152,7 @@ const RESPONSES = {
   },
   item_disambiguation: {
     en: (items) => {
-      const lines = ['I found more than one matching item. Which one do you mean?'];
+      const lines = ['I found more than one matching item. Which would you like?'];
       items.slice(0, 6).forEach((item) => {
         const price = item.price !== null && item.price !== undefined ? ` - ${item.price} ${item.currency}` : '';
         lines.push(`- ${item.name_en}${price}`);
