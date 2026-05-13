@@ -30,18 +30,18 @@ const PATTERNS = {
   },
   ar: {
     greeting_hello: [/^(مرحبا|اهلا|أهلا|هلا|السلام عليكم)/, /^(صباح الخير|مساء الخير)/],
-    greeting_how_are_you: [/^(ايه اخبارك|عامل ايه|عامل اية|انت كويس|كيفك|شلونك|اخبارك)/],
-    greeting_yasta: [/^(يسطا|يا اسطى|ياسطى|ي زميلي|يا زميلي)/],
-    thanks: [/(شكرا|شكرًا|تسلم)/],
-    help: [/(مساعدة|ساعدني|ماذا يمكنك)/],
-    catalog_general: [/(مشروعات|مشروع|عقارات|عقار|وحدات|شقق|فلل|عروض|قائمة العقارات|اعرض.*مشروعات)/],
-    item_price: [/(سعر|بكام|كم السعر|الثمن)/],
-    item_location: [/(الموقع|العنوان|فين|وين|المنطقة|الحي)/],
-    item_specs: [/(غرف|غرفة|حمام|حمامات|مساحة|متر|امتار|الأمتار|القياس)/],
-    item_finance: [/(السداد|تقسيط|المقدم|دفعة|عائد|استثمار|إيجار|إيجاري|الإيجار)/],
-    appointment: [/(معاينة|زيارة|موعد|احجز|أحجز)/],
-    contact: [/(تواصل|اتصال|رقم|واتساب|هاتف|ايميل|إيميل)/],
-    brand_info: [/(من انتم|مين انتم|عن الشركة|عن المكتب|عن المطور)/],
+    greeting_how_are_you: [/^(ايه اخبارك|عامل ايه|عامل اية|انت كويس|كيفك|شلونك|اخبارك|ازيك|إزيك)/],
+    greeting_yasta: [/^(يسطا|يا اسطى|ياسطى|ي زميلي|يا زميلي|يصاحبي|يا صاحبي)/],
+    thanks: [/(شكرا|شكرًا|تسلم|يعطيك العافية)/],
+    help: [/(مساعدة|ساعدني|ماذا يمكنك|بتعمل ايه|تساعدني)/],
+    catalog_general: [/(مشروعات|مشروع|عقارات|عقار|وحدات|شقق|فلل|عروض|قائمة|عندكم ايه|عندكو ايه|مشاريع)/],
+    item_price: [/(سعر|اسعار|أسعار|بكام|كم السعر|الثمن)/],
+    item_location: [/(الموقع|العنوان|فين|وين|المنطقة|الحي|مكان|فروعكم|فرعكم)/],
+    item_specs: [/(غرف|غرفة|حمام|حمامات|مساحة|متر|امتار|الأمتار|القياس|تشطيب)/],
+    item_finance: [/(السداد|تقسيط|المقدم|دفعة|عائد|استثمار|إيجار|إيجاري|الإيجار|قسط)/],
+    appointment: [/(معاينة|زيارة|موعد|احجز|أحجز|شوف)/],
+    contact: [/(تواصل|اتصال|رقم|واتساب|هاتف|موبايل|ايميل|إيميل|تليفون|تلفون|كلمكم|اكلمكم)/],
+    brand_info: [/(من انتم|مين انتم|عن الشركة|عن المكتب|عن المطور|مين انت)/],
   },
 };
 
@@ -166,6 +166,11 @@ function detectIntent({ text, lang, business, context = {} }) {
   if (matchesAny(normalizedText, patterns.thanks)) return { intent: 'thanks' };
   if (matchesAny(normalizedText, patterns.help)) return { intent: 'help' };
   if (matchesAny(normalizedText, patterns.appointment)) return { intent: 'appointment', item: foundItem || lastItem || null };
+  if (matchesAny(normalizedText, patterns.catalog_general)) return { intent: 'catalog_general' };
+  if (matchesAny(normalizedText, patterns.contact)) return { intent: 'contact' };
+  if (matchesAny(normalizedText, patterns.brand_info)) return { intent: 'brand_info' };
+
+
 
   const asksPrice = matchesAny(normalizedText, patterns.item_price);
   const asksLocation = matchesAny(normalizedText, patterns.item_location);
@@ -205,9 +210,7 @@ function detectIntent({ text, lang, business, context = {} }) {
   if (asksLocation && lastItem) return { intent: 'item_location', item: lastItem };
   if (asksPrice || asksLocation || asksSpecs || asksFinance) return { intent: 'need_item_context' };
 
-  if (matchesAny(normalizedText, patterns.catalog_general)) return { intent: 'catalog_general' };
-  if (matchesAny(normalizedText, patterns.contact)) return { intent: 'contact' };
-  if (matchesAny(normalizedText, patterns.brand_info)) return { intent: 'brand_info' };
+
 
   const tokens = tokenize(normalizedText);
   if (tokens.length && tokens.length <= 3) return { intent: 'item_not_found' };

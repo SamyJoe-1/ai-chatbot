@@ -10,6 +10,7 @@ const { recoverUserQuery } = require('../../engine/queryRecovery');
 const { isSessionExpired, resetSessionState } = require('../../engine/sessionLifecycle');
 const { COMMON_RESPONSES } = require('../../brains/shared/commonResponses');
 const { getBrain } = require('../../brains');
+const { recoverFranco } = require('../../engine/franco');
 
 const router = express.Router();
 
@@ -168,12 +169,28 @@ router.post('/', tokenValidator, (req, res) => {
     let intentResult = brain.detectIntent({ text: resolvedText, lang, business, context });
 
     if (shouldRetryWithRecovery(intentResult.intent)) {
-      const recoveredText = recoverUserQuery(text, lang, business.id);
-      if (recoveredText && recoveredText.trim() && recoveredText.trim() !== text) {
-        const recoveredIntent = brain.detectIntent({ text: recoveredText, lang, business, context });
-        if (!shouldRetryWithRecovery(recoveredIntent.intent)) {
-          resolvedText = recoveredText;
-          intentResult = recoveredIntent;
+      const { getBusinessItems } = require('../../brains/shared/catalogStore');
+      const items = getBusinessItems(business.id);
+
+      // Try algorithmic Franco-Arabic phonetic recovery first
+      const translatedText = recoverFranco(text, items);
+      if (translatedText && translatedText !== text) {
+        const francoIntent = brain.detectIntent({ text: translatedText, lang: 'en', business, context });
+        if (!shouldRetryWithRecovery(francoIntent.intent)) {
+          resolvedText = translatedText;
+          intentResult = francoIntent;
+        }
+      }
+
+      // If franco mapping didn't solve it, try the standard query recovery
+      if (shouldRetryWithRecovery(intentResult.intent)) {
+        const recoveredText = recoverUserQuery(text, lang, business.id);
+        if (recoveredText && recoveredText.trim() && recoveredText.trim() !== text) {
+          const recoveredIntent = brain.detectIntent({ text: recoveredText, lang, business, context });
+          if (!shouldRetryWithRecovery(recoveredIntent.intent)) {
+            resolvedText = recoveredText;
+            intentResult = recoveredIntent;
+          }
         }
       }
     }

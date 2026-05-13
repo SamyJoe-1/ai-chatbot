@@ -218,4 +218,5 @@ function recoverUserQuery(text, lang, businessId) {
 
 module.exports = {
   recoverUserQuery,
+  levenshtein,
 };

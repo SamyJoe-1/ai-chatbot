@@ -22,18 +22,18 @@ const PATTERNS = {
   },
   ar: {
     greeting_hello: [/^(مرحبا|اهلا|أهلا|هلا|السلام عليكم)/, /^(صباح الخير|مساء الخير)/],
-    greeting_how_are_you: [/^(ايه اخبارك|عامل ايه|عامل اية|انت كويس|كيفك|شلونك|اخبارك)/],
-    greeting_yasta: [/^(يسطا|يا اسطى|ياسطى|ي زميلي|يا زميلي)/],
-    thanks: [/(شكرا|شكراً|تسلم|يسلمو|ممنون)/],
-    help: [/(مساعدة|ساعدني|كيف يشتغل|كيف يعمل|ماذا يمكنك)/],
-    catalog_general: [/(منيو|منيـو|قائمه|قائمة|ايش عندكم|شو عندكم|ماذا تقدمون|وجبات|مشروبات)/],
-    item_price: [/(سعر|اسعار|أسعار|بكام|بقديش|كم السعر|الثمن)/],
-    item_sizes: [/(حجم|احجام|أحجام|صغير|وسط|كبير|الاحجام|الأحجام)/],
-    contact: [/(تواصل|اتصال|رقم|واتساب|هاتف|موبايل|ايميل|إيميل)/],
-    working_hours: [/(ساعات العمل|اوقات العمل|أوقات العمل|متى تفتحون|متى تغلقون|الدوام)/],
-    location: [/(العنوان|الموقع|وين|فين|أين|اتجاهات|خريطة)/],
-    brand_info: [/(من انتم|مين انتم|نبذه عنكم|نبذة عنكم|من انتو|ماذا تقدمون|عن المطعم|عن الكافيه)/],
-    reservation: [/(حجز|احجز|أحجز|طاوله|طاولة|ريزرفيشن)/],
+    greeting_how_are_you: [/^(ايه اخبارك|عامل ايه|عامل اية|انت كويس|كيفك|شلونك|اخبارك|ازيك|إزيك)/],
+    greeting_yasta: [/^(يسطا|يا اسطى|ياسطى|ي زميلي|يا زميلي|يصاحبي|يا صاحبي)/],
+    thanks: [/(شكرا|شكراً|تسلم|يسلمو|ممنون|يعطيك العافية)/],
+    help: [/(مساعدة|ساعدني|كيف يشتغل|كيف يعمل|ماذا يمكنك|بتعمل ايه|تساعدني)/],
+    catalog_general: [/(منيو|منيـو|قائمه|قائمة|ايش عندكم|شو عندكم|ماذا تقدمون|وجبات|مشروبات|عندكم ايه|عندكو ايه|عندك ايه)/],
+    item_price: [/(سعر|اسعار|أسعار|بكام|بقديش|كم السعر|الثمن|حسابه|حسابها)/],
+    item_sizes: [/(حجم|احجام|أحجام|صغير|وسط|كبير|الاحجام|الأحجام|مقاس|مقاسات)/],
+    contact: [/(تواصل|اتصال|رقم|واتساب|هاتف|موبايل|ايميل|إيميل|تليفون|تلفون|كلمكم|اكلمكم)/],
+    working_hours: [/(ساعات|مواعيد|عمل|الدوام|شغالين|تفتح|تقفل|تفتحون|تغلقون|امتى|امتا|الساعة كام|الساعه كام)/],
+    location: [/(العنوان|الموقع|وين|فين|أين|اتجاهات|خريطة|مكان|فروعكم|فرعكم)/],
+    brand_info: [/(من انتم|مين انتم|نبذه عنكم|نبذة عنكم|من انتو|ماذا تقدمون|عن المطعم|عن الكافيه|مين انت)/],
+    reservation: [/(حجز|احجز|أحجز|طاوله|طاولة|ريزرفيشن|حجوزات)/],
   },
 };
 
@@ -98,6 +98,13 @@ function detectIntent({ text, lang, business, context = {} }) {
   if (matchesAny(normalizedText, patterns.thanks)) return { intent: 'thanks' };
   if (matchesAny(normalizedText, patterns.help)) return { intent: 'help' };
   if (matchesAny(normalizedText, patterns.reservation)) return { intent: 'reservation' };
+  if (matchesAny(normalizedText, patterns.catalog_general)) return { intent: 'catalog_general' };
+  if (matchesAny(normalizedText, patterns.contact)) return { intent: 'contact' };
+  if (matchesAny(normalizedText, patterns.working_hours)) return { intent: 'working_hours' };
+  if (matchesAny(normalizedText, patterns.location)) return { intent: 'location' };
+  if (matchesAny(normalizedText, patterns.brand_info)) return { intent: 'brand_info' };
+
+
 
   const asksPrice = matchesAny(normalizedText, patterns.item_price);
   const asksSizes = matchesAny(normalizedText, patterns.item_sizes);
@@ -135,11 +142,7 @@ function detectIntent({ text, lang, business, context = {} }) {
   if (asksSizes && lastItem) return { intent: 'item_sizes', item: lastItem };
   if (asksPrice || asksSizes) return { intent: 'need_item_context' };
 
-  if (matchesAny(normalizedText, patterns.catalog_general)) return { intent: 'catalog_general' };
-  if (matchesAny(normalizedText, patterns.contact)) return { intent: 'contact' };
-  if (matchesAny(normalizedText, patterns.working_hours)) return { intent: 'working_hours' };
-  if (matchesAny(normalizedText, patterns.location)) return { intent: 'location' };
-  if (matchesAny(normalizedText, patterns.brand_info)) return { intent: 'brand_info' };
+
 
   const tokens = tokenize(normalizedText);
   if (tokens.length && tokens.length <= 3) {

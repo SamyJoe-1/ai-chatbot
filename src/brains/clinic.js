@@ -23,19 +23,19 @@ const PATTERNS = {
   },
   ar: {
     greeting_hello: [/^(مرحبا|اهلا|أهلا|هلا|السلام عليكم)/, /^(صباح الخير|مساء الخير)/],
-    greeting_how_are_you: [/^(ايه اخبارك|عامل ايه|عامل اية|انت كويس|كيفك|شلونك|اخبارك)/],
-    greeting_yasta: [/^(يسطا|يا اسطى|ياسطى|ي زميلي|يا زميلي)/],
-    thanks: [/(شكرا|شكراً|تسلم)/],
-    help: [/(مساعدة|ساعدني|ماذا يمكنك)/],
-    catalog_general: [/(خدمات|دكاترة|دكتور|عيادة|الأطباء)/],
-    item_price: [/(سعر|بكام|كم السعر|الثمن)/],
+    greeting_how_are_you: [/^(ايه اخبارك|عامل ايه|عامل اية|انت كويس|كيفك|شلونك|اخبارك|ازيك|إزيك)/],
+    greeting_yasta: [/^(يسطا|يا اسطى|ياسطى|ي زميلي|يا زميلي|يصاحبي|يا صاحبي)/],
+    thanks: [/(شكرا|شكراً|تسلم|يعطيك العافية)/],
+    help: [/(مساعدة|ساعدني|ماذا يمكنك|بتعمل ايه|تساعدني)/],
+    catalog_general: [/(خدمات|دكاترة|دكتور|عيادة|الأطباء|عندكم ايه|عندكو ايه|بتقدموا ايه)/],
+    item_price: [/(سعر|اسعار|أسعار|بكام|كم السعر|الثمن|كشف|فيزيتا|حساب)/],
     doctor_info: [/(دكتور|طبيب|دكتورة)/],
     specialization: [/(تخصص|تخصصه|أسنان|جلدية|باطنة|عظام)/],
-    appointment: [/(موعد|حجز|احجز|أحجز|زيارة)/],
-    contact: [/(تواصل|اتصال|رقم|واتساب|هاتف|ايميل|إيميل)/],
-    location: [/(الموقع|العنوان|الفرع|فين|وين)/],
-    working_hours: [/(ساعات العمل|اوقات العمل|أوقات العمل|الدوام)/],
-    brand_info: [/(من انتم|مين انتم|عن العيادة|عن المركز)/],
+    appointment: [/(موعد|حجز|احجز|أحجز|زيارة|كشف)/],
+    contact: [/(تواصل|اتصال|رقم|واتساب|هاتف|موبايل|ايميل|إيميل|تليفون|تلفون|كلمكم|اكلمكم)/],
+    location: [/(الموقع|العنوان|الفرع|فين|وين|مكان|فروعكم|فرعكم)/],
+    working_hours: [/(ساعات|مواعيد|عمل|الدوام|شغالين|تفتح|تقفل|تفتحون|تغلقون|امتى|امتا|الساعة كام|الساعه كام)/],
+    brand_info: [/(من انتم|مين انتم|عن العيادة|عن المركز|مين انت)/],
   },
 };
 
@@ -115,6 +115,13 @@ function detectIntent({ text, lang, business, context = {} }) {
   if (matchesAny(normalizedText, patterns.thanks)) return { intent: 'thanks' };
   if (matchesAny(normalizedText, patterns.help)) return { intent: 'help' };
   if (matchesAny(normalizedText, patterns.appointment)) return { intent: 'appointment', item: foundItem || lastItem || null };
+  if (matchesAny(normalizedText, patterns.catalog_general)) return { intent: 'catalog_general' };
+  if (matchesAny(normalizedText, patterns.contact)) return { intent: 'contact' };
+  if (matchesAny(normalizedText, patterns.location)) return { intent: 'location' };
+  if (matchesAny(normalizedText, patterns.working_hours)) return { intent: 'working_hours' };
+  if (matchesAny(normalizedText, patterns.brand_info)) return { intent: 'brand_info' };
+
+
 
   const asksPrice = matchesAny(normalizedText, patterns.item_price);
   const asksDoctor = matchesAny(normalizedText, patterns.doctor_info);
@@ -150,11 +157,7 @@ function detectIntent({ text, lang, business, context = {} }) {
   if (asksSpecialization && lastItem) return { intent: 'specialization', item: lastItem };
   if (asksPrice || asksDoctor || asksSpecialization) return { intent: 'need_item_context' };
 
-  if (matchesAny(normalizedText, patterns.catalog_general)) return { intent: 'catalog_general' };
-  if (matchesAny(normalizedText, patterns.contact)) return { intent: 'contact' };
-  if (matchesAny(normalizedText, patterns.location)) return { intent: 'location' };
-  if (matchesAny(normalizedText, patterns.working_hours)) return { intent: 'working_hours' };
-  if (matchesAny(normalizedText, patterns.brand_info)) return { intent: 'brand_info' };
+
 
   const tokens = tokenize(normalizedText);
   if (tokens.length && tokens.length <= 3) return { intent: 'item_not_found' };
