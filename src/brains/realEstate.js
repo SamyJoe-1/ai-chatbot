@@ -6,7 +6,9 @@ const { findMatchingCategories, findScoredItems, uniqueById } = require('./share
 
 const PATTERNS = {
   en: {
-    greeting: [/^(hi|hello|hey)\b/i],
+    greeting_hello: [/^(hi|hello|hey)\b/i, /^good (morning|afternoon|evening)\b/i],
+    greeting_how_are_you: [/^(how are u|how are u doing|are u okay|how are you|how are you doing|are you okay)\b/i],
+    greeting_yasta: [/^(yasta)\b/i],
     thanks: [/\b(thanks|thank you|thx)\b/i],
     help: [/\bhelp\b/i, /\bwhat can you do\b/i],
     catalog_general: [
@@ -27,7 +29,9 @@ const PATTERNS = {
     brand_info: [/\bwho are you\b/i, /\babout you\b/i, /\bagency\b/i, /\bdeveloper\b/i],
   },
   ar: {
-    greeting: [/^(مرحبا|اهلا|أهلا|هلا)/],
+    greeting_hello: [/^(مرحبا|اهلا|أهلا|هلا|السلام عليكم)/, /^(صباح الخير|مساء الخير)/],
+    greeting_how_are_you: [/^(ايه اخبارك|عامل ايه|عامل اية|انت كويس|كيفك|شلونك|اخبارك)/],
+    greeting_yasta: [/^(يسطا|يا اسطى|ياسطى|ي زميلي|يا زميلي)/],
     thanks: [/(شكرا|شكرًا|تسلم)/],
     help: [/(مساعدة|ساعدني|ماذا يمكنك)/],
     catalog_general: [/(مشروعات|مشروع|عقارات|عقار|وحدات|شقق|فلل|عروض|قائمة العقارات|اعرض.*مشروعات)/],
@@ -156,7 +160,9 @@ function detectIntent({ text, lang, business, context = {} }) {
   const topScore = scoredMatches[0]?.score || 0;
   const secondScore = scoredMatches[1]?.score || 0;
 
-  if (matchesAny(normalizedText, patterns.greeting)) return { intent: 'greeting' };
+  if (matchesAny(normalizedText, patterns.greeting_hello)) return { intent: 'greeting_hello' };
+  if (matchesAny(normalizedText, patterns.greeting_how_are_you)) return { intent: 'greeting_how_are_you' };
+  if (matchesAny(normalizedText, patterns.greeting_yasta)) return { intent: 'greeting_yasta' };
   if (matchesAny(normalizedText, patterns.thanks)) return { intent: 'thanks' };
   if (matchesAny(normalizedText, patterns.help)) return { intent: 'help' };
   if (matchesAny(normalizedText, patterns.appointment)) return { intent: 'appointment', item: foundItem || lastItem || null };
@@ -327,10 +333,22 @@ function buildResponse(intentResult, lang, business) {
   };
 
   switch (intentResult.intent) {
-    case 'greeting':
+    case 'greeting_hello':
       payload.text = locale === 'ar'
         ? `أهلًا بك في ${business.name_ar || business.name}. كيف أساعدك في المشروعات أو الوحدات اليوم؟`
         : `Hello from ${business.name}. How can I help you with projects or units today?`;
+      payload.suggestions = suggestions.slice(0, 4);
+      break;
+    case 'greeting_how_are_you':
+      payload.text = locale === 'ar'
+        ? `أنا بخير، شكراً لسؤالك! أهلًا بك في ${business.name_ar || business.name}. كيف أساعدك في المشروعات أو الوحدات اليوم؟`
+        : `I'm doing great, thanks for asking! Welcome to ${business.name}. How can I help you with projects or units today?`;
+      payload.suggestions = suggestions.slice(0, 4);
+      break;
+    case 'greeting_yasta':
+      payload.text = locale === 'ar'
+        ? `حبيبي يسطا! منور ${business.name_ar || business.name}. أقدر أساعدك إزاي في المشروعات أو الوحدات؟`
+        : `Hey there! Welcome to ${business.name}. How can I help you with projects or units today?`;
       payload.suggestions = suggestions.slice(0, 4);
       break;
     case 'thanks':

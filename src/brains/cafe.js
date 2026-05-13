@@ -6,7 +6,9 @@ const { findMatchingCategories, findScoredItems, uniqueById } = require('./share
 
 const PATTERNS = {
   en: {
-    greeting: [/^(hi|hello|hey|hiya|howdy)\b/i, /^good (morning|afternoon|evening)\b/i],
+    greeting_hello: [/^(hi|hello|hey|hiya|howdy)\b/i, /^good (morning|afternoon|evening)\b/i],
+    greeting_how_are_you: [/^(how are u|how are u doing|are u okay|how are you|how are you doing|are you okay)\b/i],
+    greeting_yasta: [/^(yasta)\b/i],
     thanks: [/\b(thanks|thank you|thx|ty|appreciate)\b/i],
     help: [/\bhelp\b/i, /\bwhat can you do\b/i, /\bhow does this work\b/i],
     catalog_general: [/\bmenu\b/i, /\bwhat do you have\b/i, /\bwhat do you offer\b/i, /\bshow me.*menu\b/i],
@@ -19,7 +21,9 @@ const PATTERNS = {
     reservation: [/\breservation\b/i, /\bbook\b/i, /\bbooking\b/i, /\btable\b/i],
   },
   ar: {
-    greeting: [/^(مرحبا|اهلا|أهلا|هلا|السلام عليكم)/, /^(صباح الخير|مساء الخير)/],
+    greeting_hello: [/^(مرحبا|اهلا|أهلا|هلا|السلام عليكم)/, /^(صباح الخير|مساء الخير)/],
+    greeting_how_are_you: [/^(ايه اخبارك|عامل ايه|عامل اية|انت كويس|كيفك|شلونك|اخبارك)/],
+    greeting_yasta: [/^(يسطا|يا اسطى|ياسطى|ي زميلي|يا زميلي)/],
     thanks: [/(شكرا|شكراً|تسلم|يسلمو|ممنون)/],
     help: [/(مساعدة|ساعدني|كيف يشتغل|كيف يعمل|ماذا يمكنك)/],
     catalog_general: [/(منيو|منيـو|قائمه|قائمة|ايش عندكم|شو عندكم|ماذا تقدمون|وجبات|مشروبات)/],
@@ -88,7 +92,9 @@ function detectIntent({ text, lang, business, context = {} }) {
   const topScore = scoredMatches[0]?.score || 0;
   const secondScore = scoredMatches[1]?.score || 0;
 
-  if (matchesAny(normalizedText, patterns.greeting)) return { intent: 'greeting' };
+  if (matchesAny(normalizedText, patterns.greeting_hello)) return { intent: 'greeting_hello' };
+  if (matchesAny(normalizedText, patterns.greeting_how_are_you)) return { intent: 'greeting_how_are_you' };
+  if (matchesAny(normalizedText, patterns.greeting_yasta)) return { intent: 'greeting_yasta' };
   if (matchesAny(normalizedText, patterns.thanks)) return { intent: 'thanks' };
   if (matchesAny(normalizedText, patterns.help)) return { intent: 'help' };
   if (matchesAny(normalizedText, patterns.reservation)) return { intent: 'reservation' };
@@ -164,10 +170,22 @@ function buildResponse(intentResult, lang, business) {
   };
 
   switch (intentResult.intent) {
-    case 'greeting':
+    case 'greeting_hello':
       payload.text = locale === 'ar'
         ? `أهلاً بك في ${business.name_ar || business.name}. كيف أساعدك؟`
         : `Hello from ${business.name}. How can I help you?`;
+      payload.suggestions = suggestions.slice(0, 4);
+      break;
+    case 'greeting_how_are_you':
+      payload.text = locale === 'ar'
+        ? `أنا بخير، شكراً لسؤالك! أهلاً بك في ${business.name_ar || business.name}. كيف أساعدك؟`
+        : `I'm doing great, thanks for asking! Welcome to ${business.name}. How can I help you?`;
+      payload.suggestions = suggestions.slice(0, 4);
+      break;
+    case 'greeting_yasta':
+      payload.text = locale === 'ar'
+        ? `حبيبي يسطا! منور ${business.name_ar || business.name}. أقدر أساعدك إزاي؟`
+        : `Hey there! Welcome to ${business.name}. How can I help you?`;
       payload.suggestions = suggestions.slice(0, 4);
       break;
     case 'thanks':

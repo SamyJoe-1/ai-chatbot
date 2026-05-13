@@ -24,8 +24,16 @@ function buildResponse(intentResult, lang, cafe) {
   };
 
   switch (intentResult.intent) {
-    case 'greeting':
-      payload.text = RESPONSES.greeting[locale](cafe);
+    case 'greeting_hello':
+      payload.text = RESPONSES.greeting_hello[locale](cafe);
+      payload.suggestions = suggestions.slice(0, 4);
+      break;
+    case 'greeting_how_are_you':
+      payload.text = RESPONSES.greeting_how_are_you[locale](cafe);
+      payload.suggestions = suggestions.slice(0, 4);
+      break;
+    case 'greeting_yasta':
+      payload.text = RESPONSES.greeting_yasta[locale](cafe);
       payload.suggestions = suggestions.slice(0, 4);
       break;
     case 'thanks':

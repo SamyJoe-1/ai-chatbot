@@ -171,7 +171,9 @@ function detectIntent(text, lang, cafeId, context = {}) {
     : null;
   const categoryMatches = findMatchingCategories(text, lang, items);
 
-  if (matchesAny(normalizedText, patterns.greeting)) return { intent: 'greeting', confidence: 1 };
+  if (matchesAny(normalizedText, patterns.greeting_hello)) return { intent: 'greeting_hello', confidence: 1 };
+  if (matchesAny(normalizedText, patterns.greeting_how_are_you)) return { intent: 'greeting_how_are_you', confidence: 1 };
+  if (matchesAny(normalizedText, patterns.greeting_yasta)) return { intent: 'greeting_yasta', confidence: 1 };
   if (matchesAny(normalizedText, patterns.thanks)) return { intent: 'thanks', confidence: 1 };
   if (matchesAny(normalizedText, patterns.help)) return { intent: 'help', confidence: 1 };
   if (matchesAny(normalizedText, patterns.reservation)) return { intent: 'reservation', confidence: 1 };
