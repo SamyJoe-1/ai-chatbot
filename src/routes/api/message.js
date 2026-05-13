@@ -172,17 +172,34 @@ router.post('/', tokenValidator, (req, res) => {
       const { getBusinessItems } = require('../../brains/shared/catalogStore');
       const items = getBusinessItems(business.id);
 
-      // Try algorithmic Franco-Arabic phonetic recovery first
-      const translatedText = recoverFranco(text, items);
-      if (translatedText && translatedText !== text) {
-        const francoIntent = brain.detectIntent({ text: translatedText, lang: 'en', business, context });
-        if (!shouldRetryWithRecovery(francoIntent.intent)) {
-          resolvedText = translatedText;
-          intentResult = francoIntent;
+      // 1. Try explicit Arabic-to-English literal translation first
+      const { translateArabicToEnglish } = require('../../engine/translation');
+      let translationMatched = false;
+      if (lang === 'ar') {
+        const translatedDictText = translateArabicToEnglish(text);
+        if (translatedDictText !== text) {
+          const dictIntent = brain.detectIntent({ text: translatedDictText, lang: 'en', business, context });
+          if (!shouldRetryWithRecovery(dictIntent.intent)) {
+            resolvedText = translatedDictText;
+            intentResult = dictIntent;
+            translationMatched = true;
+          }
         }
       }
 
-      // If franco mapping didn't solve it, try the standard query recovery
+      // 2. Try algorithmic Franco-Arabic phonetic recovery first
+      if (!translationMatched && shouldRetryWithRecovery(intentResult.intent)) {
+        const translatedText = recoverFranco(text, items);
+        if (translatedText && translatedText !== text) {
+          const francoIntent = brain.detectIntent({ text: translatedText, lang: 'en', business, context });
+          if (!shouldRetryWithRecovery(francoIntent.intent)) {
+            resolvedText = translatedText;
+            intentResult = francoIntent;
+          }
+        }
+      }
+
+      // 3. If mapping didn't solve it, try the standard query recovery
       if (shouldRetryWithRecovery(intentResult.intent)) {
         const recoveredText = recoverUserQuery(text, lang, business.id);
         if (recoveredText && recoveredText.trim() && recoveredText.trim() !== text) {

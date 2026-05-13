@@ -258,8 +258,8 @@ function buildResponse(intentResult, lang, business) {
     }
     case 'item_not_found':
       payload.text = locale === 'ar'
-        ? 'لم أجد هذا الصنف في القائمة. يمكنك فتح القائمة الكاملة من الزر بالأسفل.'
-        : 'I could not find that item in the menu. You can open the full menu below.';
+        ? 'لم أجد هذا الصنف في القائمة. يمكنك فتح القائمة الكاملة من الزر بالأسفل.' + (business.phone ? ` أو التواصل معنا مباشرة للطلب عبر ${business.phone}.` : '')
+        : 'I could not find that item in the menu. You can open the full menu below.' + (business.phone ? ` Or contact us directly to order at ${business.phone}.` : '');
       payload.suggestions = suggestions.slice(0, 3);
       if (business.catalog_link) {
         payload.buttons.push({
