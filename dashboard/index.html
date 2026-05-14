@@ -464,6 +464,42 @@
             </div>
           </div>
 
+          <!-- Section: Orders -->
+          <div class="accordion-section open">
+            <button class="accordion-header" type="button">
+              <span><i class="fas fa-shopping-cart"></i> Orders Management</span>
+              <i class="fas fa-chevron-down accordion-arrow"></i>
+            </button>
+            <div class="accordion-body">
+              <div class="section-toolbar">
+                <button id="export-orders-btn" class="btn btn-outline btn-sm" type="button">
+                  <i class="fas fa-file-export"></i> Export to CSV
+                </button>
+                <button id="refresh-orders-btn" class="btn btn-ghost btn-sm" type="button">
+                  <i class="fas fa-arrows-rotate"></i> Refresh
+                </button>
+              </div>
+              <div class="filter-bar orders-filter-bar">
+                <div class="input-group search-group">
+                  <i class="fas fa-search"></i>
+                  <input type="text" id="order-search" placeholder="Search by name or phone...">
+                </div>
+                <select id="order-filter-status" class="filter-select">
+                  <option value="all">All Statuses</option>
+                  <option value="pending">Pending</option>
+                  <option value="draft">Draft/Review</option>
+                  <option value="cancelled">Cancelled</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </div>
+              <div class="orders-container">
+                <div id="orders-list" class="orders-list-body"></div>
+                <div id="orders-pagination" class="pagination-bar"></div>
+              </div>
+            </div>
+          </div>
+
           <!-- Section: Conversations -->
           <div class="accordion-section open">
             <button class="accordion-header" type="button">

@@ -359,4 +359,75 @@ router.post('/:id/sessions/:sessionId/messages', (req, res) => {
   return res.json({ success: true });
 });
 
+/* ═══════ ORDERS ═══════ */
+router.get('/:id/orders', (req, res) => {
+  const businessId = Number(req.params.id);
+  if (!ensureAccess(req.admin, businessId)) return res.status(403).json({ error: 'forbidden' });
+
+  const orders = db.prepare(`
+    SELECT o.*, 
+           (SELECT json_group_array(json_object(
+              'id', oi.id,
+              'title_en', oi.title_en,
+              'title_ar', oi.title_ar,
+              'quantity', oi.quantity,
+              'unit_price', oi.unit_price,
+              'currency', oi.currency
+            )) FROM order_items oi WHERE oi.order_id = o.id) as items
+    FROM orders o
+    WHERE o.business_id = ?
+    ORDER BY o.created_at DESC
+    LIMIT 500
+  `).all(businessId);
+
+  return res.json(orders.map(o => ({
+    ...o,
+    items: JSON.parse(o.items || '[]')
+  })));
+});
+
+router.patch('/:id/orders/:orderId/status', (req, res) => {
+  const businessId = Number(req.params.id);
+  if (!ensureAccess(req.admin, businessId)) return res.status(403).json({ error: 'forbidden' });
+
+  const { status } = req.body || {};
+  if (!status) return res.status(400).json({ error: 'missing_status' });
+
+  db.prepare("UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ? AND business_id = ?")
+    .run(status, req.params.orderId, businessId);
+    
+  return res.json({ success: true });
+});
+
+router.get('/:id/orders/export', (req, res) => {
+  const businessId = Number(req.params.id);
+  if (!ensureAccess(req.admin, businessId)) return res.status(403).json({ error: 'forbidden' });
+
+  const orders = db.prepare(`
+    SELECT o.id, o.guest_name, o.guest_phone, o.status, o.address, o.confirmed_at, o.created_at,
+           (SELECT group_concat(oi.title_en || ' x' || oi.quantity, '; ') FROM order_items oi WHERE oi.order_id = o.id) as items_summary
+    FROM orders o
+    WHERE o.business_id = ?
+    ORDER BY o.created_at DESC
+  `).all(businessId);
+
+  let csv = 'Order ID,Customer,Phone,Status,Address,Items,Created At\n';
+  orders.forEach(o => {
+    const row = [
+      o.id,
+      o.guest_name || 'Guest',
+      o.guest_phone,
+      o.status,
+      (o.address || '').replace(/,/g, ' '),
+      (o.items_summary || '').replace(/,/g, ';'),
+      o.created_at
+    ];
+    csv += row.join(',') + '\n';
+  });
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename=orders_${businessId}.csv`);
+  return res.send(csv);
+});
+
 module.exports = router;

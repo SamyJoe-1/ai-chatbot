@@ -76,18 +76,18 @@ const hasPreviousPhoneActivity = db.prepare(`
 `);
 
 const YES_PATTERNS = {
-  en: [/^(yes|yeah|yep|sure|ok|okay|confirm|confirmed|confirm order|confirm address|go ahead|sounds good|do it)$/i],
-  ar: [/^(نعم|ايوه|أيوه|اه|آه|أكيد|اكيد|تمام|موافق|ماشي|اوكي|أوكي|تم|تأكيد الطلب|تأكيد العنوان)$/i],
+  en: [/^(yes|yeah|yep|sure|ok|okay|confirm|confirmed|confirm order|confirm address|go ahead|sounds good|do it)$/i, /^confirm (order|address)$/i],
+  ar: [/^(نعم|ايوه|أيوه|اه|آه|أكيد|اكيد|تمام|موافق|ماشي|اوكي|أوكي|تم|تأكيد الطلب|تأكيد العنوان)$/i, /^تأكيد (الطلب|العنوان)$/i],
 };
 
 const CANCEL_PATTERNS = {
-  en: [/^(cancel|stop|exit|leave it|never mind)$/i],
-  ar: [/^(الغاء|إلغاء|وقف|خلاص|خليه|سيبها|الغي|إلغي)$/i],
+  en: [/^(cancel|stop|exit|leave it|never mind|cancel order)$/i, /^cancel order$/i],
+  ar: [/^(الغاء|إلغاء|وقف|خلاص|خليه|سيبها|الغي|إلغي|إلغاء الطلب|الغاء الطلب)$/i, /^(إلغاء|الغاء) الطلب$/i],
 };
 
 const ADD_MORE_PATTERNS = {
-  en: [/^(add|add item|add another|add another item|add more|add more items)$/i],
-  ar: [/^(اضف|أضف|اضافة عنصر|إضافة عنصر|اضافة طلب|إضافة طلب|اضف عنصر|أضف عنصر|اضف عنصر اخر|أضف عنصر آخر|اضافة عنصر اخر|إضافة عنصر آخر)$/i],
+  en: [/^(add|add item|add another|add another item|add more|add more items)$/i, /^add another item$/i],
+  ar: [/^(اضف|أضف|اضافة عنصر|إضافة عنصر|اضافة طلب|إضافة طلب|اضف عنصر|أضف عنصر|اضف عنصر اخر|أضف عنصر آخر|اضافة عنصر اخر|إضافة عنصر آخر)$/i, /^(إضافة|اضافة) عنصر آخر$/i],
 };
 
 const ORDER_INTENT_PATTERNS = {
@@ -106,6 +106,15 @@ function looksLikeOrderIntent(text, lang) {
 
 function buildCommand(action, itemId) {
   return `${ORDER_COMMAND_PREFIX}${action}${itemId ? `:${itemId}` : ''}`;
+}
+
+function emptyUiState() {
+  return {
+    input_locked: false,
+    choice_buttons: [],
+    address_preview: '',
+    order_draft: null,
+  };
 }
 
 function parseOrderCommand(text) {
@@ -156,7 +165,7 @@ function getOrderSummaryText(items, lang) {
 }
 
 function createOrderId() {
-  return `ord_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+  return Math.floor(100000000000 + Math.random() * 900000000000).toString();
 }
 
 function touchOrder(orderId) {
@@ -179,20 +188,20 @@ function buildChoiceButtons(lang, stage, hasItems) {
   if (stage === 'review') {
     const buttons = [
       {
-        label: lang === 'ar' ? 'إلغاء الطلب' : 'Cancel order',
-        value: lang === 'ar' ? 'إلغاء الطلب' : 'Cancel order',
+        label: lang === 'ar' ? 'إلغاء الطلب' : 'Cancel',
+        value: buildCommand('cancel'),
         style: 'danger',
       },
       {
         label: lang === 'ar' ? 'إضافة عنصر آخر' : 'Add another item',
-        value: lang === 'ar' ? 'إضافة عنصر آخر' : 'Add another item',
+        value: buildCommand('add_more'),
         style: 'secondary',
       },
     ];
     if (hasItems) {
       buttons.push({
         label: lang === 'ar' ? 'تأكيد الطلب' : 'Confirm order',
-        value: lang === 'ar' ? 'تأكيد الطلب' : 'Confirm order',
+        value: buildCommand('confirm'),
         style: 'primary',
       });
     }
@@ -202,8 +211,8 @@ function buildChoiceButtons(lang, stage, hasItems) {
   if (stage === 'add_item') {
     return [
       {
-        label: lang === 'ar' ? 'إلغاء الطلب' : 'Cancel order',
-        value: lang === 'ar' ? 'إلغاء الطلب' : 'Cancel order',
+        label: lang === 'ar' ? 'إلغاء الطلب' : 'Cancel',
+        value: buildCommand('cancel'),
         style: 'danger',
       },
     ];
@@ -212,8 +221,8 @@ function buildChoiceButtons(lang, stage, hasItems) {
   if (stage === 'address') {
     return [
       {
-        label: lang === 'ar' ? 'إلغاء الطلب' : 'Cancel order',
-        value: lang === 'ar' ? 'إلغاء الطلب' : 'Cancel order',
+        label: lang === 'ar' ? 'إلغاء الطلب' : 'Cancel',
+        value: buildCommand('cancel'),
         style: 'danger',
       },
     ];
@@ -222,13 +231,18 @@ function buildChoiceButtons(lang, stage, hasItems) {
   if (stage === 'address_confirmation') {
     return [
       {
-        label: lang === 'ar' ? 'إلغاء الطلب' : 'Cancel order',
-        value: lang === 'ar' ? 'إلغاء الطلب' : 'Cancel order',
+        label: lang === 'ar' ? 'إلغاء الطلب' : 'Cancel',
+        value: buildCommand('cancel'),
         style: 'danger',
       },
       {
+        label: lang === 'ar' ? 'تعديل العنوان' : 'Rewrite address',
+        value: buildCommand('rewrite_address'),
+        style: 'secondary',
+      },
+      {
         label: lang === 'ar' ? 'تأكيد العنوان' : 'Confirm address',
-        value: lang === 'ar' ? 'تأكيد العنوان' : 'Confirm address',
+        value: buildCommand('confirm_address'),
         style: 'primary',
       },
     ];
@@ -455,7 +469,7 @@ function buildAddressConfirmationMessage({ lang, address }) {
     lang === 'ar' ? 'هذا هو العنوان الذي استلمته:' : 'This is the address I received:',
     address,
     '',
-    lang === 'ar' ? 'إذا كان صحيحاً اختر تأكيد العنوان أو اختر إلغاء الطلب.' : 'If it is correct, choose Confirm address or Cancel order.',
+    lang === 'ar' ? 'إذا كان صحيحاً اختر تأكيد العنوان أو اختر إلغاء الطلب.' : 'If it is correct, choose Confirm address or Cancel.',
   ].join('\n');
 }
 
@@ -477,13 +491,7 @@ function buildOrderCompleteMessage({ lang, order, items, address }) {
   ].join('\n');
 }
 
-function buildOrderCancelledMessage({ lang, keptPending }) {
-  if (keptPending) {
-    return lang === 'ar'
-      ? 'تم الخروج من وضع تعديل الطلب الحالي، وسأترك طلبك المفتوح كما هو. يمكنك المتابعة معي في أي وقت.'
-      : 'I exited the order editing flow and left your open order exactly as it is. You can continue chatting with me any time.';
-  }
-
+function buildOrderCancelledMessage({ lang }) {
   return lang === 'ar'
     ? 'تم إلغاء الطلب والعودة إلى الدردشة العادية. إذا أردت نبدأ طلباً جديداً في أي وقت.'
     : 'The order was cancelled and we are back to the normal chat. If you want, we can start a new order any time.';
@@ -587,24 +595,14 @@ function startOrderFlow({ business, session, context, lang, seedItems = [] }) {
 function resolveOrderUiState({ business, session, context, lang }) {
   if (!isCafeOrderingEnabled(business)) {
     return {
-      ui_state: {
-        input_locked: false,
-        choice_buttons: [],
-        address_preview: '',
-        order_draft: null,
-      },
+      ui_state: emptyUiState(),
       suggestions: [],
     };
   }
 
   if (!String(session.phase || '').startsWith('order_')) {
     return {
-      ui_state: {
-        input_locked: false,
-        choice_buttons: [],
-        address_preview: '',
-        order_draft: null,
-      },
+      ui_state: emptyUiState(),
       suggestions: [],
     };
   }
@@ -612,12 +610,7 @@ function resolveOrderUiState({ business, session, context, lang }) {
   const orderId = context?.order_flow?.order_id;
   if (!orderId) {
     return {
-      ui_state: {
-        input_locked: false,
-        choice_buttons: [],
-        address_preview: '',
-        order_draft: null,
-      },
+      ui_state: emptyUiState(),
       suggestions: [],
     };
   }
@@ -625,12 +618,7 @@ function resolveOrderUiState({ business, session, context, lang }) {
   const order = getOrderById.get(orderId);
   if (!order || !ACTIVE_ORDER_STATUSES.includes(order.status)) {
     return {
-      ui_state: {
-        input_locked: false,
-        choice_buttons: [],
-        address_preview: '',
-        order_draft: null,
-      },
+      ui_state: emptyUiState(),
       suggestions: [],
     };
   }
@@ -650,21 +638,104 @@ function resolveOrderUiState({ business, session, context, lang }) {
   }
 
   return {
-    ui_state: {
-      input_locked: false,
-      choice_buttons: [],
-      address_preview: '',
-      order_draft: null,
-    },
+    ui_state: emptyUiState(),
     suggestions: [],
   };
 }
 
 function handleOrderMessage({ text, business, session, context, lang }) {
   const normalizedContext = normalizeOrderContext(context);
-  const orderId = normalizedContext.order_flow?.order_id;
-  const order = orderId ? getOrderById.get(orderId) : null;
-  const items = order ? getOrderItems(order.id) : [];
+  const orderCommand = parseOrderCommand(text);
+  let orderId = normalizedContext.order_flow?.order_id;
+  let order = orderId ? getOrderById.get(orderId) : null;
+
+  // Global Cancel Handling (Even if order ID is missing from context, try to find it by phone)
+  if (isCancelText(text, lang) || (orderCommand && orderCommand.action === 'cancel')) {
+    if (!order) {
+      order = getLatestActiveOrderByPhone.get(business.id, session.guest_phone);
+    }
+
+    if (order) {
+      cancelOrder.run(order.id);
+      return {
+        phase: 'active',
+        context: clearOrderContext(normalizedContext),
+        response: {
+          text: buildOrderCancelledMessage({ lang }),
+          type: 'text',
+          buttons: [],
+          suggestions: [],
+          ui_state: emptyUiState(),
+        },
+        intent: 'order_cancelled',
+      };
+    }
+
+    // No order found at all to cancel
+    return {
+      phase: 'active',
+      context: clearOrderContext(normalizedContext),
+      response: {
+        text: lang === 'ar' ? 'لا يوجد طلب مفتوح لإلغائه حالياً.' : 'There is no open order to cancel right now.',
+        type: 'text',
+        buttons: [],
+        suggestions: [],
+        ui_state: emptyUiState(),
+      },
+      intent: 'order_cancel_missing',
+    };
+  }
+
+  // Global Add More Handling
+  if (isAddMoreText(text, lang) || (orderCommand && orderCommand.action === 'add_more')) {
+    if (!order) {
+      order = getLatestActiveOrderByPhone.get(business.id, session.guest_phone);
+    }
+    if (order) {
+      const items = getOrderItems(order.id);
+      const updatedContext = setOrderContext(normalizedContext, { order_id: order.id, stage: 'add_item' });
+      return {
+        phase: 'order_add_item',
+        context: updatedContext,
+        response: {
+          text: buildAddItemMessage({ lang, order, hasItems: items.length > 0 }),
+          type: 'text',
+          buttons: [],
+          ...serializeOrderState({ lang, stage: 'add_item', order, items, context: updatedContext }),
+        },
+        intent: 'order_add_more',
+      };
+    }
+  }
+
+  // Handle "Rewrite Address"
+  if (orderCommand && orderCommand.action === 'rewrite_address') {
+    if (order) {
+      const items = getOrderItems(order.id);
+      const updatedContext = setOrderContext(normalizedContext, {
+        stage: 'address',
+        pending_address: '',
+      });
+      updateOrderStatus.run('awaiting_address', order.id);
+      return {
+        phase: 'order_address',
+        context: updatedContext,
+        response: {
+          text: buildAddressPrompt({ lang, order }),
+          type: 'text',
+          buttons: [],
+          ...serializeOrderState({
+            lang,
+            stage: 'address',
+            order,
+            items,
+            context: updatedContext,
+          }),
+        },
+        intent: 'order_address_rewrite',
+      };
+    }
+  }
 
   if (!order) {
     return {
@@ -677,12 +748,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
         type: 'text',
         buttons: [],
         suggestions: [],
-        ui_state: {
-          input_locked: false,
-          choice_buttons: [],
-          address_preview: '',
-          order_draft: null,
-        },
+        ui_state: emptyUiState(),
       },
       intent: 'order_missing',
       skipUserMessage: false,
@@ -690,40 +756,14 @@ function handleOrderMessage({ text, business, session, context, lang }) {
     };
   }
 
-  if (isCancelText(text, lang)) {
-    const keepPending = order.status === 'pending';
-    if (!keepPending) {
-      cancelOrder.run(order.id);
-    }
-
-    return {
-      phase: 'active',
-      context: clearOrderContext(normalizedContext),
-      response: {
-        text: buildOrderCancelledMessage({ lang, keptPending: keepPending }),
-        type: 'text',
-        buttons: [],
-        suggestions: [],
-        ui_state: {
-          input_locked: false,
-          choice_buttons: [],
-          address_preview: '',
-          order_draft: null,
-        },
-      },
-      intent: 'order_cancelled',
-      skipUserMessage: false,
-      skipBotMessage: false,
-    };
-  }
+  const items = getOrderItems(order.id);
 
   if (session.phase === 'order_review') {
-    const command = parseOrderCommand(text);
-    if (command && ['inc', 'dec', 'remove'].includes(command.action)) {
+    if (orderCommand && ['inc', 'dec', 'remove'].includes(orderCommand.action)) {
       if (order.status === 'pending') {
         updateOrderStatus.run('draft', order.id);
       }
-      const nextItems = applyOrderItemCommand(order.id, command);
+      const nextItems = applyOrderItemCommand(order.id, orderCommand);
       if (!nextItems.length) {
         const updatedContext = setOrderContext(normalizedContext, { stage: 'add_item' });
         return {
@@ -769,24 +809,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
       };
     }
 
-    if (isAddMoreText(text, lang)) {
-      const updatedContext = setOrderContext(normalizedContext, { stage: 'add_item' });
-      return {
-        phase: 'order_add_item',
-        context: updatedContext,
-        response: {
-          text: buildAddItemMessage({ lang, order, hasItems: true }),
-          type: 'text',
-          buttons: [],
-          ...serializeOrderState({ lang, stage: 'add_item', order, items, context: updatedContext }),
-        },
-        intent: 'order_add_more',
-        skipUserMessage: false,
-        skipBotMessage: false,
-      };
-    }
-
-    if (isYesText(text, lang) && items.length) {
+    if (isYesText(text, lang) || (orderCommand && orderCommand.action === 'confirm')) {
       const updatedContext = setOrderContext(normalizedContext, {
         stage: 'address',
         pending_address: '',
@@ -852,13 +875,15 @@ function handleOrderMessage({ text, business, session, context, lang }) {
       };
     }
 
+    // Auto-add the first (top) match
+    const bestMatch = matchedItems[0];
     if (order.status === 'pending') {
       updateOrderStatus.run('draft', order.id);
     }
-    addItemsToOrder(order.id, matchedItems);
+    addItemsToOrder(order.id, [bestMatch]);
 
     const nextItems = getOrderItems(order.id);
-    const updatedContext = setOrderContext(mergeRecentItemsIntoContext(normalizedContext, matchedItems), { stage: 'review' });
+    const updatedContext = setOrderContext(mergeRecentItemsIntoContext(normalizedContext, [bestMatch]), { stage: 'review' });
     return {
       phase: 'order_review',
       context: updatedContext,
@@ -920,7 +945,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
   }
 
   if (session.phase === 'order_address_confirm') {
-    if (isYesText(text, lang)) {
+    if (isYesText(text, lang) || (orderCommand && orderCommand.action === 'confirm_address')) {
       const address = normalizedContext.order_flow?.pending_address || order.address || '';
       updateOrderAddressAndStatus.run(address, 'pending', order.id);
       const refreshedOrder = getOrderById.get(order.id);
@@ -934,12 +959,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
           type: 'text',
           buttons: [],
           suggestions: [],
-          ui_state: {
-            input_locked: false,
-            choice_buttons: [],
-            address_preview: '',
-            order_draft: null,
-          },
+          ui_state: emptyUiState(),
         },
         intent: 'order_confirmed',
         skipUserMessage: false,

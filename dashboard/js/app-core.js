@@ -14,8 +14,15 @@ const state = {
   },
   sessionsPage: 1,
   sessionFilter: {},
+  orders: [],
+  ordersPage: 1,
+  ordersFilter: {
+    search: '',
+    status: 'all',
+  },
   MENU_PER_PAGE: 15,
   SESSIONS_PER_PAGE: 20,
+  ORDERS_PER_PAGE: 15,
   // Chat polling
   activeSessionChatId: null,
   activeSessionChatSignature: '',

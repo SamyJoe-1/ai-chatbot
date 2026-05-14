@@ -635,6 +635,109 @@ document.getElementById('clear-sessions-btn').addEventListener('click', async ()
   finally { btnLoad(btn, false); }
 });
 
+/* ═══════ ORDERS ═══════ */
+async function loadOrders() {
+  if (!state.selectedCafe) return;
+  try {
+    state.orders = await api(`/dashboard/businesses/${state.selectedCafe.id}/orders`);
+    renderOrders();
+  } catch (err) { toastErr('Failed to load orders'); }
+}
+
+function renderOrders() {
+  const list = document.getElementById('orders-list');
+  const pagEl = document.getElementById('orders-pagination');
+  list.innerHTML = '';
+  pagEl.innerHTML = '';
+
+  const search = (state.ordersFilter.search || '').toLowerCase();
+  const status = state.ordersFilter.status || 'all';
+
+  let filtered = state.orders.filter(o => {
+    const haystack = [o.id, o.guest_name, o.guest_phone, o.address].join(' ').toLowerCase();
+    if (search && !haystack.includes(search)) return false;
+    if (status !== 'all') {
+      if (status === 'draft' && !['draft', 'review', 'awaiting_address', 'address_confirmation'].includes(o.status)) return false;
+      if (status !== 'draft' && o.status !== status) return false;
+    }
+    return true;
+  });
+
+  if (!filtered.length) {
+    list.innerHTML = '<div class="orders-empty"><i class="fas fa-shopping-cart"></i><p>No orders found.</p></div>';
+    return;
+  }
+
+  const perPage = state.ORDERS_PER_PAGE;
+  const total = Math.ceil(filtered.length / perPage);
+  if (state.ordersPage > total) state.ordersPage = total;
+  const start = (state.ordersPage - 1) * perPage;
+  const slice = filtered.slice(start, start + perPage);
+
+  slice.forEach(o => {
+    const row = document.createElement('div');
+    row.className = 'order-row';
+    const itemsHtml = o.items.map(i => `<li>${esc(i.title_en)} x${i.quantity}</li>`).join('');
+    
+    row.innerHTML = `
+      <div class="order-info">
+        <div class="order-header">
+          <span class="order-id">#${o.id.split('_')[1] || o.id}</span>
+          <span class="order-status-badge status-${o.status}">${o.status.toUpperCase()}</span>
+          <span class="order-time">${o.created_at}</span>
+        </div>
+        <div class="order-customer">
+          <strong>${esc(o.guest_name || 'Guest')}</strong> (${esc(o.guest_phone)})
+        </div>
+        <div class="order-address">${esc(o.address || 'No address provided')}</div>
+        <ul class="order-items-list">${itemsHtml}</ul>
+      </div>
+      <div class="order-actions">
+        <select class="status-select btn-sm" onchange="updateOrderStatus('${o.id}', this.value)">
+          <option value="pending" ${o.status === 'pending' ? 'selected' : ''}>Pending</option>
+          <option value="completed" ${o.status === 'completed' ? 'selected' : ''}>Completed</option>
+          <option value="rejected" ${o.status === 'rejected' ? 'selected' : ''}>Rejected</option>
+          <option value="cancelled" ${o.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
+        </select>
+      </div>`;
+    list.appendChild(row);
+  });
+
+  if (total > 1) renderPagination(pagEl, state.ordersPage, total, p => { state.ordersPage = p; renderOrders(); });
+}
+
+async function updateOrderStatus(orderId, status) {
+  try {
+    await api(`/dashboard/businesses/${state.selectedCafe.id}/orders/${orderId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status })
+    });
+    toast('Order status updated');
+    loadOrders();
+  } catch (err) { toastErr(err.message); }
+}
+
+window.updateOrderStatus = updateOrderStatus; // expose to inline onchange
+
+document.getElementById('order-search').addEventListener('input', e => {
+  state.ordersFilter.search = e.target.value;
+  state.ordersPage = 1;
+  renderOrders();
+});
+
+document.getElementById('order-filter-status').addEventListener('change', e => {
+  state.ordersFilter.status = e.target.value;
+  state.ordersPage = 1;
+  renderOrders();
+});
+
+document.getElementById('refresh-orders-btn').addEventListener('click', () => loadOrders());
+
+document.getElementById('export-orders-btn').addEventListener('click', () => {
+  if (!state.selectedCafe) return;
+  window.open(`/dashboard/businesses/${state.selectedCafe.id}/orders/export?token=${state.token}`, '_blank');
+});
+
 /* ═══════ PAGINATION HELPER ═══════ */
 function renderPagination(container, current, total, onChange) {
   container.innerHTML = '';

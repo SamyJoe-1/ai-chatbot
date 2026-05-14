@@ -33,6 +33,8 @@
     pollTimer: null,
     isSending: false,
     isTypingReply: false,
+    lastRequestTime: 0,
+    typingId: 0,
   };
 
   let refs;
@@ -208,6 +210,7 @@
       }
       .cb-messages {
         flex: 1;
+        min-height: 0;
         overflow-y: auto;
         padding: 18px;
         display: flex;
@@ -268,13 +271,33 @@
         0%, 80%, 100% { transform: translateY(0); opacity: 0.45; }
         40% { transform: translateY(-4px); opacity: 1; }
       }
-      .cb-actions, .cb-suggestions, .cb-choice-row {
+      .cb-actions {
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
         margin-top: 2px;
       }
+      .cb-choice-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 2px;
+        max-height: 90px !important;
+        overflow-y: auto !important;
+      }
+      .cb-suggestions {
+        display: block !important;
+        max-height: 100px !important;
+        overflow-y: scroll !important;
+        overflow-x: hidden !important;
+        padding: 4px 0;
+        margin-top: 2px;
+      }
+      .cb-suggestions::-webkit-scrollbar { width: 4px; }
+      .cb-suggestions::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 2px; }
       .cb-action, .cb-chip {
+        display: inline-block !important;
+        margin: 3px;
         border-radius: 999px;
         padding: 6px 12px;
         border: 1px solid var(--cb-border);
@@ -288,9 +311,12 @@
         background: rgba(0, 0, 0, 0.05);
       }
       .cb-footer {
+        flex-shrink: 0;
         padding: 14px;
         background: rgba(255,255,255,0.9);
         border-top: 1px solid var(--cb-border);
+        max-height: 55% !important;
+        overflow-y: auto !important;
       }
       .cb-order {
         display: flex;
@@ -303,7 +329,18 @@
         border-radius: 18px;
         padding: 12px;
         background: #fbfaf8;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
       }
+      .cb-order-items {
+        max-height: 100px !important;
+        overflow-y: auto !important;
+        padding-right: 4px;
+        border-bottom: 1px solid rgba(16, 24, 40, 0.04);
+      }
+      .cb-order-items::-webkit-scrollbar { width: 4px; }
+      .cb-order-items::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 2px; }
       .cb-order-title {
         font-size: 13px;
         font-weight: 700;
@@ -455,8 +492,12 @@
   }
 
   async function typeMessage(text, role, lang) {
+    state.typingId++;
+    const currentId = state.typingId;
     const message = appendMessage('', role, lang, false);
+
     for (let i = 0; i < text.length; i++) {
+      if (currentId !== state.typingId) return;
       message.textContent += text[i];
       refs.messages.scrollTop = refs.messages.scrollHeight;
       await new Promise((resolve) => setTimeout(resolve, 12));
@@ -597,6 +638,9 @@
     card.appendChild(title);
 
     if (Array.isArray(orderDraft.items) && orderDraft.items.length) {
+      const itemsList = document.createElement('div');
+      itemsList.className = 'cb-order-items';
+
       orderDraft.items.forEach((item) => {
         const row = document.createElement('div');
         row.className = 'cb-order-row';
@@ -613,7 +657,14 @@
         dec.type = 'button';
         dec.className = 'cb-qty-btn';
         dec.textContent = '-';
-        dec.addEventListener('click', () => sendMessage({ value: item.dec_value, silent: true }));
+        dec.addEventListener('click', () => {
+          item.quantity = Math.max(0, item.quantity - 1);
+          if (item.quantity === 0) {
+            orderDraft.items = orderDraft.items.filter(i => i.order_item_id !== item.order_item_id);
+          }
+          renderOrderDraft(orderDraft, addressPreview);
+          sendMessage({ value: item.dec_value, silent: true });
+        });
 
         const count = document.createElement('span');
         count.textContent = item.quantity;
@@ -622,21 +673,30 @@
         inc.type = 'button';
         inc.className = 'cb-qty-btn';
         inc.textContent = '+';
-        inc.addEventListener('click', () => sendMessage({ value: item.inc_value, silent: true }));
+        inc.addEventListener('click', () => {
+          item.quantity++;
+          renderOrderDraft(orderDraft, addressPreview);
+          sendMessage({ value: item.inc_value, silent: true });
+        });
 
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'cb-order-remove';
         remove.textContent = state.language === 'ar' ? 'حذف' : 'Remove';
-        remove.addEventListener('click', () => sendMessage({ value: item.remove_value, silent: true }));
+        remove.addEventListener('click', () => {
+          orderDraft.items = orderDraft.items.filter(i => i.order_item_id !== item.order_item_id);
+          renderOrderDraft(orderDraft, addressPreview);
+          sendMessage({ value: item.remove_value, silent: true });
+        });
 
         qty.appendChild(dec);
         qty.appendChild(count);
         qty.appendChild(inc);
         qty.appendChild(remove);
         row.appendChild(qty);
-        card.appendChild(row);
+        itemsList.appendChild(row);
       });
+      card.appendChild(itemsList);
     } else {
       const empty = document.createElement('div');
       empty.className = 'cb-order-empty';
@@ -814,8 +874,8 @@
     const silent = Boolean(isObjectInput && forcedInput.silent);
 
     if (!requestText) return;
-    if (!silent && refs.send.disabled) return;
-    if (state.uiState.input_locked && !isObjectInput) return;
+    if (!forcedInput && refs.send.disabled) return;
+    if (state.uiState.input_locked && !forcedInput) return;
 
     if (!silent) {
       refs.input.value = '';
@@ -824,18 +884,25 @@
     }
 
     if (state.automated && !silent) showTyping();
-    state.isSending = true;
-    syncComposerState();
+    if (!silent) {
+      state.isSending = true;
+      syncComposerState();
+    }
 
     try {
       const startTime = Date.now();
+      state.lastRequestTime = startTime;
+
       const payload = await postJson('/api/message', {
         session_key: state.sessionKey,
         message: requestText,
       });
 
+      // If a newer silent request was sent, ignore this one's UI update to prevent flicker
+      if (silent && startTime < state.lastRequestTime) return;
+
       const elapsed = Date.now() - startTime;
-      if (elapsed < 800) {
+      if (!silent && elapsed < 800) {
         await new Promise((resolve) => setTimeout(resolve, 800 - elapsed));
       }
 
@@ -852,12 +919,6 @@
         return;
       }
 
-      if (payload.response && payload.response.text) {
-        state.history.push({ role: 'bot', content: payload.response.text });
-        state.isTypingReply = true;
-        await typeMessage(payload.response.text, 'bot', state.language);
-      }
-
       if (payload.response && payload.response.buttons) {
         renderButtons(payload.response.buttons);
       }
@@ -866,6 +927,12 @@
         suggestions: payload.response?.suggestions || payload.suggestions || [],
         ui_state: payload.response?.ui_state || payload.ui_state || emptyUiState(),
       });
+
+      if (payload.response && payload.response.text) {
+        state.history.push({ role: 'bot', content: payload.response.text });
+        state.isTypingReply = true;
+        await typeMessage(payload.response.text, 'bot', state.language);
+      }
     } catch (_error) {
       removeTyping();
       const fallback = state.language === 'ar'

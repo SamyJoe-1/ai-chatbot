@@ -232,6 +232,29 @@ img{max-width:100%}
 .chat-msg.support{background:#2b2218;color:#f6e4d2;border-left:4px solid var(--accent)}
 .chat-msg.system{align-self:center;background:rgba(230,237,243,.08);color:var(--text-muted);border-radius:999px;max-width:100%;font-size:12px;padding:8px 14px;text-align:center}
 
+/* ═══════════ ORDERS ═══════════ */
+.orders-container{border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+.orders-list-body{max-height:500px;overflow-y:auto;display:flex;flex-direction:column}
+.order-row{display:flex;padding:16px;border-bottom:1px solid var(--border);gap:16px;background:var(--bg-card);transition:background var(--transition)}
+.order-row:hover{background:var(--bg-hover)}
+.order-info{flex:1;min-width:0}
+.order-header{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+.order-id{font-family:monospace;font-weight:700;color:var(--accent);font-size:14px}
+.order-time{font-size:11px;color:var(--text-dim)}
+.order-status-badge{font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;text-transform:uppercase}
+.status-pending{background:rgba(214,96,32,.2);color:#f8b37c}
+.status-completed{background:rgba(63,185,80,.2);color:var(--success)}
+.status-rejected,.status-cancelled{background:rgba(248,81,73,.15);color:var(--danger)}
+.status-draft{background:rgba(139,148,158,.15);color:var(--text-muted)}
+.order-customer{font-size:13px;margin-bottom:4px}
+.order-address{font-size:12px;color:var(--text-muted);margin-bottom:10px;font-style:italic}
+.order-items-list{list-style:none;margin-left:0;font-size:12px;display:flex;flex-direction:column;gap:3px;border-top:1px dashed var(--border);padding-top:8px}
+.order-items-list li{display:flex;justify-content:space-between;padding-left:12px;position:relative}
+.order-items-list li::before{content:"•";position:absolute;left:0;color:var(--accent)}
+.order-actions{flex-shrink:0;display:flex;align-items:flex-start}
+.status-select{background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);padding:4px 8px;color:var(--text);font:inherit;font-size:12px;cursor:pointer}
+.orders-empty{padding:48px;text-align:center;color:var(--text-muted)}
+
 /* ═══════════ PAGE LOADER ═══════════ */
 .page-loader{position:fixed;inset:0;background:rgba(14,17,23,.8);display:flex;align-items:center;justify-content:center;z-index:9999}
 .loader-spinner{font-size:36px;color:var(--accent);animation:spin 1s linear infinite}

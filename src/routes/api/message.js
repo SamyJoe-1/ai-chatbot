@@ -247,7 +247,7 @@ router.post('/', tokenValidator, (req, res) => {
       }
     }
 
-    if (isCafeOrderingEnabled(business) && session.phase === 'active' && looksLikeOrderIntent(text, lang)) {
+    if (isCafeOrderingEnabled(business) && session.phase === 'active' && (looksLikeOrderIntent(text, lang) || isInternalOrderCommand(text))) {
       const orderSeedItems = matchItemsForOrder({
         text,
         lang,
