@@ -1,3 +1,109 @@
+/* ═══════ NOTIFICATION BELL + BACKGROUND SESSION POLLER ═══════ */
+const notificationState = {
+  pendingMap: {},       // sessionId -> last known pending_human_messages count
+  pollTimer: null,
+  bellAudio: null,
+};
+
+function getOrCreateBell() {
+  if (notificationState.bellAudio) return notificationState.bellAudio;
+  // Synthesise a pleasant bell tone via Web Audio API — no external file needed
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  notificationState.bellAudio = ctx;
+  return ctx;
+}
+
+function playBell() {
+  try {
+    const ctx = getOrCreateBell();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.4);
+    gain.gain.setValueAtTime(0.5, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.6);
+  } catch {}
+}
+
+function fireNewMessageToast(guestName, pendingCount) {
+  Swal.fire({
+    toast: true,
+    position: 'top-end',
+    icon: 'info',
+    title: `New message from ${esc(guestName || 'Guest')}`,
+    text: `${pendingCount} unanswered message${pendingCount > 1 ? 's' : ''} waiting`,
+    showConfirmButton: false,
+    timer: 5000,
+    timerProgressBar: true,
+    background: '#1a2332',
+    color: '#e6edf3',
+    iconColor: '#3b9eff',
+    showClass: { popup: 'animate__animated animate__slideInRight animate__faster' },
+  });
+  playBell();
+}
+
+function updateSessionBadgeInDOM(sessionId, count) {
+  // Update any rendered session-row badge without a full re-render
+  document.querySelectorAll('.session-row').forEach(row => {
+    const badge = row.querySelector('.session-pending-badge');
+    // We tag each row with data-session-id when rendering
+    if (String(row.dataset.sessionId) !== String(sessionId)) return;
+    if (count > 0) {
+      if (badge) {
+        badge.textContent = count;
+      } else {
+        // Create badge and inject after the mode badge
+        const modeBadge = row.querySelector('.session-mode-badge');
+        if (modeBadge) {
+          const newBadge = document.createElement('span');
+          newBadge.className = 'session-pending-badge';
+          newBadge.textContent = count;
+          modeBadge.insertAdjacentElement('afterend', newBadge);
+        }
+      }
+    } else if (badge) {
+      badge.remove();
+    }
+  });
+}
+
+function startGlobalSessionsPoller() {
+  if (notificationState.pollTimer) return;
+  notificationState.pollTimer = setInterval(async () => {
+    if (!state.selectedCafe) return;
+    try {
+      const sessions = await api(`/dashboard/businesses/${state.selectedCafe.id}/sessions`);
+      sessions.forEach(s => {
+        if (Number(s.automated) !== 0) return; // only human-mode sessions matter
+        const sessionId = s.id;
+        const pending = Number(s.pending_human_messages || 0);
+        const previous = notificationState.pendingMap[sessionId] ?? pending; // first load: no toast
+        // Fire notification only if count INCREASED and this is not the currently open chat
+        if (pending > previous && state.activeSessionChatId !== sessionId) {
+          fireNewMessageToast(s.guest_name, pending);
+        }
+        notificationState.pendingMap[sessionId] = pending;
+        updateSessionBadgeInDOM(sessionId, pending);
+      });
+      // Sync state.sessions without triggering a full re-render
+      state.sessions = sessions;
+    } catch {}
+  }, 5000);
+}
+
+function stopGlobalSessionsPoller() {
+  if (notificationState.pollTimer) {
+    clearInterval(notificationState.pollTimer);
+    notificationState.pollTimer = null;
+  }
+}
+
 /* ═══════ CATALOG ═══════ */
 async function loadMenu() {
   if (!state.selectedCafe) return;
@@ -292,8 +398,11 @@ function renderSessions() {
   slice.forEach(s => {
     const row = document.createElement('div');
     row.className = 'session-row';
+    row.dataset.sessionId = s.id;  // ← needed for live badge updates
     const automated = Number(s.automated) !== 0;
     const pendingHumanMessages = Number(s.pending_human_messages || 0);
+    // Seed the poller map so first load doesn't fire false notifications
+    notificationState.pendingMap[s.id] = pendingHumanMessages;
     row.innerHTML = `
       <div class="session-info">
         <div class="session-name">
@@ -411,37 +520,49 @@ async function viewSession(session) {
         const scroll = document.getElementById('chat-scroll');
         renderSessionMessages(scroll, result.messages, { forceScroll: true });
         startSessionChatPolling(session, scroll);
-        document.getElementById('send-admin-msg').addEventListener('click', async () => {
+        async function sendAdminMessage() {
           const inp = document.getElementById('admin-msg-input');
           const msg = inp.value.trim();
           if (!msg) return;
+          const sendBtn = document.getElementById('send-admin-msg');
+          sendBtn.disabled = true;
           try {
             await api(`/dashboard/businesses/${state.selectedCafe.id}/sessions/${session.id}/messages`, {
               method: 'POST',
               body: JSON.stringify({ content: msg }),
             });
-            inp.value = '';
+            inp.value = '';          // clear input
+            inp.focus();             // keep focus so admin can keep typing
             const refreshed = await fetchSessionMessages(session.id);
             state.activeSessionChatSignature = getChatMessagesSignature(refreshed.messages);
             renderSessionMessages(scroll, refreshed.messages, { forceScroll: true });
             const statusBanner = document.getElementById('chat-status-banner');
-            const statusText = document.getElementById('chat-status-text');
-            const statusPill = document.getElementById('chat-status-pill');
-            const adminInput = document.getElementById('admin-msg-input');
+            const statusText  = document.getElementById('chat-status-text');
+            const statusPill  = document.getElementById('chat-status-pill');
             if (refreshed.session.automated === false && statusBanner && statusText && statusPill) {
               statusBanner.classList.remove('auto');
               statusText.textContent = 'Customer support joined this chat.';
-              statusPill.textContent = 'Human support';
+              statusPill.textContent  = 'Human support';
+              inp.placeholder = 'Type support message...';
             }
-            if (refreshed.session.automated === false && adminInput) {
-              adminInput.placeholder = 'Type support message...';
-            }
-            await loadSessions();
-            toast('Message sent!');
-          } catch (err) { toastErr(err.message); }
-        });
+            // Update badge in list without closing modal
+            notificationState.pendingMap[session.id] = 0;
+            updateSessionBadgeInDOM(session.id, 0);
+            // Silently refresh session list in background
+            loadSessions().catch(() => {});
+          } catch (err) {
+            toastErr(err.message);
+          } finally {
+            sendBtn.disabled = false;
+          }
+        }
+
+        document.getElementById('send-admin-msg').addEventListener('click', sendAdminMessage);
         document.getElementById('admin-msg-input').addEventListener('keydown', e => {
-          if (e.key === 'Enter') document.getElementById('send-admin-msg').click();
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();   // prevent any form submit / modal close
+            sendAdminMessage();
+          }
         });
       },
       willClose: () => {

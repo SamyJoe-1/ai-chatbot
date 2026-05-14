@@ -16,6 +16,10 @@ const state = {
   sessionFilter: {},
   MENU_PER_PAGE: 15,
   SESSIONS_PER_PAGE: 20,
+  // Chat polling
+  activeSessionChatId: null,
+  activeSessionChatSignature: '',
+  sessionChatPollTimer: null,
 };
 
 /* ═══════ API HELPER ═══════ */
@@ -256,6 +260,7 @@ document.getElementById('logout-btn').addEventListener('click', () => {
     confirmButtonText: 'Logout',
   }).then(r => {
     if (r.isConfirmed) {
+      if (typeof stopGlobalSessionsPoller === 'function') stopGlobalSessionsPoller();
       localStorage.removeItem('eglotech_dashboard_token');
       window.location.reload();
     }
@@ -373,6 +378,8 @@ function parseTextareaList(v) {
 
 async function selectCafe(id, { updateHash = true } = {}) {
   showLoader();
+  // Stop any previous poller when switching business
+  if (typeof stopGlobalSessionsPoller === 'function') stopGlobalSessionsPoller();
   try {
     state.selectedCafe = await api(`/dashboard/businesses/${id}`);
     fillEditor();
@@ -381,6 +388,8 @@ async function selectCafe(id, { updateHash = true } = {}) {
     state.sessionsPage = 1;
     await Promise.all([loadMenu(), loadSessions()]);
     if (updateHash) syncHashRoute('edit-cafe', { cafeId: state.selectedCafe.id });
+    // Start live notification poller after initial sessions load
+    if (typeof startGlobalSessionsPoller === 'function') startGlobalSessionsPoller();
   } catch (err) { toastErr(err.message); }
   finally { hideLoader(); }
 }
