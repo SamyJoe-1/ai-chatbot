@@ -16,7 +16,7 @@ function authMiddleware(req, res, next) {
   }
 
   try {
-    req.admin = jwt.verify(header.slice(7), SECRET);
+    req.admin = jwt.verify(token, SECRET);
     if (req.admin && req.admin.business_id === undefined && req.admin.cafe_id !== undefined) {
       req.admin.business_id = req.admin.cafe_id;
     }
