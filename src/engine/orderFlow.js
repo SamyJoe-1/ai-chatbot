@@ -122,11 +122,24 @@ function parseOrderCommand(text) {
   if (!value.startsWith(ORDER_COMMAND_PREFIX)) return null;
 
   const rest = value.slice(ORDER_COMMAND_PREFIX.length);
-  const [action, rawItemId] = rest.split(':');
-  const itemId = rawItemId ? Number(rawItemId) : null;
+  const colon1 = rest.indexOf(':');
+  if (colon1 === -1) {
+    return { action: rest, itemId: null, payload: null };
+  }
+  const action = rest.slice(0, colon1);
+  const remainder = rest.slice(colon1 + 1);
+  
+  if (action === 'sync_cart') {
+    return { action, itemId: null, payload: remainder };
+  }
+
+  const colon2 = remainder.indexOf(':');
+  const rawItemId = colon2 === -1 ? remainder : remainder.slice(0, colon2);
+  const itemId = Number(rawItemId);
   return {
     action,
     itemId: Number.isFinite(itemId) ? itemId : null,
+    payload: colon2 === -1 ? null : remainder.slice(colon2 + 1),
   };
 }
 
@@ -759,11 +772,31 @@ function handleOrderMessage({ text, business, session, context, lang }) {
   const items = getOrderItems(order.id);
 
   if (session.phase === 'order_review') {
-    if (orderCommand && ['inc', 'dec', 'remove'].includes(orderCommand.action)) {
+    if (orderCommand && (['inc', 'dec', 'remove'].includes(orderCommand.action) || orderCommand.action === 'sync_cart')) {
       if (order.status === 'pending') {
         updateOrderStatus.run('draft', order.id);
       }
-      const nextItems = applyOrderItemCommand(order.id, orderCommand);
+      
+      let nextItems = [];
+      if (orderCommand.action === 'sync_cart') {
+        try {
+          const newCart = JSON.parse(orderCommand.payload || '[]');
+          const currentItems = getOrderItems(order.id);
+          
+          for (const current of currentItems) {
+            const found = newCart.find(i => Number(i.id) === current.id);
+            if (!found || found.qty <= 0) {
+              deleteOrderItemById.run(current.id);
+            } else if (found.qty !== current.quantity) {
+              updateOrderItemQuantity.run(found.qty, current.id);
+            }
+          }
+        } catch(e) {}
+        nextItems = getOrderItems(order.id);
+      } else {
+        nextItems = applyOrderItemCommand(order.id, orderCommand);
+      }
+
       if (!nextItems.length) {
         const updatedContext = setOrderContext(normalizedContext, { stage: 'add_item' });
         return {

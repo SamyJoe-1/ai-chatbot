@@ -5,8 +5,13 @@ const jwt = require('jsonwebtoken');
 const SECRET = process.env.JWT_SECRET || 'change-me-now';
 
 function authMiddleware(req, res, next) {
+  let token = req.query.token;
   const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) {
+  if (header && header.startsWith('Bearer ')) {
+    token = header.slice(7);
+  }
+
+  if (!token) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 

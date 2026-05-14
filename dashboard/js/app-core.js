@@ -393,7 +393,8 @@ async function selectCafe(id, { updateHash = true } = {}) {
     navigateTo('edit-cafe', { updateHash: false });
     state.menuPage = 1;
     state.sessionsPage = 1;
-    await Promise.all([loadMenu(), loadSessions()]);
+    state.ordersPage = 1;
+    await Promise.all([loadMenu(), loadSessions(), loadOrders()]);
     if (updateHash) syncHashRoute('edit-cafe', { cafeId: state.selectedCafe.id });
     // Start live notification poller after initial sessions load
     if (typeof startGlobalSessionsPoller === 'function') startGlobalSessionsPoller();

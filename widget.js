@@ -312,12 +312,22 @@
       }
       .cb-footer {
         flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
         padding: 14px;
         background: rgba(255,255,255,0.9);
         border-top: 1px solid var(--cb-border);
         max-height: 55% !important;
-        overflow-y: auto !important;
+        overflow: hidden;
       }
+      .cb-footer-scroller {
+        flex: 1;
+        overflow-y: auto !important;
+        min-height: 0;
+        margin-bottom: 8px;
+      }
+      .cb-footer-scroller::-webkit-scrollbar { width: 4px; }
+      .cb-footer-scroller::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 2px; }
       .cb-order {
         display: flex;
         flex-direction: column;
@@ -422,6 +432,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
+        flex-shrink: 0;
       }
       .cb-input {
         flex: 1;
@@ -781,9 +792,11 @@
         </header>
         <div class="cb-messages"></div>
         <footer class="cb-footer">
-          <div class="cb-order"></div>
-          <div class="cb-choice-row"></div>
-          <div class="cb-suggestions"></div>
+          <div class="cb-footer-scroller">
+            <div class="cb-order"></div>
+            <div class="cb-choice-row"></div>
+            <div class="cb-suggestions"></div>
+          </div>
           <div class="cb-form">
             <input class="cb-input" type="text" placeholder="Type your message..." />
             <button class="cb-send" type="button" aria-label="Send message">&#10148;</button>

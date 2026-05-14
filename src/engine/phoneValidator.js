@@ -35,7 +35,9 @@ function validatePhone(input) {
 
   const egyptResult = phone(clean, { country: 'EGY' });
   if (egyptResult.isValid) {
-    return { valid: true, normalized: egyptResult.phoneNumber };
+    // If it's a valid Egyptian mobile number and user typed it starting with '0', keep their format
+    const normalized = (clean.startsWith('0') && clean.length >= 11) ? clean : egyptResult.phoneNumber;
+    return { valid: true, normalized };
   }
 
   return { valid: false, normalized: null };
