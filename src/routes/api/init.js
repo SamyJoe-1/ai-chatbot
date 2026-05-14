@@ -7,6 +7,7 @@ const db = require('../../db/db');
 const { detectLanguage } = require('../../engine/detector');
 const { isSessionExpired, resetSessionState } = require('../../engine/sessionLifecycle');
 const { tokenValidator } = require('../../middleware/tokenValidator');
+const { resolveOrderUiState } = require('../../engine/orderFlow');
 const { COMMON_RESPONSES } = require('../../brains/shared/commonResponses');
 const { getBrain } = require('../../brains');
 
@@ -91,6 +92,8 @@ router.post('/', tokenValidator, (req, res) => {
         ? parseSuggestions(context.last_suggestions)
         : parseSuggestions(business[`suggestions_${language}`]))
       : [];
+    const orderState = resolveOrderUiState({ business, session, context, lang: language });
+    const finalSuggestions = orderState.suggestions.length ? orderState.suggestions : suggestions;
 
     const payloadBusiness = {
       id: business.id,
@@ -117,7 +120,8 @@ router.post('/', tokenValidator, (req, res) => {
       business: payloadBusiness,
       cafe: payloadBusiness,
       history,
-      suggestions: Number(session.automated) !== 0 ? suggestions : [],
+      suggestions: Number(session.automated) !== 0 ? finalSuggestions : [],
+      ui_state: orderState.ui_state,
     });
   } catch (error) {
     console.error('[init]', error);

@@ -77,5 +77,34 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS orders (
+  id TEXT PRIMARY KEY,
+  business_id INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
+  guest_name TEXT,
+  guest_phone TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',
+  address TEXT,
+  confirmed_at TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS order_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  service_item_id INTEGER REFERENCES service_items(id) ON DELETE SET NULL,
+  title_en TEXT NOT NULL,
+  title_ar TEXT,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  unit_price REAL,
+  currency TEXT DEFAULT 'EGP',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_orders_business_phone_status ON orders (business_id, guest_phone, status, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_order_items_unique_service_item ON order_items (order_id, service_item_id);
+
 INSERT OR IGNORE INTO admins (id, username, password, role)
 VALUES (1, 'admin', '$2a$10$kx69ZN/LvamVRScsPjB8aeDPF46oKClKAIsNFOXSw7bk6bSMle686', 'admin');

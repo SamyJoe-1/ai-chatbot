@@ -8,6 +8,15 @@ const { detectLanguage, normalizeArabicDigits } = require('../../engine/detector
 const { validatePhone } = require('../../engine/phoneValidator');
 const { recoverUserQuery } = require('../../engine/queryRecovery');
 const { isSessionExpired, resetSessionState } = require('../../engine/sessionLifecycle');
+const {
+  isCafeOrderingEnabled,
+  isInternalOrderCommand,
+  looksLikeOrderIntent,
+  getExistingPhoneStatus,
+  startOrderFlow,
+  handleOrderMessage,
+  matchItemsForOrder,
+} = require('../../engine/orderFlow');
 const { COMMON_RESPONSES } = require('../../brains/shared/commonResponses');
 const { getBrain } = require('../../brains');
 const { recoverFranco } = require('../../engine/franco');
@@ -41,6 +50,37 @@ function parseSuggestions(business, lang) {
 
 function normalizeSuggestions(value) {
   return Array.isArray(value) ? value.slice(0, 4).filter(Boolean) : [];
+}
+
+function emptyUiState() {
+  return {
+    input_locked: false,
+    choice_buttons: [],
+    address_preview: '',
+    order_draft: null,
+  };
+}
+
+function mergeRecentItemIds(context, ids) {
+  const nextIds = Array.isArray(context.recent_item_ids) ? context.recent_item_ids.slice() : [];
+  ids.forEach((id) => {
+    if (!Number.isFinite(id)) return;
+    const existingIndex = nextIds.indexOf(id);
+    if (existingIndex >= 0) {
+      nextIds.splice(existingIndex, 1);
+    }
+    nextIds.push(id);
+  });
+  return nextIds.slice(-10);
+}
+
+function collectTrackedItemIds(intentResult) {
+  if (!intentResult || typeof intentResult !== 'object') return [];
+  if (intentResult.item?.id) return [intentResult.item.id];
+  if (Array.isArray(intentResult.items)) {
+    return intentResult.items.map((item) => item?.id).filter(Number.isFinite).slice(0, 10);
+  }
+  return [];
 }
 
 function shouldRetryWithRecovery(intent) {
@@ -84,7 +124,10 @@ router.post('/', tokenValidator, (req, res) => {
     }
 
     const text = String(message).trim();
-    const lang = detectLanguage(text);
+    let lang = detectLanguage(text);
+    if (session.phase === 'collect_phone' && session.language) {
+      lang = session.language === 'ar' ? 'ar' : 'en';
+    }
 
     if (isSessionExpired(session.last_active)) {
       const freshMessages = resetSessionState(db, session.id, lang, business);
@@ -98,7 +141,10 @@ router.post('/', tokenValidator, (req, res) => {
     }
 
     const context = parseContext(session.context);
-    insertMessage.run(session.id, 'user', text, null);
+    const internalOrderCommand = isInternalOrderCommand(text);
+    if (!internalOrderCommand) {
+      insertMessage.run(session.id, 'user', text, null);
+    }
 
     if (Number(session.automated) === 0) {
       db.prepare("UPDATE sessions SET last_active = datetime('now') WHERE id = ?").run(session.id);
@@ -149,7 +195,11 @@ router.post('/', tokenValidator, (req, res) => {
         });
       }
 
-      const reply = COMMON_RESPONSES.active_ready[lang](session.guest_name || (lang === 'ar' ? 'صديقي' : 'there'));
+      const displayName = session.guest_name || (lang === 'ar' ? 'صديقي' : 'there');
+      const isReturningGuest = getExistingPhoneStatus(business.id, phoneResult.normalized, session.id);
+      const reply = isReturningGuest
+        ? COMMON_RESPONSES.active_ready_again[lang](displayName)
+        : COMMON_RESPONSES.active_ready[lang](displayName);
       const nextContext = {
         ...context,
         last_suggestions: parseSuggestions(business, lang),
@@ -159,9 +209,78 @@ router.post('/', tokenValidator, (req, res) => {
 
       return res.json({
         automated: true,
-        response: { text: reply, type: 'text', buttons: [], suggestions: parseSuggestions(business, lang) },
+        response: {
+          text: reply,
+          type: 'text',
+          buttons: [],
+          suggestions: parseSuggestions(business, lang),
+          ui_state: emptyUiState(),
+        },
         language: lang,
         phase: 'active',
+      });
+    }
+
+    if (isCafeOrderingEnabled(business) && String(session.phase || '').startsWith('order_')) {
+      const orderFlowResult = handleOrderMessage({ text, business, session, context, lang });
+      if (orderFlowResult) {
+        updateSession.run(
+          orderFlowResult.phase,
+          lang,
+          session.guest_name,
+          session.guest_phone,
+          JSON.stringify(orderFlowResult.context),
+          session.id
+        );
+
+        if (!orderFlowResult.skipBotMessage && orderFlowResult.response.text) {
+          insertMessage.run(session.id, 'bot', orderFlowResult.response.text, orderFlowResult.intent);
+        }
+
+        return res.json({
+          automated: true,
+          response: orderFlowResult.response,
+          language: lang,
+          phase: orderFlowResult.phase,
+          intent: orderFlowResult.intent,
+        });
+      }
+    }
+
+    if (isCafeOrderingEnabled(business) && session.phase === 'active' && looksLikeOrderIntent(text, lang)) {
+      const orderSeedItems = matchItemsForOrder({
+        text,
+        lang,
+        businessId: business.id,
+        context,
+      });
+      const orderStartResult = startOrderFlow({
+        business,
+        session,
+        context,
+        lang,
+        seedItems: orderSeedItems,
+      });
+
+      updateSession.run(
+        orderStartResult.phase,
+        lang,
+        session.guest_name,
+        session.guest_phone,
+        JSON.stringify(orderStartResult.context),
+        session.id
+      );
+
+      if (orderStartResult.response.text) {
+        insertMessage.run(session.id, 'bot', orderStartResult.response.text, orderStartResult.intent);
+      }
+
+      return res.json({
+        automated: true,
+        response: orderStartResult.response,
+        language: lang,
+        phase: orderStartResult.phase,
+        intent: orderStartResult.intent,
       });
     }
 
@@ -212,11 +331,16 @@ router.post('/', tokenValidator, (req, res) => {
       }
     }
 
+    const trackedItemIds = mergeRecentItemIds(
+      context,
+      collectTrackedItemIds(intentResult)
+    );
     const payload = brain.buildResponse(intentResult, lang, business);
     const nextContext = {
       ...context,
       ...payload.context_update,
       last_suggestions: normalizeSuggestions(payload.suggestions),
+      recent_item_ids: trackedItemIds,
     };
     if (resolvedText !== text) {
       nextContext.last_recovered_query = resolvedText;
@@ -239,6 +363,7 @@ router.post('/', tokenValidator, (req, res) => {
         type: payload.type,
         buttons: payload.buttons,
         suggestions: payload.suggestions,
+        ui_state: emptyUiState(),
       },
       language: lang,
       phase: session.phase,

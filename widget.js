@@ -24,10 +24,27 @@
     hasHistory: false,
     history: [],
     currentSuggestions: [],
+    uiState: {
+      input_locked: false,
+      choice_buttons: [],
+      address_preview: '',
+      order_draft: null,
+    },
     pollTimer: null,
     isSending: false,
     isTypingReply: false,
   };
+
+  let refs;
+
+  function emptyUiState() {
+    return {
+      input_locked: false,
+      choice_buttons: [],
+      address_preview: '',
+      order_draft: null,
+    };
+  }
 
   function loadStoredSession() {
     try {
@@ -251,7 +268,7 @@
         0%, 80%, 100% { transform: translateY(0); opacity: 0.45; }
         40% { transform: translateY(-4px); opacity: 1; }
       }
-      .cb-actions, .cb-suggestions {
+      .cb-actions, .cb-suggestions, .cb-choice-row {
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
@@ -275,7 +292,90 @@
         background: rgba(255,255,255,0.9);
         border-top: 1px solid var(--cb-border);
       }
-      .cb-footer.live-mode .cb-suggestions {
+      .cb-order {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .cb-order-card {
+        border: 1px solid var(--cb-border);
+        border-radius: 18px;
+        padding: 12px;
+        background: #fbfaf8;
+      }
+      .cb-order-title {
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 8px;
+        color: var(--cb-text);
+      }
+      .cb-order-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 0;
+        border-top: 1px solid rgba(16, 24, 40, 0.06);
+      }
+      .cb-order-row:first-of-type {
+        border-top: 0;
+        padding-top: 0;
+      }
+      .cb-order-name {
+        flex: 1;
+        font-size: 13px;
+        color: var(--cb-text);
+      }
+      .cb-order-qty {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .cb-qty-btn {
+        width: 28px;
+        height: 28px;
+        border-radius: 999px;
+        border: 1px solid var(--cb-border);
+        background: #fff;
+        color: var(--cb-text);
+        cursor: pointer;
+        font-size: 15px;
+        line-height: 1;
+      }
+      .cb-order-remove {
+        border: 0;
+        background: transparent;
+        color: #b14a4a;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .cb-order-empty, .cb-order-address {
+        font-size: 13px;
+        color: #5a6965;
+        line-height: 1.45;
+      }
+      .cb-choice-row {
+        margin-bottom: 10px;
+      }
+      .cb-choice {
+        border: 0;
+        border-radius: 999px;
+        padding: 9px 14px;
+        color: #fff;
+        background: #24443c;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .cb-choice.secondary {
+        background: #eef3f1;
+        color: var(--cb-text);
+        border: 1px solid var(--cb-border);
+      }
+      .cb-choice.danger { background: #c65353; }
+      .cb-footer.live-mode .cb-suggestions,
+      .cb-footer.live-mode .cb-order,
+      .cb-footer.live-mode .cb-choice-row {
         display: none;
       }
       .cb-root.live-mode .cb-actions {
@@ -293,6 +393,11 @@
         padding: 12px 14px;
         font-size: 14px;
         outline: none;
+      }
+      .cb-input:disabled {
+        background: #f3f5f4;
+        color: #7a8783;
+        cursor: not-allowed;
       }
       .cb-send {
         width: 46px;
@@ -321,8 +426,7 @@
     refs.messages.appendChild(message);
     refs.messages.scrollTop = refs.messages.scrollHeight;
     if (allowAutoOpen !== false && role === 'bot' && !state.open) {
-      // openPanel(true); // Disable auto-open to show the badge instead
-      refs.root.querySelector('.cb-bubble').classList.add('has-unread');
+      refs.bubble.classList.add('has-unread');
       playNotifySound();
     }
     return message;
@@ -355,7 +459,7 @@
     for (let i = 0; i < text.length; i++) {
       message.textContent += text[i];
       refs.messages.scrollTop = refs.messages.scrollHeight;
-      await new Promise(r => setTimeout(r, 12));
+      await new Promise((resolve) => setTimeout(resolve, 12));
     }
     if (!state.open) {
       refs.bubble.classList.add('has-unread');
@@ -366,8 +470,6 @@
 
   function playNotifySound() {
     try {
-      const audio = new Audio('https://fonts.gstatic.com/s/i/productlogos/googleg/v6/web-24dp/logo_googleg_color_24dp.png'); // Placeholder or better sound
-      // Real sound link
       const sfx = new Audio('https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3');
       sfx.volume = 0.4;
       sfx.play().catch(() => {});
@@ -412,22 +514,278 @@
     }
   }
 
+  function normalizeUiState(uiState) {
+    return {
+      input_locked: Boolean(uiState && uiState.input_locked),
+      choice_buttons: Array.isArray(uiState && uiState.choice_buttons) ? uiState.choice_buttons : [],
+      address_preview: uiState && uiState.address_preview ? String(uiState.address_preview) : '',
+      order_draft: uiState && uiState.order_draft ? uiState.order_draft : null,
+    };
+  }
+
+  function setInputPlaceholder() {
+    if (!refs || !refs.input) return;
+    refs.input.placeholder = state.uiState.input_locked
+      ? (state.language === 'ar' ? 'اختر من الخيارات الظاهرة' : 'Choose one of the visible options')
+      : (state.language === 'ar' ? 'اكتب رسالتك...' : 'Type your message...');
+  }
+
+  function syncComposerState() {
+    if (!refs) return;
+    const locked = state.uiState.input_locked || !state.automated;
+    refs.input.disabled = locked;
+    refs.send.disabled = locked || state.isSending;
+  }
+
+  function renderButtons(buttons) {
+    if (!buttons || !buttons.length) return;
+    const row = document.createElement('div');
+    row.className = 'cb-actions';
+    buttons.forEach((button) => {
+      const link = document.createElement('a');
+      link.className = 'cb-action';
+      link.href = button.url;
+      link.target = button.target || '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = button.label;
+      row.appendChild(link);
+    });
+    refs.messages.appendChild(row);
+    refs.messages.scrollTop = refs.messages.scrollHeight;
+  }
+
+  function renderSuggestions(list) {
+    state.currentSuggestions = Array.isArray(list) ? list.slice(0, 10) : [];
+    refs.suggestions.innerHTML = '';
+    if (!state.automated) return;
+    state.currentSuggestions.forEach((text) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'cb-chip';
+      chip.textContent = text;
+      chip.addEventListener('click', () => sendMessage({ value: text, displayText: text, silent: false }));
+      refs.suggestions.appendChild(chip);
+    });
+  }
+
+  function renderChoiceButtons(buttons) {
+    refs.choices.innerHTML = '';
+    buttons.forEach((button) => {
+      const choice = document.createElement('button');
+      choice.type = 'button';
+      choice.className = `cb-choice ${button.style || 'primary'}`.trim();
+      choice.textContent = button.label || button.value;
+      choice.addEventListener('click', () => sendMessage({
+        value: button.value || button.label,
+        displayText: button.label || button.value,
+        silent: false,
+      }));
+      refs.choices.appendChild(choice);
+    });
+  }
+
+  function renderOrderDraft(orderDraft, addressPreview) {
+    refs.order.innerHTML = '';
+    if (!orderDraft) return;
+
+    const card = document.createElement('div');
+    card.className = 'cb-order-card';
+
+    const title = document.createElement('div');
+    title.className = 'cb-order-title';
+    title.textContent = `${state.language === 'ar' ? 'رقم الطلب' : 'Order ID'}: ${orderDraft.order_id}`;
+    card.appendChild(title);
+
+    if (Array.isArray(orderDraft.items) && orderDraft.items.length) {
+      orderDraft.items.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = 'cb-order-row';
+
+        const name = document.createElement('div');
+        name.className = 'cb-order-name';
+        name.textContent = item.title;
+        row.appendChild(name);
+
+        const qty = document.createElement('div');
+        qty.className = 'cb-order-qty';
+
+        const dec = document.createElement('button');
+        dec.type = 'button';
+        dec.className = 'cb-qty-btn';
+        dec.textContent = '-';
+        dec.addEventListener('click', () => sendMessage({ value: item.dec_value, silent: true }));
+
+        const count = document.createElement('span');
+        count.textContent = item.quantity;
+
+        const inc = document.createElement('button');
+        inc.type = 'button';
+        inc.className = 'cb-qty-btn';
+        inc.textContent = '+';
+        inc.addEventListener('click', () => sendMessage({ value: item.inc_value, silent: true }));
+
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'cb-order-remove';
+        remove.textContent = state.language === 'ar' ? 'حذف' : 'Remove';
+        remove.addEventListener('click', () => sendMessage({ value: item.remove_value, silent: true }));
+
+        qty.appendChild(dec);
+        qty.appendChild(count);
+        qty.appendChild(inc);
+        qty.appendChild(remove);
+        row.appendChild(qty);
+        card.appendChild(row);
+      });
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'cb-order-empty';
+      empty.textContent = orderDraft.empty_label || (state.language === 'ar' ? 'الطلب فارغ حالياً' : 'This order is empty right now');
+      card.appendChild(empty);
+    }
+
+    if (addressPreview) {
+      const address = document.createElement('div');
+      address.className = 'cb-order-address';
+      address.textContent = `${state.language === 'ar' ? 'العنوان' : 'Address'}: ${addressPreview}`;
+      card.appendChild(address);
+    }
+
+    refs.order.appendChild(card);
+  }
+
+  function applyUiState(uiState) {
+    state.uiState = normalizeUiState(uiState || emptyUiState());
+    renderChoiceButtons(state.uiState.choice_buttons);
+    renderOrderDraft(state.uiState.order_draft, state.uiState.address_preview);
+    setInputPlaceholder();
+    syncComposerState();
+  }
+
+  function updateChatModeUi() {
+    if (!refs) return;
+    refs.root.classList.toggle('live-mode', !state.automated);
+    refs.brandSub.textContent = state.automated
+      ? (state.language === 'ar' ? 'مساعدة فورية' : 'Instant support')
+      : (state.language === 'ar' ? 'تم تحويل المحادثة إلى خدمة العملاء' : 'Chat handed to customer support');
+    refs.footer.classList.toggle('live-mode', !state.automated);
+    syncComposerState();
+  }
+
+  function openPanel(force) {
+    state.open = force !== undefined ? force : !state.open;
+    refs.root.classList.toggle('open', state.open);
+    if (state.open) {
+      refs.bubble.classList.remove('has-unread');
+      if (!refs.input.disabled) refs.input.focus();
+    }
+  }
+
+  function buildWidget(cafe) {
+    createStyles({
+      primary: cafe.primary_color || '#17443a',
+    });
+
+    const root = document.createElement('div');
+    root.className = 'cb-root';
+    root.innerHTML = `
+      <button class="cb-bubble" type="button" aria-label="Open chatbot">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 3C6.477 3 2 6.91 2 11.733c0 2.143.904 4.106 2.41 5.622L3.3 21l4.575-1.527c1.228.46 2.567.705 3.995.705 5.523 0 10-3.91 10-8.445S17.523 3 12 3Z"></path>
+        </svg>
+      </button>
+      <section class="cb-panel" aria-label="Chatbot panel">
+        <header class="cb-header">
+          <div class="cb-brand">
+            ${cafe.logo_url ? `<img class="cb-logo" src="${cafe.logo_url}" alt="${cafe.name}">` : `
+              <div class="cb-logo" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.15);">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 8V4H8"></path>
+                  <rect width="16" height="12" x="4" y="8" rx="2"></rect>
+                  <path d="M2 14h2"></path>
+                  <path d="M20 14h2"></path>
+                  <path d="M15 13v2"></path>
+                  <path d="M9 13v2"></path>
+                </svg>
+              </div>
+            `}
+            <div class="cb-brand-text">
+              <div class="cb-brand-name">${cafe.name}</div>
+              <div class="cb-brand-sub">Instant support</div>
+            </div>
+          </div>
+          <div>
+            <button type="button" class="cb-close cb-new" aria-label="Start new chat">&#8635;</button>
+            <button type="button" class="cb-close" aria-label="Close chatbot">&times;</button>
+          </div>
+        </header>
+        <div class="cb-messages"></div>
+        <footer class="cb-footer">
+          <div class="cb-order"></div>
+          <div class="cb-choice-row"></div>
+          <div class="cb-suggestions"></div>
+          <div class="cb-form">
+            <input class="cb-input" type="text" placeholder="Type your message..." />
+            <button class="cb-send" type="button" aria-label="Send message">&#10148;</button>
+          </div>
+        </footer>
+      </section>
+    `;
+
+    document.body.appendChild(root);
+
+    return {
+      root,
+      bubble: root.querySelector('.cb-bubble'),
+      newChat: root.querySelector('.cb-new'),
+      close: root.querySelector('.cb-close:not(.cb-new)'),
+      messages: root.querySelector('.cb-messages'),
+      order: root.querySelector('.cb-order'),
+      choices: root.querySelector('.cb-choice-row'),
+      suggestions: root.querySelector('.cb-suggestions'),
+      brandSub: root.querySelector('.cb-brand-sub'),
+      footer: root.querySelector('.cb-footer'),
+      input: root.querySelector('.cb-input'),
+      send: root.querySelector('.cb-send'),
+    };
+  }
+
+  async function initSession(forceNew) {
+    let payload;
+    try {
+      payload = await postJson('/api/init', { session_key: state.sessionKey, force_new: Boolean(forceNew) });
+    } catch (error) {
+      if (error && error.payload && error.payload.error === 'invalid_token') return;
+      return;
+    }
+
+    state.sessionKey = payload.session_key;
+    state.language = payload.language || 'en';
+    state.cafe = payload.cafe;
+    state.automated = payload.automated !== false;
+    persistSession();
+
+    return payload;
+  }
+
+  function applyPayloadUi(payload) {
+    applyUiState(payload && payload.ui_state ? payload.ui_state : emptyUiState());
+    renderSuggestions(payload && Array.isArray(payload.suggestions) ? payload.suggestions : []);
+    setInputPlaceholder();
+    updateChatModeUi();
+  }
+
   function startPolling() {
     stopPolling();
     state.pollTimer = setInterval(async () => {
       if (!state.sessionKey || !refs || state.isSending || state.isTypingReply) return;
       try {
         const payload = await initSession(false);
-        if (!payload) return;
-        if (state.isSending || state.isTypingReply) return;
+        if (!payload || state.isSending || state.isTypingReply) return;
         state.language = payload.language || state.language;
         state.automated = payload.automated !== false;
-        const historySync = syncIncomingHistory(payload.history, state.language);
-        if (historySync.changed || !state.currentSuggestions.length) {
-          renderSuggestions(payload.suggestions);
-        }
-        setInputPlaceholder();
-        updateChatModeUi();
+        syncIncomingHistory(payload.history, state.language);
+        applyPayloadUi(payload);
       } catch {}
     }, 3000);
   }
@@ -449,202 +807,79 @@
     }
   }
 
-  function renderButtons(buttons) {
-    if (!buttons || !buttons.length) return;
-    const row = document.createElement('div');
-    row.className = 'cb-actions';
-    buttons.forEach((button) => {
-      const link = document.createElement('a');
-      link.className = 'cb-action';
-      link.href = button.url;
-      link.target = button.target || '_blank';
-      link.rel = 'noopener noreferrer';
-      link.textContent = button.label;
-      row.appendChild(link);
-    });
-    refs.messages.appendChild(row);
-    refs.messages.scrollTop = refs.messages.scrollHeight;
-  }
+  async function sendMessage(forcedInput) {
+    const isObjectInput = forcedInput && typeof forcedInput === 'object' && !Array.isArray(forcedInput);
+    const requestText = isObjectInput ? String(forcedInput.value || '').trim() : String(forcedInput || refs.input.value || '').trim();
+    const displayText = isObjectInput ? String(forcedInput.displayText || forcedInput.value || '').trim() : requestText;
+    const silent = Boolean(isObjectInput && forcedInput.silent);
 
-  function renderSuggestions(list) {
-    state.currentSuggestions = Array.isArray(list) ? list.slice(0, 4) : [];
-    refs.suggestions.innerHTML = '';
-    if (!state.automated) return;
-    state.currentSuggestions.forEach((text) => {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'cb-chip';
-      chip.textContent = text;
-      chip.addEventListener('click', () => sendMessage(text));
-      refs.suggestions.appendChild(chip);
-    });
-  }
+    if (!requestText) return;
+    if (!silent && refs.send.disabled) return;
+    if (state.uiState.input_locked && !isObjectInput) return;
 
-  function setInputPlaceholder() {
-    if (!refs || !refs.input) return;
-    refs.input.placeholder = state.language === 'ar' ? 'اكتب رسالتك...' : 'Type your message...';
-  }
-
-  function updateChatModeUi() {
-    if (!refs) return;
-    refs.root.classList.toggle('live-mode', !state.automated);
-    refs.brandSub.textContent = state.automated
-      ? (state.language === 'ar' ? 'مساعدة فورية' : 'Instant support')
-      : (state.language === 'ar' ? 'تم تحويل المحادثة إلى خدمة العملاء' : 'Chat handed to customer support');
-    refs.footer.classList.toggle('live-mode', !state.automated);
-  }
-
-  function openPanel(force) {
-    state.open = force !== undefined ? force : !state.open;
-    refs.root.classList.toggle('open', state.open);
-    if (state.open) {
-      refs.bubble.classList.remove('has-unread');
-      refs.input.focus();
+    if (!silent) {
+      refs.input.value = '';
+      appendMessage(displayText, 'user', state.language);
+      state.history.push({ role: 'user', content: displayText });
     }
-  }
 
-  async function sendMessage(forcedText) {
-    const text = (forcedText || refs.input.value || '').trim();
-    if (!text || refs.send.disabled) return;
-
-    refs.input.value = '';
-    appendMessage(text, 'user', state.language);
-    state.history.push({ role: 'user', content: text });
-    if (state.automated) showTyping();
-    refs.send.disabled = true;
+    if (state.automated && !silent) showTyping();
     state.isSending = true;
+    syncComposerState();
 
     try {
       const startTime = Date.now();
       const payload = await postJson('/api/message', {
         session_key: state.sessionKey,
-        message: text,
+        message: requestText,
       });
 
       const elapsed = Date.now() - startTime;
-      if (elapsed < 800) await new Promise(r => setTimeout(r, 800 - elapsed));
+      if (elapsed < 800) {
+        await new Promise((resolve) => setTimeout(resolve, 800 - elapsed));
+      }
 
       state.language = payload.language || state.language;
-      removeTyping();
-      if (payload.reset) {
-        state.automated = payload.automated !== false;
-        renderHistory(payload.history || [], state.language);
-        renderSuggestions(payload.response?.suggestions || []);
-        setInputPlaceholder();
-        updateChatModeUi();
-        return;
-      }
       state.automated = payload.automated !== false;
-      updateChatModeUi();
-      if (!payload.response || !payload.response.text) {
-        renderSuggestions(payload.suggestions || []);
-        setInputPlaceholder();
+      removeTyping();
+
+      if (payload.reset) {
+        renderHistory(payload.history || [], state.language);
+        applyPayloadUi({
+          suggestions: payload.response?.suggestions || [],
+          ui_state: payload.response?.ui_state || emptyUiState(),
+        });
         return;
       }
-      state.history.push({ role: 'bot', content: payload.response.text });
-      state.isTypingReply = true;
-      await typeMessage(payload.response.text, 'bot', state.language);
-      renderButtons(payload.response.buttons);
-      renderSuggestions(payload.response.suggestions);
-      setInputPlaceholder();
+
+      if (payload.response && payload.response.text) {
+        state.history.push({ role: 'bot', content: payload.response.text });
+        state.isTypingReply = true;
+        await typeMessage(payload.response.text, 'bot', state.language);
+      }
+
+      if (payload.response && payload.response.buttons) {
+        renderButtons(payload.response.buttons);
+      }
+
+      applyPayloadUi({
+        suggestions: payload.response?.suggestions || payload.suggestions || [],
+        ui_state: payload.response?.ui_state || payload.ui_state || emptyUiState(),
+      });
     } catch (_error) {
       removeTyping();
       const fallback = state.language === 'ar'
-        ? `حصل خطأ. تواصل معنا على ${state.cafe.phone || 'رقم التواصل'}.`
-        : `Something went wrong. Contact us at ${state.cafe.phone || 'our phone number'}.`;
+        ? `حدث خطأ ما. تواصل معنا على ${state.cafe && state.cafe.phone ? state.cafe.phone : 'رقم الهاتف'}.`
+        : `Something went wrong. Contact us at ${state.cafe && state.cafe.phone ? state.cafe.phone : 'our phone number'}.`;
       appendMessage(fallback, 'bot', state.language);
       state.history.push({ role: 'bot', content: fallback });
+      applyUiState(emptyUiState());
     } finally {
       state.isSending = false;
       state.isTypingReply = false;
-      refs.send.disabled = false;
-      refs.input.focus();
+      syncComposerState();
+      if (!refs.input.disabled) refs.input.focus();
     }
-  }
-
-  function buildWidget(cafe) {
-    createStyles({
-      primary: cafe.primary_color || '#17443a'
-    });
-
-    const root = document.createElement('div');
-    root.className = 'cb-root';
-    root.innerHTML = `
-      <button class="cb-bubble" type="button" aria-label="Open chatbot">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M12 3C6.477 3 2 6.91 2 11.733c0 2.143.904 4.106 2.41 5.622L3.3 21l4.575-1.527c1.228.46 2.567.705 3.995.705 5.523 0 10-3.91 10-8.445S17.523 3 12 3Z"></path>
-        </svg>
-      </button>
-      <section class="cb-panel" aria-label="Chatbot panel">
-        <header class="cb-header">
-          <div class="cb-brand">
-            ${cafe.logo_url ? `<img class="cb-logo" src="${cafe.logo_url}" alt="${cafe.name}">` : `
-              <div class="cb-logo" style="display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.15);">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 8V4H8"></path>
-                  <rect width="16" height="12" x="4" y="8" rx="2"></rect>
-                  <path d="M2 14h2"></path>
-                  <path d="M20 14h2"></path>
-                  <path d="M15 13v2"></path>
-                  <path d="M9 13v2"></path>
-                </svg>
-              </div>
-            `}
-            <div class="cb-brand-text">
-              <div class="cb-brand-name">${cafe.name}</div>
-              <div class="cb-brand-sub">Instant support</div>
-            </div>
-          </div>
-          <div>
-            <button type="button" class="cb-close cb-new" aria-label="Start new chat">↺</button>
-            <button type="button" class="cb-close" aria-label="Close chatbot">×</button>
-          </div>
-        </header>
-        <div class="cb-messages"></div>
-        <footer class="cb-footer">
-          <div class="cb-suggestions"></div>
-          <div class="cb-form">
-            <input class="cb-input" type="text" placeholder="Type your message..." />
-            <button class="cb-send" type="button" aria-label="Send message">➜</button>
-          </div>
-        </footer>
-      </section>
-    `;
-
-    document.body.appendChild(root);
-
-    return {
-      root,
-      bubble: root.querySelector('.cb-bubble'),
-      newChat: root.querySelector('.cb-new'),
-      close: root.querySelector('.cb-close:not(.cb-new)'),
-      messages: root.querySelector('.cb-messages'),
-      suggestions: root.querySelector('.cb-suggestions'),
-      brandSub: root.querySelector('.cb-brand-sub'),
-      footer: root.querySelector('.cb-footer'),
-      input: root.querySelector('.cb-input'),
-      send: root.querySelector('.cb-send'),
-    };
-  }
-
-  let refs;
-
-  async function initSession(forceNew) {
-    let payload;
-    try {
-      payload = await postJson('/api/init', { session_key: state.sessionKey, force_new: Boolean(forceNew) });
-    } catch (error) {
-      if (error && error.payload && error.payload.error === 'invalid_token') return;
-      return;
-    }
-
-    state.sessionKey = payload.session_key;
-    state.language = payload.language || 'en';
-    state.cafe = payload.cafe;
-    state.automated = payload.automated !== false;
-    persistSession();
-
-    return payload;
   }
 
   async function startNewChat() {
@@ -652,9 +887,7 @@
     const payload = await initSession(true);
     if (!payload) return;
     renderHistory(payload.history, payload.language);
-    renderSuggestions(payload.suggestions);
-    setInputPlaceholder();
-    updateChatModeUi();
+    applyPayloadUi(payload);
     startPolling();
     openPanel(true);
   }
@@ -679,9 +912,7 @@
     });
 
     renderHistory(payload.history, payload.language);
-    renderSuggestions(payload.suggestions);
-    setInputPlaceholder();
-    updateChatModeUi();
+    applyPayloadUi(payload);
     startPolling();
 
     if (payload.is_new || !state.hasHistory) {
