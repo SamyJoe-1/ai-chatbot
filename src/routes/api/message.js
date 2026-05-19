@@ -16,6 +16,7 @@ const {
   startOrderFlow,
   handleOrderMessage,
   matchItemsForOrder,
+  resolveOrderUiState,
 } = require('../../engine/orderFlow');
 const { COMMON_RESPONSES } = require('../../brains/shared/commonResponses');
 const { getBrain } = require('../../brains');
@@ -356,6 +357,8 @@ router.post('/', tokenValidator, (req, res) => {
     );
     insertMessage.run(session.id, 'bot', payload.text, intentResult.intent);
 
+    const orderState = resolveOrderUiState({ business, session, context: nextContext, lang });
+
     return res.json({
       automated: true,
       response: {
@@ -363,7 +366,7 @@ router.post('/', tokenValidator, (req, res) => {
         type: payload.type,
         buttons: payload.buttons,
         suggestions: payload.suggestions,
-        ui_state: emptyUiState(),
+        ui_state: orderState.ui_state,
       },
       language: lang,
       phase: session.phase,
