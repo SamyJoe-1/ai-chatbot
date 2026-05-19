@@ -594,7 +594,7 @@
 
   function syncComposerState() {
     if (!refs) return;
-    const locked = state.uiState.input_locked || !state.automated;
+    const locked = state.uiState.input_locked;
     refs.input.disabled = locked;
     refs.send.disabled = locked || state.isSending;
   }

@@ -266,7 +266,7 @@ function buildChoiceButtons(lang, stage, hasItems) {
 
 function buildUiState({ lang, stage, order, items, addressPreview }) {
   return {
-    input_locked: false,
+    input_locked: stage !== 'address',
     choice_buttons: buildChoiceButtons(lang, stage, items.length > 0),
     address_preview: addressPreview || '',
     order_draft: order ? {
@@ -869,8 +869,19 @@ function handleOrderMessage({ text, business, session, context, lang }) {
       };
     }
 
-    // Removed locked fallback, returning null allows normal chat to handle questions
-    return null;
+    return {
+      phase: 'order_review',
+      context: normalizedContext,
+      response: {
+        text: buildLockedChoiceMessage({ lang }),
+        type: 'text',
+        buttons: [],
+        ...serializeOrderState({ lang, stage: 'review', order: getOrderById.get(order.id), items, context: normalizedContext }),
+      },
+      intent: 'order_review_locked',
+      skipUserMessage: false,
+      skipBotMessage: false,
+    };
   }
 
   if (session.phase === 'order_add_item') {
@@ -989,8 +1000,27 @@ function handleOrderMessage({ text, business, session, context, lang }) {
       };
     }
 
-    // Removed locked fallback, returning null allows normal chat to handle questions
-    return null;
+    }
+
+    return {
+      phase: 'order_address_confirm',
+      context: normalizedContext,
+      response: {
+        text: buildLockedChoiceMessage({ lang }),
+        type: 'text',
+        buttons: [],
+        ...serializeOrderState({
+          lang,
+          stage: 'address_confirmation',
+          order: getOrderById.get(order.id),
+          items,
+          context: normalizedContext,
+        }),
+      },
+      intent: 'order_address_locked',
+      skipUserMessage: false,
+      skipBotMessage: false,
+    };
   }
 
   return null;
