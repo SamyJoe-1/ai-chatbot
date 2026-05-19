@@ -587,14 +587,14 @@
 
   function setInputPlaceholder() {
     if (!refs || !refs.input) return;
-    refs.input.placeholder = state.uiState.input_locked
+    refs.input.placeholder = (state.automated && state.uiState.input_locked)
       ? (state.language === 'ar' ? 'اختر من الخيارات الظاهرة' : 'Choose one of the visible options')
       : (state.language === 'ar' ? 'اكتب رسالتك...' : 'Type your message...');
   }
 
   function syncComposerState() {
     if (!refs) return;
-    const locked = state.uiState.input_locked;
+    const locked = state.automated ? state.uiState.input_locked : false;
     refs.input.disabled = locked;
     refs.send.disabled = locked || state.isSending;
   }
@@ -898,7 +898,7 @@
 
     if (!requestText) return;
     if (!forcedInput && refs.send.disabled) return;
-    if (state.uiState.input_locked && !forcedInput) return;
+    if (state.automated && state.uiState.input_locked && !forcedInput) return;
 
     if (!silent) {
       refs.input.value = '';

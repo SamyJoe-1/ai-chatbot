@@ -613,6 +613,13 @@ function resolveOrderUiState({ business, session, context, lang }) {
     };
   }
 
+  if (Number(session.automated) === 0) {
+    return {
+      ui_state: emptyUiState(),
+      suggestions: [],
+    };
+  }
+
   if (!String(session.phase || '').startsWith('order_')) {
     return {
       ui_state: emptyUiState(),
