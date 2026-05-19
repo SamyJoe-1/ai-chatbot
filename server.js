@@ -55,6 +55,9 @@ app.use('/api/init', chatLimiter, require('./src/routes/api/init'));
 app.use('/api/message', chatLimiter, require('./src/routes/api/message'));
 app.use('/api/sync', require('./src/routes/api/sync'));
 
+app.use('/portal/api', require('./src/routes/portal'));
+app.use('/portal', express.static(path.join(__dirname, 'portal')));
+
 app.use('/dashboard/auth', require('./src/routes/dashboard/auth'));
 app.use('/dashboard/businesses', require('./src/routes/dashboard/businesses'));
 app.use('/dashboard/cafes', require('./src/routes/dashboard/businesses'));
@@ -62,6 +65,18 @@ app.use('/dashboard/catalog', require('./src/routes/dashboard/catalog'));
 app.use('/dashboard/menu', require('./src/routes/dashboard/catalog'));
 app.use('/dashboard/db', require('./src/routes/dashboard/database'));
 app.use('/dashboard', express.static(path.join(__dirname, 'dashboard')));
+
+app.get('/portal', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'portal', 'index.html'));
+});
+
+app.get('/portal/*', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'portal', 'index.html'));
+});
+
+app.get('/dashboard', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'dashboard', 'index.html'));
+});
 
 app.get('/dashboard/*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'dashboard', 'index.html'));

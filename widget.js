@@ -38,6 +38,16 @@
   };
 
   let refs;
+  let cartSyncTimer = null;
+
+  function scheduleCartSync(orderDraft) {
+    if (cartSyncTimer) clearTimeout(cartSyncTimer);
+    cartSyncTimer = setTimeout(async () => {
+      if (!orderDraft || !orderDraft.items) return;
+      const items = orderDraft.items.map(i => ({ id: i.order_item_id, qty: i.quantity }));
+      await sendMessage({ value: `__order__:sync_cart:${JSON.stringify(items)}`, silent: true });
+    }, 800);
+  }
 
   function emptyUiState() {
     return {
@@ -674,7 +684,7 @@
             orderDraft.items = orderDraft.items.filter(i => i.order_item_id !== item.order_item_id);
           }
           renderOrderDraft(orderDraft, addressPreview);
-          sendMessage({ value: item.dec_value, silent: true });
+          scheduleCartSync(orderDraft);
         });
 
         const count = document.createElement('span');
@@ -687,7 +697,7 @@
         inc.addEventListener('click', () => {
           item.quantity++;
           renderOrderDraft(orderDraft, addressPreview);
-          sendMessage({ value: item.inc_value, silent: true });
+          scheduleCartSync(orderDraft);
         });
 
         const remove = document.createElement('button');
@@ -697,7 +707,7 @@
         remove.addEventListener('click', () => {
           orderDraft.items = orderDraft.items.filter(i => i.order_item_id !== item.order_item_id);
           renderOrderDraft(orderDraft, addressPreview);
-          sendMessage({ value: item.remove_value, silent: true });
+          scheduleCartSync(orderDraft);
         });
 
         qty.appendChild(dec);

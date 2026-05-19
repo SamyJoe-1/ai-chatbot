@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>E-Glotech Portal</title>
+  <meta name="description" content="Business self-serve portal for E-Glotech chatbot customers">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+  <link rel="stylesheet" href="/dashboard/css/app.css">
+  <link rel="stylesheet" href="/portal/css/app.css">
+</head>
+<body>
+  <div id="login-page" class="login-page">
+    <div class="login-particles"></div>
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="login-logo-icon"><i class="fas fa-key"></i></div>
+        <h1>Business Portal</h1>
+        <p class="login-tagline">Sign in with your API token</p>
+      </div>
+      <form id="login-form" autocomplete="off">
+        <div class="input-group">
+          <i class="fas fa-key"></i>
+          <input id="portal-token" type="password" placeholder="Paste your business token" required>
+        </div>
+        <button id="login-btn" type="submit" class="btn btn-primary btn-block">
+          <span class="btn-text">Open Portal</span>
+          <span class="btn-loader hidden"><i class="fas fa-circle-notch fa-spin"></i></span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div id="dashboard-shell" class="shell hidden">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-icon"><i class="fas fa-store"></i></div>
+        <div>
+          <div id="sidebar-business-name" class="brand-name">Business Portal</div>
+          <div id="sidebar-business-type" class="brand-sub">Workspace</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-btn active" data-route="profile" type="button">
+          <i class="fas fa-id-card"></i><span>Profile</span>
+        </button>
+        <button class="nav-btn" data-route="integration" type="button">
+          <i class="fas fa-table-cells-large"></i><span>Integration</span>
+        </button>
+        <button class="nav-btn" data-route="assistant" type="button">
+          <i class="fas fa-comments"></i><span>Assistant Setup</span>
+        </button>
+        <button class="nav-btn" data-route="catalog" type="button">
+          <i class="fas fa-box-open"></i><span>Catalog</span>
+        </button>
+        <button class="nav-btn" data-route="orders" type="button">
+          <i class="fas fa-shopping-cart"></i><span>Orders</span>
+        </button>
+        <button class="nav-btn" data-route="inbox" type="button">
+          <i class="fas fa-inbox"></i><span>Inbox</span>
+        </button>
+        <button class="nav-btn" data-route="account" type="button">
+          <i class="fas fa-key"></i><span>Account</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div id="user-badge" class="user-badge">
+          <i class="fas fa-circle-user"></i>
+          <span id="user-meta">Business owner</span>
+        </div>
+        <button id="logout-btn" class="nav-btn logout-btn" type="button">
+          <i class="fas fa-right-from-bracket"></i><span>Logout</span>
+        </button>
+      </div>
+    </aside>
+
+    <div class="mobile-topbar">
+      <button id="mobile-menu-toggle" type="button"><i class="fas fa-bars"></i></button>
+      <span id="mobile-business-name" class="mobile-brand">Business Portal</span>
+    </div>
+
+    <main class="main-content">
+      <section id="page-portal" class="page active">
+        <div class="page-header portal-hero portal-route-header">
+          <div class="portal-hero-copy">
+            <div id="portal-page-chip" class="portal-panel-chip">Workspace</div>
+            <h2 id="portal-page-title"><i class="fas fa-id-card"></i> Profile</h2>
+            <p id="portal-page-description">Business identity and customer-facing details.</p>
+          </div>
+          <div class="page-header-actions">
+            <button id="save-business-btn" class="btn btn-primary" type="button">
+              <span class="btn-text"><i class="fas fa-save"></i> Save Changes</span>
+              <span class="btn-loader hidden"><i class="fas fa-circle-notch fa-spin"></i></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="portal-stats hidden" aria-hidden="true">
+          <div class="stat-card">
+            <div class="stat-icon"><i class="fas fa-box-open"></i></div>
+            <div class="stat-info">
+              <div class="stat-number" id="stat-catalog-count">0</div>
+              <div class="stat-label">Catalog Items</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="fas fa-shopping-cart"></i></div>
+            <div class="stat-info">
+              <div class="stat-number" id="stat-open-orders">0</div>
+              <div class="stat-label">Open Orders</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="fas fa-inbox"></i></div>
+            <div class="stat-info">
+              <div class="stat-number" id="stat-pending-chats">0</div>
+              <div class="stat-label">Pending Chats</div>
+            </div>
+          </div>
+        </div>
+
+        <section id="section-profile" class="portal-panel form-card">
+          <div class="portal-panel-head">
+            <div>
+              <h3>Profile</h3>
+              <p>Business identity and customer-facing details.</p>
+            </div>
+            <span class="portal-panel-chip">Public info</span>
+          </div>
+          <div class="form-grid">
+            <div class="form-field">
+              <label>Business Name (EN)</label>
+              <div class="field-with-ar">
+                <input type="text" id="business-name">
+                <button class="btn-ar-toggle" type="button" data-ar-target="business-name-ar" title="Set Arabic"><span>ع</span></button>
+              </div>
+            </div>
+            <div class="form-field">
+              <label>Service Type</label>
+              <select id="business-service-type" class="filter-select">
+                <option value="cafe">Cafe</option>
+                <option value="real_estate">Real Estate</option>
+                <option value="clinic">Clinic</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label>Phone</label>
+              <input type="text" id="business-phone">
+            </div>
+            <div class="form-field">
+              <label>Email</label>
+              <input type="email" id="business-email">
+            </div>
+            <div class="form-field">
+              <label>Primary Color</label>
+              <div class="color-input-wrap">
+                <input type="color" id="business-primary-color">
+                <span class="color-hex" id="business-primary-color-hex"></span>
+              </div>
+            </div>
+            <div class="form-field">
+              <label>Logo URL</label>
+              <input type="text" id="business-logo-url">
+            </div>
+            <div class="form-field full-width">
+              <label>Catalog or Menu URL</label>
+              <input type="text" id="business-catalog-link">
+            </div>
+          </div>
+        </section>
+
+        <section id="section-integration" class="portal-panel form-card">
+          <div class="portal-panel-head">
+            <div>
+              <h3>Integration</h3>
+              <p>Connect the catalog sheet without exposing Drive folder details here.</p>
+            </div>
+            <span class="portal-panel-chip">Sheet sync</span>
+          </div>
+          <div class="form-grid">
+            <div class="form-field">
+              <label>Google Sheet Link or ID</label>
+              <input type="text" id="business-sheet-id">
+            </div>
+            <div class="form-field">
+              <label>Sheet Name</label>
+              <input type="text" id="business-sheet-name" placeholder="Catalog / Menu / Properties / Services">
+            </div>
+          </div>
+        </section>
+
+        <section id="section-assistant" class="portal-panel form-card">
+          <div class="portal-panel-head">
+            <div>
+              <h3>Assistant Setup</h3>
+              <p>Control the messages customers actually see, with a live widget simulation.</p>
+            </div>
+            <span class="portal-panel-chip portal-panel-chip-live">Live preview</span>
+          </div>
+          <div class="assistant-studio">
+            <div class="assistant-fields">
+              <div class="form-grid">
+                <div class="form-field full-width">
+                  <label>Welcome Message (EN)</label>
+                  <div class="field-with-ar">
+                    <textarea id="business-welcome-en" rows="2"></textarea>
+                    <button class="btn-ar-toggle" type="button" data-ar-target="business-welcome-ar" title="Set Arabic"><span>ع</span></button>
+                  </div>
+                </div>
+                <div class="form-field full-width">
+                  <label>Suggestions (EN) <small>one per line, shown as pills</small></label>
+                  <div class="field-with-ar">
+                    <textarea id="business-suggestions-en" rows="3"></textarea>
+                    <button class="btn-ar-toggle" type="button" data-ar-target="business-suggestions-ar" title="Set Arabic"><span>ع</span></button>
+                  </div>
+                </div>
+                <div class="form-field full-width">
+                  <label>About Us (EN)</label>
+                  <div class="field-with-ar">
+                    <textarea id="business-about-en" rows="3"></textarea>
+                    <button class="btn-ar-toggle" type="button" data-ar-target="business-about-ar" title="Set Arabic"><span>ع</span></button>
+                  </div>
+                </div>
+                <div class="form-field">
+                  <label>Address (EN)</label>
+                  <div class="field-with-ar">
+                    <textarea id="business-address-en" rows="2"></textarea>
+                    <button class="btn-ar-toggle" type="button" data-ar-target="business-address-ar" title="Set Arabic"><span>ع</span></button>
+                  </div>
+                </div>
+                <div class="form-field">
+                  <label>Working Hours (EN)</label>
+                  <div class="field-with-ar">
+                    <textarea id="business-hours-en" rows="2"></textarea>
+                    <button class="btn-ar-toggle" type="button" data-ar-target="business-hours-ar" title="Set Arabic"><span>ع</span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <aside class="widget-preview-card">
+              <div class="widget-preview-card-head">
+                <div>
+                  <div class="widget-preview-eyebrow">Live widget preview</div>
+                  <h3>Customer-facing simulation</h3>
+                </div>
+                <span class="portal-panel-chip portal-panel-chip-live">Preview</span>
+              </div>
+
+              <div class="widget-preview-shell" id="assistant-preview-shell">
+                <div class="widget-preview-header">
+                  <div class="widget-preview-brand">
+                    <div class="widget-preview-logo-wrap">
+                      <img id="preview-logo-image" class="widget-preview-logo-image hidden" alt="Business logo">
+                      <span id="preview-logo-fallback" class="widget-preview-logo-fallback">B</span>
+                    </div>
+                    <div class="widget-preview-brand-text">
+                      <div id="preview-business-name" class="widget-preview-brand-name">Business Name</div>
+                      <div id="preview-business-subtitle" class="widget-preview-brand-subtitle">Assistant preview</div>
+                    </div>
+                  </div>
+                  <button class="widget-preview-close" type="button" aria-label="Preview only">&times;</button>
+                </div>
+                <div class="widget-preview-messages">
+                  <div id="preview-welcome" class="widget-preview-message bot">Welcome message preview appears here.</div>
+                  <div id="preview-suggestions" class="widget-preview-suggestions"></div>
+                  <div class="widget-preview-message user">Tell me about you</div>
+                  <div id="preview-about" class="widget-preview-message bot">About preview appears here.</div>
+                  <div class="widget-preview-message user">Where are you and when are you open?</div>
+                  <div id="preview-location" class="widget-preview-message bot">Address and hours preview appears here.</div>
+                </div>
+                <div class="widget-preview-inputbar">
+                  <div class="widget-preview-input">Type a message...</div>
+                  <button class="widget-preview-send" type="button" aria-label="Preview send">
+                    <i class="fas fa-paper-plane"></i>
+                  </button>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="section-catalog" class="portal-panel form-card">
+          <div class="portal-panel-head">
+            <div>
+              <h3>Catalog</h3>
+              <p>Manage item data manually or sync directly from your sheet.</p>
+            </div>
+            <span class="portal-panel-chip">Live data</span>
+          </div>
+          <div class="section-toolbar">
+            <button id="sync-catalog-btn" class="btn btn-outline btn-sm" type="button">
+              <span class="btn-text"><i class="fas fa-arrows-rotate"></i> Sync from Sheet</span>
+              <span class="btn-loader hidden"><i class="fas fa-circle-notch fa-spin"></i></span>
+            </button>
+            <button id="add-catalog-btn" class="btn btn-primary btn-sm" type="button">
+              <i class="fas fa-plus"></i> Add Catalog Item
+            </button>
+          </div>
+          <div class="filter-bar menu-filter-bar">
+            <div class="input-group search-group">
+              <i class="fas fa-search"></i>
+              <input type="text" id="catalog-search" placeholder="Search catalog items or categories...">
+            </div>
+            <select id="catalog-filter-category" class="filter-select">
+              <option value="all">All Categories</option>
+            </select>
+            <select id="catalog-filter-availability" class="filter-select">
+              <option value="all">All Catalog Items</option>
+              <option value="available">Available</option>
+              <option value="unavailable">Unavailable</option>
+            </select>
+          </div>
+          <div class="menu-container">
+            <div class="menu-list-header">
+              <span class="mh-name">Name</span>
+              <span class="mh-cat">Category</span>
+              <span class="mh-price">Price</span>
+              <span class="mh-actions">Actions</span>
+            </div>
+            <div id="catalog-list" class="menu-list-body"></div>
+            <div id="catalog-pagination" class="pagination-bar"></div>
+          </div>
+        </section>
+
+        <section id="section-orders" class="portal-panel form-card">
+          <div class="portal-panel-head">
+            <div>
+              <h3>Orders</h3>
+              <p>Track customer orders and update status live.</p>
+            </div>
+            <span class="portal-panel-chip portal-panel-chip-live">Live queue</span>
+          </div>
+          <div class="section-toolbar">
+            <button id="export-orders-btn" class="btn btn-outline btn-sm" type="button">
+              <i class="fas fa-file-export"></i> Export CSV
+            </button>
+            <button id="refresh-orders-btn" class="btn btn-ghost btn-sm" type="button">
+              <i class="fas fa-arrows-rotate"></i> Refresh
+            </button>
+          </div>
+          <div class="filter-bar orders-filter-bar">
+            <div class="input-group search-group">
+              <i class="fas fa-search"></i>
+              <input type="text" id="order-search" placeholder="Search by name, phone, or address...">
+            </div>
+            <select id="order-filter-status" class="filter-select">
+              <option value="all">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="draft">Draft/Review</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="rejected">Rejected</option>
+              <option value="completed">Completed</option>
+            </select>
+          </div>
+          <div class="orders-container">
+            <div id="orders-list" class="orders-list-body"></div>
+            <div id="orders-pagination" class="pagination-bar"></div>
+          </div>
+        </section>
+
+        <section id="section-inbox" class="portal-panel form-card">
+          <div class="portal-panel-head">
+            <div>
+              <h3>Inbox</h3>
+              <p>Review customer conversations, pending messages, and manual replies.</p>
+            </div>
+            <span class="portal-panel-chip portal-panel-chip-live">Events + replies</span>
+          </div>
+          <div class="section-toolbar">
+            <button id="filter-sessions-btn" class="btn btn-outline btn-sm" type="button">
+              <i class="fas fa-filter"></i> Filters
+            </button>
+            <button id="clear-sessions-btn" class="btn btn-danger btn-sm" type="button">
+              <span class="btn-text"><i class="fas fa-trash"></i> Clear All</span>
+              <span class="btn-loader hidden"><i class="fas fa-circle-notch fa-spin"></i></span>
+            </button>
+          </div>
+          <div class="sessions-container">
+            <div id="sessions-list" class="sessions-list-body"></div>
+            <div id="sessions-pagination" class="pagination-bar"></div>
+          </div>
+        </section>
+
+        <section id="section-account" class="portal-panel form-card">
+          <div class="portal-panel-head">
+            <div>
+              <h3>Account</h3>
+              <p>Everything related to your API token and embed access.</p>
+            </div>
+            <span class="portal-panel-chip">API token</span>
+          </div>
+          <div class="form-grid">
+            <div class="form-field full-width">
+              <label>API Token</label>
+              <input type="text" id="account-token" class="readonly-code" readonly>
+            </div>
+          </div>
+          <div class="token-actions portal-token-actions">
+            <button id="copy-token-btn" class="btn btn-outline btn-sm" type="button">
+              <i class="fas fa-copy"></i> Copy Token
+            </button>
+            <button id="copy-embed-btn" class="btn btn-outline btn-sm" type="button">
+              <i class="fas fa-code"></i> Copy Embed Code
+            </button>
+            <button id="regenerate-token-btn" class="btn btn-danger btn-sm" type="button">
+              <span class="btn-text"><i class="fas fa-rotate"></i> Regenerate Token</span>
+              <span class="btn-loader hidden"><i class="fas fa-circle-notch fa-spin"></i></span>
+            </button>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <input type="hidden" id="business-name-ar">
+  <textarea id="business-suggestions-ar" class="hidden"></textarea>
+  <textarea id="business-about-ar" class="hidden"></textarea>
+  <textarea id="business-address-ar" class="hidden"></textarea>
+  <textarea id="business-hours-ar" class="hidden"></textarea>
+  <textarea id="business-welcome-ar" class="hidden"></textarea>
+
+  <div id="page-loader" class="page-loader hidden">
+    <div class="loader-spinner"><i class="fas fa-circle-notch fa-spin"></i></div>
+  </div>
+
+  <script src="/portal/js/app.js"></script>
+</body>
+</html>
