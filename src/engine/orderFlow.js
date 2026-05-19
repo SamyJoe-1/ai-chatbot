@@ -1000,8 +1000,6 @@ function handleOrderMessage({ text, business, session, context, lang }) {
       };
     }
 
-    }
-
     return {
       phase: 'order_address_confirm',
       context: normalizedContext,
