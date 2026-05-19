@@ -47,7 +47,7 @@ app.get('/health', (_req, res) => {
 
 app.get('/widget.js', (_req, res) => {
   res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.sendFile(path.join(__dirname, 'widget.js'));
 });
 
