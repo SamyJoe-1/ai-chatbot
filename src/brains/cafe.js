@@ -2,7 +2,7 @@
 
 const { tokenize, normalize } = require('../engine/detector');
 const { getBusinessItems } = require('./shared/catalogStore');
-const { findMatchingCategories, findScoredItems, uniqueById } = require('./shared/matcher');
+const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle } = require('./shared/matcher');
 
 const PATTERNS = {
   en: {
@@ -13,7 +13,11 @@ const PATTERNS = {
     help: [/\bhelp\b/i, /\bwhat can you do\b/i, /\bhow does this work\b/i],
     catalog_general: [/\bmenu\b/i, /\bwhat do you have\b/i, /\bwhat do you offer\b/i, /\bshow me.*menu\b/i],
     item_price: [/\bprice\b/i, /\bcost\b/i, /\bhow much\b/i],
-    item_sizes: [/\bsize\b/i, /\bsizes\b/i, /\bsmall\b/i, /\bmedium\b/i, /\blarge\b/i],
+    item_sizes: [
+      /\bsize\b/i, /\bsizes\b/i, /\bsmall\b/i, /\bmedium\b/i, /\blarge\b/i,
+      /\bdiameter\b/i, /\binch(es)?\b/i, /\bweight\b/i, /\bgram(s)?\b/i,
+      /\bserves\b/i, /\bdimension(s)?\b/i, /\bwidth\b/i, /\bmeasur(e|ement)\b/i
+    ],
     contact: [/\bcontact\b/i, /\bphone\b/i, /\bwhatsapp\b/i, /\bcall\b/i, /\bemail\b/i],
     working_hours: [/\bhours\b/i, /\bopen\b/i, /\bclose\b/i, /\bworking hours\b/i],
     location: [/\blocation\b/i, /\baddress\b/i, /\bwhere are you\b/i, /\bdirections\b/i],
@@ -28,7 +32,7 @@ const PATTERNS = {
     help: [/(مساعدة|ساعدني|كيف يشتغل|كيف يعمل|ماذا يمكنك|بتعمل ايه|تساعدني)/],
     catalog_general: [/(منيو|منيـو|قائمه|قائمة|ايش عندكم|شو عندكم|ماذا تقدمون|وجبات|مشروبات|عندكم ايه|عندكو ايه|عندك ايه)/],
     item_price: [/(سعر|اسعار|أسعار|بكام|بقديش|كم السعر|الثمن|حسابه|حسابها)/],
-    item_sizes: [/(حجم|احجام|أحجام|صغير|وسط|كبير|الاحجام|الأحجام|مقاس|مقاسات)/],
+    item_sizes: [/(حجم|احجام|أحجام|صغير|وسط|كبير|الاحجام|الأحجام|مقاس|مقاسات|قطر|بوصة|بوصه|انش|إنش|سم|سنتيمتر|وزن|جرام|تكفي|تكفى)/],
     contact: [/(تواصل|اتصال|رقم|واتساب|هاتف|موبايل|ايميل|إيميل|تليفون|تلفون|كلمكم|اكلمكم)/],
     working_hours: [/(ساعات|مواعيد|عمل|الدوام|شغالين|تفتح|تقفل|تفتحون|تغلقون|امتى|امتا|الساعة كام|الساعه كام)/],
     location: [/(العنوان|الموقع|وين|فين|أين|اتجاهات|خريطة|مكان|فروعكم|فرعكم)/],
@@ -49,13 +53,39 @@ function getDisplayCategory(item, lang) {
   return lang === 'ar' ? item.category_ar || item.category_en : item.category_en || item.category_ar;
 }
 
+const SIZE_KEYWORDS = {
+  small: {
+    en: /\b(small|sm|s|single|personal|individual|baby|smallest)\b/i,
+    ar: /(صغير|صغيره|سيرف|فرد|فرد واحد|لشخص|لشخص واحد|سمول|بيبي|الاصغر|الأصغر|اصغر حجم|أصغر حجم|منفرد|منفرده)/i
+  },
+  medium: {
+    en: /\b(medium|med|m|mid|middle|regular|reg|double|serves 2|for 2)\b/i,
+    ar: /(وسط|الوسط|المتوسط|ميديام|ميديوم|شخصين|فردين|لشخصين|لفردين|الحجم الوسط|المقاس الوسط)/i
+  },
+  large: {
+    en: /\b(large|lg|l|big|jumbo|giant|family|family size|largest|xl|xxl)\b/i,
+    ar: /(كبير|كبيره|الكبير|العائلي|عائلي|عائله|عائلة|لارج|الاضخم|الأضخم|اكبر حجم|أكبر حجم|جامبو|عملاق)/i
+  }
+};
+
+function detectTargetSize(text, lang) {
+  const normalized = text.toLowerCase();
+  for (const [sizeKey, patterns] of Object.entries(SIZE_KEYWORDS)) {
+    const pattern = lang === 'ar' ? patterns.ar : patterns.en;
+    if (pattern.test(normalized)) {
+      return sizeKey;
+    }
+  }
+  return null;
+}
+
 function getSizes(item) {
   return Array.isArray(item.metadata?.sizes) ? item.metadata.sizes.filter(Boolean) : [];
 }
 
 function findCafeItems(text, lang, businessId, context = {}) {
   const items = getBusinessItems(businessId);
-  const scoredMatches = findScoredItems({
+  const scoredMatchesAll = findScoredItems({
     text,
     lang,
     items,
@@ -69,10 +99,12 @@ function findCafeItems(text, lang, businessId, context = {}) {
     ],
   });
 
+  const scoredMatches = uniqueScoredByTitle(scoredMatchesAll, lang);
+
   return {
     items,
     scoredMatches,
-    matchedItems: uniqueById(scoredMatches.map((entry) => entry.item)),
+    matchedItems: scoredMatches.map((entry) => entry.item),
     categoryMatches: findMatchingCategories({
       text,
       lang,
@@ -84,6 +116,14 @@ function findCafeItems(text, lang, businessId, context = {}) {
 }
 
 function detectIntent({ text, lang, business, context = {} }) {
+  const result = runDetectIntent({ text, lang, business, context });
+  if (result) {
+    result.queryText = text;
+  }
+  return result;
+}
+
+function runDetectIntent({ text, lang, business, context = {} }) {
   const patterns = PATTERNS[lang] || PATTERNS.en;
   const normalizedText = normalize(text, lang);
   const { items, scoredMatches, matchedItems, categoryMatches } = findCafeItems(text, lang, business.id, context);
@@ -106,8 +146,28 @@ function detectIntent({ text, lang, business, context = {} }) {
 
 
 
-  const asksPrice = matchesAny(normalizedText, patterns.item_price);
-  const asksSizes = matchesAny(normalizedText, patterns.item_sizes);
+  const asksPriceBase = matchesAny(normalizedText, patterns.item_price);
+  const asksSizesBase = matchesAny(normalizedText, patterns.item_sizes);
+
+  let asksPrice = asksPriceBase;
+  let asksSizes = asksSizesBase;
+
+  if (foundItem) {
+    const itemTitle = (lang === 'ar' ? foundItem.title_ar || foundItem.title_en : foundItem.title_en || foundItem.title_ar) || '';
+    const itemTokens = tokenize(normalize(itemTitle, lang));
+    const queryTokens = tokenize(normalizedText);
+    const extraTokens = queryTokens.filter((token) => !itemTokens.includes(token));
+    const extraText = extraTokens.join(' ');
+
+    asksPrice = matchesAny(extraText, patterns.item_price);
+    asksSizes = matchesAny(extraText, patterns.item_sizes);
+  }
+
+  if ((asksPrice || asksSizes) && lastItem && topScore < 12) {
+    if (asksPrice && !asksSizes) return { intent: 'item_price', item: lastItem };
+    if (asksSizes && !asksPrice) return { intent: 'item_sizes', item: lastItem };
+    return { intent: 'item_sizes', item: lastItem };
+  }
 
   if (matchedItems.length === 1 && foundItem) {
     if (asksPrice && !asksSizes) return { intent: 'item_price', item: foundItem };
@@ -216,9 +276,16 @@ function buildResponse(intentResult, lang, business) {
     case 'item_found': {
       const item = intentResult.item;
       const sizes = getSizes(item);
-      const lines = [getDisplayTitle(item, locale)];
+      const title = getDisplayTitle(item, locale);
+      const lines = [title];
       const description = locale === 'ar' ? item.description_ar || item.description_en : item.description_en || item.description_ar;
-      if (description) lines.push(description);
+      if (description) {
+        const titleClean = tokenize(normalize(title, locale)).join(' ');
+        const descClean = tokenize(normalize(description, locale)).join(' ');
+        if (descClean !== titleClean) {
+          lines.push(description);
+        }
+      }
       if (item.price !== null && item.price !== undefined) lines.push(locale === 'ar' ? `السعر: ${item.price} ${item.currency}` : `Price: ${item.price} ${item.currency}`);
       if (sizes.length) lines.push(locale === 'ar' ? `الأحجام: ${sizes.join('، ')}` : `Sizes: ${sizes.join(', ')}`);
       const category = getDisplayCategory(item, locale);
@@ -231,14 +298,44 @@ function buildResponse(intentResult, lang, business) {
     }
     case 'item_sizes': {
       const item = intentResult.item;
-      const sizes = getSizes(item);
-      payload.text = sizes.length
-        ? (locale === 'ar'
-          ? `${getDisplayTitle(item, locale)} متوفر بالأحجام التالية: ${sizes.join('، ')}.`
-          : `${getDisplayTitle(item, locale)} is available in: ${sizes.join(', ')}.`)
-        : (locale === 'ar'
-          ? `${getDisplayTitle(item, locale)} متوفر بحجم واحد فقط.`
-          : `${getDisplayTitle(item, locale)} is available in one standard size.`);
+      const queryText = intentResult.queryText || '';
+      const targetSizeKey = detectTargetSize(queryText, locale);
+      const itemTitle = getDisplayTitle(item, locale);
+      const details = item.metadata?.size_details;
+
+      if (targetSizeKey && details && details[targetSizeKey]) {
+        const spec = details[targetSizeKey];
+        const sizeName = locale === 'ar' ? spec.name_ar || spec.name_en : spec.name_en || spec.name_ar;
+        const diameter = locale === 'ar' ? spec.diameter_ar || spec.diameter_en : spec.diameter_en || spec.diameter_ar;
+        const weight = locale === 'ar' ? spec.weight_ar || spec.weight_en : spec.weight_en || spec.weight_ar;
+        const serves = locale === 'ar' ? spec.serves_ar || spec.serves_en : spec.serves_en || spec.serves_ar;
+
+        let responseText = locale === 'ar'
+          ? `تفاصيل الحجم ال${sizeName} لـ ${itemTitle}:\n`
+          : `Details for ${sizeName} ${itemTitle}:\n`;
+
+        if (diameter) responseText += locale === 'ar' ? `- المقاس / القطر: ${diameter}\n` : `- Diameter: ${diameter}\n`;
+        if (weight) responseText += locale === 'ar' ? `- الوزن: ${weight}\n` : `- Weight: ${weight}\n`;
+        if (serves) responseText += locale === 'ar' ? `- السعة: ${serves}\n` : `- Serving: ${serves}\n`;
+        if (spec.price) responseText += locale === 'ar' ? `- السعر: ${spec.price} ${item.currency || 'EGP'}` : `- Price: ${spec.price} ${item.currency || 'EGP'}`;
+
+        payload.text = responseText.trim();
+        payload.suggestions = locale === 'ar'
+          ? [`اطلب ${itemTitle} ${sizeName}`, 'عرض باقي الأحجام']
+          : [`Order ${sizeName} ${itemTitle}`, 'Show other sizes'];
+      } else {
+        const sizes = getSizes(item);
+        payload.text = sizes.length
+          ? (locale === 'ar'
+            ? `${itemTitle} متوفر بالأحجام التالية: ${sizes.join('، ')}.`
+            : `${itemTitle} is available in: ${sizes.join(', ')}.`)
+          : (locale === 'ar'
+            ? `${itemTitle} متوفر بحجم واحد فقط.`
+            : `${itemTitle} is available in one standard size.`);
+        if (sizes.length) {
+          payload.suggestions = sizes.map(s => locale === 'ar' ? `تفاصيل الحجم ${s}` : `Details of ${s}`);
+        }
+      }
       payload.context_update.last_item = item.id;
       payload.context_update.last_category = getDisplayCategory(item, locale) || null;
       break;
@@ -342,6 +439,22 @@ function mapSheetRecords(records) {
         .map((entry) => entry.trim())
         .filter(Boolean);
 
+      const rawMetadata = record.metadata || record.Metadata || record.METADATA || '';
+      let metadataObj = {};
+      if (rawMetadata) {
+        try {
+          metadataObj = typeof rawMetadata === 'object'
+            ? rawMetadata
+            : JSON.parse(rawMetadata);
+        } catch (e) {
+          console.error('[mapSheetRecords] Failed to parse metadata json:', e.message);
+        }
+      }
+
+      if (!metadataObj.sizes || !metadataObj.sizes.length) {
+        metadataObj.sizes = sizes;
+      }
+
       return {
         title_en: record.name_en || record.name || record.title_en || record.title || '',
         title_ar: record.name_ar || record.title_ar || '',
@@ -351,7 +464,7 @@ function mapSheetRecords(records) {
         description_ar: record.description_ar || '',
         price: record.price ? Number(record.price) : null,
         currency: record.currency || 'EGP',
-        metadata: JSON.stringify({ sizes }),
+        metadata: JSON.stringify(metadataObj),
         available: ['0', 'false', 'no'].includes(String(record.available || '').toLowerCase()) ? 0 : 1,
       };
     });

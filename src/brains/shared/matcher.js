@@ -117,12 +117,36 @@ function findMatchingCategories({ text, lang, items, getCategoryVariants, getCat
   }
 
   return Array.from(categoryMap.values())
-    .map((entry) => ({ ...entry, items: uniqueById(entry.items) }))
+    .map((entry) => ({ ...entry, items: uniqueByTitle(uniqueById(entry.items), lang) }))
     .filter((entry) => entry.items.length);
+}
+
+function uniqueByTitle(items, lang) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const title = item.title_en || item.title_ar || item.name_en || item.name_ar || '';
+    const key = normalize(title, lang);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function uniqueScoredByTitle(scoredEntries, lang) {
+  const seen = new Set();
+  return scoredEntries.filter((entry) => {
+    const title = entry.item.title_en || entry.item.title_ar || entry.item.name_en || entry.item.name_ar || '';
+    const key = normalize(title, lang);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 module.exports = {
   findMatchingCategories,
   findScoredItems,
   uniqueById,
+  uniqueByTitle,
+  uniqueScoredByTitle,
 };

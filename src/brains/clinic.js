@@ -2,7 +2,7 @@
 
 const { tokenize, normalize } = require('../engine/detector');
 const { getBusinessItems } = require('./shared/catalogStore');
-const { findMatchingCategories, findScoredItems, uniqueById } = require('./shared/matcher');
+const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle } = require('./shared/matcher');
 
 const PATTERNS = {
   en: {
@@ -65,7 +65,7 @@ function getBranch(item) {
 
 function findServices(text, lang, businessId, context = {}) {
   const items = getBusinessItems(businessId);
-  const scoredMatches = findScoredItems({
+  const scoredMatchesAll = findScoredItems({
     text,
     lang,
     items,
@@ -86,10 +86,12 @@ function findServices(text, lang, businessId, context = {}) {
     ],
   });
 
+  const scoredMatches = uniqueScoredByTitle(scoredMatchesAll, lang);
+
   return {
     items,
     scoredMatches,
-    matchedItems: uniqueById(scoredMatches.map((entry) => entry.item)),
+    matchedItems: scoredMatches.map((entry) => entry.item),
     categoryMatches: findMatchingCategories({
       text,
       lang,
@@ -166,9 +168,16 @@ function detectIntent({ text, lang, business, context = {} }) {
 
 function buildServiceSummary(item, lang) {
   const locale = lang === 'ar' ? 'ar' : 'en';
-  const lines = [getDisplayTitle(item, locale)];
+  const title = getDisplayTitle(item, locale);
+  const lines = [title];
   const description = locale === 'ar' ? item.description_ar || item.description_en : item.description_en || item.description_ar;
-  if (description) lines.push(description);
+  if (description) {
+    const titleClean = tokenize(normalize(title, locale)).join(' ');
+    const descClean = tokenize(normalize(description, locale)).join(' ');
+    if (descClean !== titleClean) {
+      lines.push(description);
+    }
+  }
   if (item.price !== null && item.price !== undefined) lines.push(locale === 'ar' ? `السعر: ${item.price} ${item.currency}` : `Price: ${item.price} ${item.currency}`);
   if (getDoctor(item)) lines.push(locale === 'ar' ? `الطبيب: ${getDoctor(item)}` : `Doctor: ${getDoctor(item)}`);
   if (getSpecialization(item)) lines.push(locale === 'ar' ? `التخصص: ${getSpecialization(item)}` : `Specialization: ${getSpecialization(item)}`);
