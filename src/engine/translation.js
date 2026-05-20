@@ -37,6 +37,7 @@ const ARABIC_TO_ENGLISH_DICT = {
   'شوربة': 'soup',
   'شوربه': 'soup',
   'حلو': 'dessert',
+  'الحلو': 'dessert',
   'حلويات': 'dessert',
   'خبز': 'bread',
   'عيش': 'bread',
