@@ -686,15 +686,15 @@ function resolveOrderUiState({ business, session, context, lang }) {
 
   const items = getOrderItems(order.id);
 
-  if (order.status === 'pending') {
-    return serializeOrderState({ lang, stage: 'pending', order, items, context });
-  }
-
   if (!String(session.phase || '').startsWith('order_')) {
     return {
       ui_state: emptyUiState(),
       suggestions: [],
     };
+  }
+
+  if (order.status === 'pending') {
+    return serializeOrderState({ lang, stage: 'pending', order, items, context });
   }
 
   if (session.phase === 'order_review') {
