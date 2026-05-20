@@ -613,31 +613,33 @@ function startOrderFlow({ business, session, context, lang, seedItems = [] }) {
   const orderId = createOrderId();
   createOrder.run(orderId, business.id, session.id, session.guest_name || '', session.guest_phone);
 
-  if (seedItems.length) {
-    addItemsToOrder(orderId, seedItems);
-  }
-
+  // Never auto-add items into a fresh order — seedItems are suggestions only
   const order = getOrderById.get(orderId);
-  const items = getOrderItems(orderId);
-  const stage = items.length ? 'review' : 'add_item';
-    const updatedContext = setOrderContext(mergeRecentItemsIntoContext(nextContext, seedItems), {
-      order_id: orderId,
-      stage,
-      pending_address: '',
-    });
+  const items = getOrderItems(orderId); // always empty for a new order
+  const stage = 'add_item';
+  const updatedContext = setOrderContext(nextContext, {
+    order_id: orderId,
+    stage,
+    pending_address: '',
+  });
 
-  const responseText = items.length
-    ? buildReviewMessage({ lang, order, items, existingOrder: false })
-    : buildAddItemMessage({ lang, order, hasItems: false });
+  // Build suggestion labels from seedItems so the user can tap them to add
+  const seedSuggestions = seedItems
+    .map((item) => (lang === 'ar' ? item.title_ar || item.title_en : item.title_en || item.title_ar))
+    .filter(Boolean);
+
+  const orderState = serializeOrderState({ lang, stage, order, items, context: updatedContext });
 
   return {
-    phase: stage === 'review' ? 'order_review' : 'order_add_item',
+    phase: 'order_add_item',
     context: updatedContext,
     response: {
-      text: responseText,
+      text: buildAddItemMessage({ lang, order, hasItems: false }),
       type: 'text',
       buttons: [],
-      ...serializeOrderState({ lang, stage, order, items, context: updatedContext }),
+      ...orderState,
+      // Override suggestions with the seed item names so user can tap them
+      suggestions: seedSuggestions.length ? seedSuggestions : (orderState.suggestions || []),
     },
     intent: 'order_started',
   };
@@ -814,79 +816,83 @@ function handleOrderMessage({ text, business, session, context, lang }) {
     };
   }
 
-  const items = getOrderItems(order.id);
+  let items = getOrderItems(order.id);
 
-  if (session.phase === 'order_review') {
-    if (orderCommand && (['inc', 'dec', 'remove'].includes(orderCommand.action) || orderCommand.action === 'sync_cart')) {
-      if (order.status === 'pending') {
-        updateOrderStatus.run('draft', order.id);
-      }
-      
-      let nextItems = [];
-      if (orderCommand.action === 'sync_cart') {
-        try {
-          const newCart = JSON.parse(orderCommand.payload || '[]');
-          const currentItems = getOrderItems(order.id);
-          
-          for (const current of currentItems) {
-            const found = newCart.find(i => Number(i.id) === current.id);
-            if (!found || found.qty <= 0) {
-              deleteOrderItemById.run(current.id);
-            } else if (found.qty !== current.quantity) {
-              updateOrderItemQuantity.run(found.qty, current.id);
-            }
+  // Handle cart edit commands (inc, dec, remove, sync_cart) globally across all stages
+  if (orderCommand && (['inc', 'dec', 'remove'].includes(orderCommand.action) || orderCommand.action === 'sync_cart')) {
+    if (order.status === 'pending') {
+      updateOrderStatus.run('draft', order.id);
+    }
+
+    let nextItems = [];
+    if (orderCommand.action === 'sync_cart') {
+      try {
+        const newCart = JSON.parse(orderCommand.payload || '[]');
+        const currentItems = getOrderItems(order.id);
+
+        for (const current of currentItems) {
+          const found = newCart.find(i => Number(i.id) === current.id);
+          if (!found || found.qty <= 0) {
+            deleteOrderItemById.run(current.id);
+          } else if (found.qty !== current.quantity) {
+            updateOrderItemQuantity.run(found.qty, current.id);
           }
-        } catch(e) {}
-        nextItems = getOrderItems(order.id);
-      } else {
-        nextItems = applyOrderItemCommand(order.id, orderCommand);
-      }
+        }
+      } catch (e) {}
+      nextItems = getOrderItems(order.id);
+    } else {
+      nextItems = applyOrderItemCommand(order.id, orderCommand);
+    }
 
-      if (!nextItems.length) {
-        const updatedContext = setOrderContext(normalizedContext, { stage: 'add_item' });
-        return {
-          phase: 'order_add_item',
-          context: updatedContext,
-          response: {
-            text: buildAddItemMessage({ lang, order: getOrderById.get(order.id), hasItems: false }),
-            type: 'text',
-            buttons: [],
-            ...serializeOrderState({
-              lang,
-              stage: 'add_item',
-              order: getOrderById.get(order.id),
-              items: nextItems,
-              context: updatedContext,
-            }),
-          },
-          intent: 'order_empty_after_edit',
-          skipUserMessage: true,
-          skipBotMessage: false,
-        };
-      }
-
-      const updatedContext = setOrderContext(normalizedContext, { stage: 'review' });
+    if (!nextItems.length) {
+      const updatedContext = setOrderContext(normalizedContext, { stage: 'add_item' });
       return {
-        phase: 'order_review',
+        phase: 'order_add_item',
         context: updatedContext,
         response: {
-          text: '',
+          text: buildAddItemMessage({ lang, order: getOrderById.get(order.id), hasItems: false }),
           type: 'text',
           buttons: [],
           ...serializeOrderState({
             lang,
-            stage: 'review',
+            stage: 'add_item',
             order: getOrderById.get(order.id),
             items: nextItems,
             context: updatedContext,
           }),
         },
-        intent: 'order_item_updated',
+        intent: 'order_empty_after_edit',
         skipUserMessage: true,
-        skipBotMessage: true,
+        skipBotMessage: false,
       };
     }
 
+    const currentStage = session.phase === 'order_add_item' ? 'add_item' : 'review';
+    const nextPhase = session.phase === 'order_add_item' ? 'order_add_item' : 'order_review';
+
+    const updatedContext = setOrderContext(normalizedContext, { stage: currentStage });
+    return {
+      phase: nextPhase,
+      context: updatedContext,
+      response: {
+        text: '',
+        type: 'text',
+        buttons: [],
+        ...serializeOrderState({
+          lang,
+          stage: currentStage,
+          order: getOrderById.get(order.id),
+          items: nextItems,
+          context: updatedContext,
+        }),
+      },
+      intent: 'order_item_updated',
+      skipUserMessage: true,
+      skipBotMessage: true,
+    };
+  }
+
+  if (session.phase === 'order_review') {
     if (isYesText(text, lang) || (orderCommand && orderCommand.action === 'confirm')) {
       const updatedContext = setOrderContext(normalizedContext, {
         stage: 'address',

@@ -44,8 +44,8 @@
     if (cartSyncTimer) clearTimeout(cartSyncTimer);
     cartSyncTimer = setTimeout(async () => {
       if (!orderDraft || !orderDraft.items) return;
-      // const items = orderDraft.items.map(i => ({ id: i.order_item_id, qty: i.quantity }));
-      // await sendMessage({ value: `__order__:sync_cart:${JSON.stringify(items)}`, silent: true });
+      const items = orderDraft.items.map(i => ({ id: i.order_item_id, qty: i.quantity }));
+      await sendMessage({ value: `__order__:sync_cart:${JSON.stringify(items)}`, silent: true });
     }, 800);
   }
 
