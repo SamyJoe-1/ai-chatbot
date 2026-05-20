@@ -90,23 +90,133 @@ function buildPhoneticVocabularyList(items) {
 function recoverFranco(text, items) {
   if (!text) return text;
 
-  // 1. Direct dictionary matches first (for extreme shortcuts)
+  // 1. Only process if it has Franco characters (Latin characters or digits)
+  if (!/[a-zA-Z0-9]/.test(text)) {
+    return text;
+  }
+
+  // 2. Direct dictionary matches first (for extreme shortcuts)
   let processedText = text;
   for (const [k, v] of Object.entries(FRANCO_DICT)) {
     processedText = processedText.replace(new RegExp(`\\b${k}\\b`, 'g'), v);
   }
 
-  // 2. Transliterate AR -> EN phonetics
-  const arToEnText = transliterateArToEn(processedText);
-  const words = arToEnText.split(/[\s,،.!?؟:\/\\()[\]{}"'-]+/);
-  const vocabList = buildPhoneticVocabularyList(items);
+  const { ARABIC_TO_ENGLISH_DICT } = require('./translation');
+  const words = processedText.split(/[\s,،.!?؟:\/\\()[\]{}"'-]+/);
+  
+  // Helper: Transliterate Franco character-by-character to Arabic phonetic equivalent
+  const francoToArabic = (w) => {
+    let lowerW = w.toLowerCase();
+    lowerW = lowerW.replace(/sh/g, 'ش');
+    lowerW = lowerW.replace(/ch/g, 'ش');
+    lowerW = lowerW.replace(/kh/g, 'خ');
+    lowerW = lowerW.replace(/5/g, 'خ');
+    lowerW = lowerW.replace(/gh/g, 'غ');
+    lowerW = lowerW.replace(/3\'/g, 'غ');
+    lowerW = lowerW.replace(/th/g, 'ث');
+    lowerW = lowerW.replace(/3/g, 'ع');
+    lowerW = lowerW.replace(/7/g, 'ح');
+    lowerW = lowerW.replace(/2/g, 'ء');
+    lowerW = lowerW.replace(/9/g, 'ص');
+    lowerW = lowerW.replace(/6/g, 'ط');
+    lowerW = lowerW.replace(/8/g, 'ق');
 
-  // 3. Match each transliterated word's phonetic hash against the catalog's phonetic hashes
+    const singleMap = {
+      'a': 'ا', 'b': 'ب', 'p': 'ب', 't': 'ت', 'j': 'ج', 'g': 'ج', 'd': 'د',
+      'r': 'ر', 'z': 'ز', 's': 'س', 'f': 'ف', 'v': 'ف', 'q': 'ق', 'k': 'ك',
+      'c': 'ك', 'l': 'ل', 'm': 'م', 'n': 'ن', 'h': 'ه', 'w': 'و', 'o': 'و',
+      'u': 'و', 'y': 'ي', 'i': 'ي', 'e': 'ي'
+    };
+
+    let result = '';
+    for (let i = 0; i < lowerW.length; i++) {
+      const char = lowerW[i];
+      result += singleMap[char] || char;
+    }
+    return result;
+  };
+
+  // Helper: Normalize Arabic phonetic components to handle colloquial typos
+  const arabicPhoneticNormalize = (t) => {
+    if (!t) return '';
+    return t
+      .replace(/[طت]/g, 'ت')
+      .replace(/[صسث]/g, 'س')
+      .replace(/[حهه]/g, 'ه')
+      .replace(/[كق]/g, 'ك')
+      .replace(/[ذزظ]/g, 'ز')
+      .replace(/[ضد]/g, 'د')
+      .replace(/[أإآءؤئ]/g, 'ا')
+      .replace(/ة/g, 'ه')
+      .replace(/[ىئ]/g, 'ي');
+  };
+
+  // Pre-build catalog Arabic words for mapping
+  const catalogWords = [];
+  if (items && items.length) {
+    items.forEach(item => {
+      [item.title_ar, item.category_ar, item.description_ar].forEach(field => {
+        if (!field) return;
+        field.split(/[\s,،.!?؟:\/\\()[\]{}"'-]+/).forEach(word => {
+          const clean = word.trim();
+          if (clean.length >= 2) {
+            catalogWords.push({ ar: clean, en: item.title_en.split(' ')[0].toLowerCase() });
+          }
+        });
+      });
+    });
+  }
+
   const recoveredWords = words.map(w => {
     if (w.length < 2) return w;
-    const wHash = phoneticHash(w);
+    const lowerW = w.toLowerCase();
+
+    // Direct overrides
+    const directDict = {
+      'hello': 'hello', 'hi': 'hi', 'okay': 'okay', 'thanks': 'thanks',
+      'order': 'order', 'shokran': 'thanks', 'salam': 'hi',
+    };
+    if (directDict[lowerW]) {
+      return directDict[lowerW];
+    }
+
+    // A. Try character-by-character Arabic phonetic recovery mapping
+    const arText = francoToArabic(lowerW);
+    const normalizedArText = arabicPhoneticNormalize(arText);
+
+    // Look up in translation dictionary first
+    let bestArKey = null;
+    let bestDist = 999;
+    for (const arKey of Object.keys(ARABIC_TO_ENGLISH_DICT)) {
+      const dist = levenshtein(normalizedArText, arabicPhoneticNormalize(arKey));
+      if (dist < bestDist && dist <= 2) {
+        bestArKey = arKey;
+        bestDist = dist;
+      }
+    }
+    if (bestArKey) {
+      return ARABIC_TO_ENGLISH_DICT[bestArKey];
+    }
+
+    // Look up in catalog Arabic words next
+    let bestCatalogEnWord = null;
+    let bestCatalogDist = 999;
+    for (const entry of catalogWords) {
+      const dist = levenshtein(normalizedArText, arabicPhoneticNormalize(entry.ar));
+      if (dist < bestCatalogDist && dist <= 2) {
+        bestCatalogEnWord = entry.en;
+        bestCatalogDist = dist;
+      }
+    }
+    if (bestCatalogEnWord) {
+      return bestCatalogEnWord;
+    }
+
+    // B. Fallback to existing phoneticHash matching (collapsing digraphs/consonants)
+    const wHash = phoneticHash(lowerW);
     if (!wHash) return w;
 
+    const vocabList = buildPhoneticVocabularyList(items || []);
     let bestMatch = null;
     let bestScore = 999;
     let bestStrDist = 999;
@@ -115,18 +225,25 @@ function recoverFranco(text, items) {
       if (!v.hash) continue;
 
       const dist = levenshtein(wHash, v.hash);
-
       if (dist === 0) {
-        return v.word; // immediate perfect phonetic match
+        // Prevent collisions on very short hashes (e.g. length <= 2 like "N")
+        if (wHash.length <= 2) {
+          const strDist = levenshtein(lowerW, v.word);
+          if (strDist <= 2) {
+            return v.word;
+          }
+        } else {
+          return v.word;
+        }
       }
 
-      // Allow distance 1 for hashes of sufficient length
-      if (dist === 1 && wHash.length >= 1 && v.hash.length >= 1) {
-        const strDist = levenshtein(w, v.word);
+      // Allow distance 1 only for hashes of length >= 3
+      if (dist === 1 && wHash.length >= 3 && v.hash.length >= 3) {
+        const strDist = levenshtein(lowerW, v.word);
         if (dist < bestScore || (dist === bestScore && strDist < bestStrDist)) {
-            bestMatch = v.word;
-            bestScore = dist;
-            bestStrDist = strDist;
+          bestMatch = v.word;
+          bestScore = dist;
+          bestStrDist = strDist;
         }
       }
     }

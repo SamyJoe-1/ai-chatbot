@@ -400,14 +400,17 @@ function matchItemsForOrder({ text, lang, businessId, context = {} }) {
   const items = getBusinessItems(businessId);
   if (!items.length) return [];
 
+  const containsArabic = /[\u0600-\u06FF]/.test(text || '');
+  const activeLang = containsArabic ? 'ar' : (lang || 'en');
+
   // Try matching original text first
-  let matches = getMatchesForText(text, lang, items, context);
+  let matches = getMatchesForText(text, activeLang, items, context);
   if (matches.length) {
     return matches;
   }
 
   // 1. Try explicit Arabic-to-English literal translation
-  if (lang === 'ar') {
+  if (activeLang === 'ar') {
     const { translateArabicToEnglish } = require('./translation');
     const translatedDictText = translateArabicToEnglish(text);
     if (translatedDictText !== text) {
@@ -417,18 +420,21 @@ function matchItemsForOrder({ text, lang, businessId, context = {} }) {
   }
 
   // 2. Try algorithmic Franco-Arabic phonetic recovery
-  const { recoverFranco } = require('./franco');
-  const francoText = recoverFranco(text, items);
-  if (francoText && francoText !== text) {
-    matches = getMatchesForText(francoText, 'en', items, context);
-    if (matches.length) return matches;
+  // Only run if the text actually contains Franco (Latin) letters/digits
+  if (/[a-zA-Z0-9]/.test(text)) {
+    const { recoverFranco } = require('./franco');
+    const francoText = recoverFranco(text, items);
+    if (francoText && francoText !== text) {
+      matches = getMatchesForText(francoText, 'en', items, context);
+      if (matches.length) return matches;
+    }
   }
 
   // 3. Try standard query recovery (Levenshtein)
   const { recoverUserQuery } = require('./queryRecovery');
-  const recoveredText = recoverUserQuery(text, lang, businessId);
+  const recoveredText = recoverUserQuery(text, activeLang, businessId);
   if (recoveredText && recoveredText !== text) {
-    matches = getMatchesForText(recoveredText, lang, items, context);
+    matches = getMatchesForText(recoveredText, activeLang, items, context);
     if (matches.length) return matches;
   }
 

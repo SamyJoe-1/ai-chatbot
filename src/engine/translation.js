@@ -132,8 +132,8 @@ function translateArabicToEnglish(text) {
   
   for (const ar of keys) {
     const en = ARABIC_TO_ENGLISH_DICT[ar];
-    // Replace whole words only, preserving other text around it
-    const regex = new RegExp(`(^|\\s)${ar}(?=\\s|$)`, 'g');
+    // Replace whole words only, preserving other text around it (safe for Arabic character boundaries and punctuation)
+    const regex = new RegExp(`(^|[^\\u0600-\\u06FF])${ar}(?=[^\\u0600-\\u06FF]|$)`, 'g');
     processed = processed.replace(regex, `$1${en}`);
   }
   
