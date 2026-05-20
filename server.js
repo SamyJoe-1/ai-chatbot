@@ -53,6 +53,7 @@ app.get('/widget.js', (_req, res) => {
 
 app.use('/api/init', chatLimiter, require('./src/routes/api/init'));
 app.use('/api/message', chatLimiter, require('./src/routes/api/message'));
+app.use('/api/search', chatLimiter, require('./src/routes/api/search'));
 app.use('/api/sync', require('./src/routes/api/sync'));
 
 app.use('/portal/api', require('./src/routes/portal'));

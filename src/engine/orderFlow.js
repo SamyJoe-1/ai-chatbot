@@ -272,6 +272,7 @@ function buildUiState({ lang, stage, order, items, addressPreview }) {
     order_draft: order ? {
       order_id: order.id,
       status: order.status,
+      address: order.address || '',
       empty_label: lang === 'ar' ? 'الطلب فارغ حالياً' : 'This order is empty right now',
       items: items.map((item) => ({
         order_item_id: item.id,
@@ -287,7 +288,7 @@ function buildUiState({ lang, stage, order, items, addressPreview }) {
 
 function getFallbackSuggestions(businessId, lang) {
   return getBusinessItems(businessId)
-    .slice(0, 6)
+    .slice(0, 10)
     .map((item) => getDisplayItemTitle(item, lang))
     .filter(Boolean);
 }
@@ -311,7 +312,9 @@ function getRecentItemSuggestions(context, businessId, lang) {
 
 function getOrderItemSuggestions(context, businessId, lang) {
   const recent = getRecentItemSuggestions(context, businessId, lang);
-  return recent.length ? recent : getFallbackSuggestions(businessId, lang);
+  const fallback = getFallbackSuggestions(businessId, lang);
+  const combined = [...recent, ...fallback];
+  return [...new Set(combined)].slice(0, 10);
 }
 
 function setOrderContext(context, patch) {
@@ -660,22 +663,14 @@ function resolveOrderUiState({ business, session, context, lang }) {
     };
   }
 
-  if (!String(session.phase || '').startsWith('order_')) {
-    return {
-      ui_state: emptyUiState(),
-      suggestions: [],
-    };
+  let orderId = context?.order_flow?.order_id;
+  let order = null;
+  if (orderId) {
+    order = getOrderById.get(orderId);
+  } else if (session.guest_phone) {
+    order = getLatestActiveOrderByPhone.get(business.id, session.guest_phone);
   }
 
-  const orderId = context?.order_flow?.order_id;
-  if (!orderId) {
-    return {
-      ui_state: emptyUiState(),
-      suggestions: [],
-    };
-  }
-
-  const order = getOrderById.get(orderId);
   if (!order || !ACTIVE_ORDER_STATUSES.includes(order.status)) {
     return {
       ui_state: emptyUiState(),
@@ -684,6 +679,18 @@ function resolveOrderUiState({ business, session, context, lang }) {
   }
 
   const items = getOrderItems(order.id);
+
+  if (order.status === 'pending') {
+    return serializeOrderState({ lang, stage: 'pending', order, items, context });
+  }
+
+  if (!String(session.phase || '').startsWith('order_')) {
+    return {
+      ui_state: emptyUiState(),
+      suggestions: [],
+    };
+  }
+
   if (session.phase === 'order_review') {
     return serializeOrderState({ lang, stage: 'review', order, items, context });
   }

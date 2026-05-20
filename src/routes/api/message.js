@@ -125,6 +125,7 @@ router.post('/', tokenValidator, (req, res) => {
     }
 
     const text = String(message).trim();
+    const dashboardActive = req.body.order_dashboard_active !== false;
     let lang = detectLanguage(text);
     if (session.phase === 'collect_phone' && session.language) {
       lang = session.language === 'ar' ? 'ar' : 'en';
@@ -222,7 +223,8 @@ router.post('/', tokenValidator, (req, res) => {
       });
     }
 
-    if (isCafeOrderingEnabled(business) && String(session.phase || '').startsWith('order_')) {
+    const isOrderCmd = isInternalOrderCommand(text);
+    if (isCafeOrderingEnabled(business) && String(session.phase || '').startsWith('order_') && (dashboardActive || isOrderCmd)) {
       const orderFlowResult = handleOrderMessage({ text, business, session, context, lang });
       if (orderFlowResult) {
         updateSession.run(
@@ -238,18 +240,32 @@ router.post('/', tokenValidator, (req, res) => {
           insertMessage.run(session.id, 'bot', orderFlowResult.response.text, orderFlowResult.intent);
         }
 
+        const lastSuggestions = orderFlowResult.context.last_suggestions;
+        const chitchatSuggestions = Array.isArray(lastSuggestions) && lastSuggestions.length
+          ? lastSuggestions
+          : parseSuggestions(business, lang);
+
+        const orderSuggestions = orderFlowResult.response.suggestions || [];
+
+        const finalResponse = {
+          ...orderFlowResult.response,
+          suggestions: chitchatSuggestions,
+          order_suggestions: orderSuggestions,
+        };
+
         return res.json({
           automated: true,
-          response: orderFlowResult.response,
+          response: finalResponse,
           language: lang,
           phase: orderFlowResult.phase,
           intent: orderFlowResult.intent,
+          order_suggestions: orderSuggestions,
         });
       }
     }
 
     const isOrderIntent = looksLikeOrderIntent(text, lang) || (lang === 'ar' && looksLikeOrderIntent(require('../../engine/translation').translateArabicToEnglish(text), 'en'));
-    if (isCafeOrderingEnabled(business) && session.phase === 'active' && (isOrderIntent || isInternalOrderCommand(text))) {
+    if (isCafeOrderingEnabled(business) && (session.phase === 'active' || String(session.phase || '').startsWith('order_')) && (isOrderIntent || isInternalOrderCommand(text))) {
       const orderSeedItems = matchItemsForOrder({
         text,
         lang,
@@ -277,12 +293,26 @@ router.post('/', tokenValidator, (req, res) => {
         insertMessage.run(session.id, 'bot', orderStartResult.response.text, orderStartResult.intent);
       }
 
+      const lastSuggestions = orderStartResult.context.last_suggestions;
+      const chitchatSuggestions = Array.isArray(lastSuggestions) && lastSuggestions.length
+        ? lastSuggestions
+        : parseSuggestions(business, lang);
+
+      const orderSuggestions = orderStartResult.response.suggestions || [];
+
+      const finalResponse = {
+        ...orderStartResult.response,
+        suggestions: chitchatSuggestions,
+        order_suggestions: orderSuggestions,
+      };
+
       return res.json({
         automated: true,
-        response: orderStartResult.response,
+        response: finalResponse,
         language: lang,
         phase: orderStartResult.phase,
         intent: orderStartResult.intent,
+        order_suggestions: orderSuggestions,
       });
     }
 
@@ -359,6 +389,20 @@ router.post('/', tokenValidator, (req, res) => {
     insertMessage.run(session.id, 'bot', payload.text, intentResult.intent);
 
     const orderState = resolveOrderUiState({ business, session, context: nextContext, lang });
+    const orderSuggestions = orderState.suggestions || [];
+    
+    let finalUiState = orderState.ui_state;
+    if (!dashboardActive) {
+      finalUiState = {
+        ui_state: {
+          input_locked: false,
+          choice_buttons: [],
+          address_preview: '',
+          order_draft: orderState.ui_state?.order_draft || null,
+        },
+        suggestions: [],
+      }.ui_state;
+    }
 
     return res.json({
       automated: true,
@@ -367,11 +411,13 @@ router.post('/', tokenValidator, (req, res) => {
         type: payload.type,
         buttons: payload.buttons,
         suggestions: payload.suggestions,
-        ui_state: orderState.ui_state,
+        ui_state: finalUiState,
+        order_suggestions: orderSuggestions,
       },
       language: lang,
       phase: session.phase,
       intent: intentResult.intent,
+      order_suggestions: orderSuggestions,
     });
   } catch (error) {
     console.error('[message]', error);

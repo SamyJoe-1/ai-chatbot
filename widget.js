@@ -24,6 +24,16 @@
     hasHistory: false,
     history: [],
     currentSuggestions: [],
+    orderSuggestions: [],
+    chitchatSuggestions: [],
+    orderDashboardActive: false,
+    searchDebounceTimer: null,
+    isSearching: false,
+    searchResults: [],
+    searchQuery: '',
+    typedAddress: '',
+    confirmCancelActive: false,
+    confirmDeleteItem: null,
     uiState: {
       input_locked: false,
       choice_buttons: [],
@@ -35,6 +45,8 @@
     isTypingReply: false,
     lastRequestTime: 0,
     typingId: 0,
+    cartSyncPending: false,
+    lastCartEditTime: 0,
   };
 
   let refs;
@@ -472,6 +484,463 @@
         .cb-panel { width: 100%; height: min(60vh, 540px); }
         .cb-bubble::after { display: none; }
       }
+      
+      .cb-panel.order-dashboard-mode .cb-messages,
+      .cb-panel.order-dashboard-mode .cb-footer,
+      .cb-panel.order-dashboard-mode .cb-header {
+        display: none !important;
+      }
+      .cb-panel.order-dashboard-mode .cb-order-dashboard {
+        display: flex !important;
+      }
+      .cb-order-dashboard {
+        display: none;
+        flex-direction: column;
+        height: 100%;
+        background: #fafaf9;
+        font-family: inherit;
+      }
+      .cb-dash-header {
+        background: var(--cb-primary);
+        color: #fff;
+        padding: 14px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+      }
+      .cb-dash-back {
+        background: rgba(255, 255, 255, 0.15);
+        color: #fff;
+        border: 0;
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 13px;
+        cursor: pointer;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        transition: background 150ms ease;
+      }
+      .cb-dash-back:hover {
+        background: rgba(255, 255, 255, 0.25);
+      }
+      .cb-dash-cancel {
+        background: #ef4444;
+        color: #fff;
+        border: 0;
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 13px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: background 150ms ease;
+      }
+      .cb-dash-cancel:hover {
+        background: #dc2626;
+      }
+      .cb-dash-title {
+        font-size: 14px;
+        font-weight: 700;
+        opacity: 0.95;
+      }
+      .cb-dash-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .cb-dash-content::-webkit-scrollbar {
+        width: 4px;
+      }
+      .cb-dash-content::-webkit-scrollbar-thumb {
+        background: rgba(0,0,0,0.1);
+        border-radius: 2px;
+      }
+      .cb-card {
+        background: #fff;
+        border: 1px solid var(--cb-border);
+        border-radius: 16px;
+        padding: 16px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+      }
+      .cb-card-title {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        font-weight: 700;
+        color: #78716c;
+        margin-bottom: 12px;
+      }
+      .cb-dash-item-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 0;
+        border-bottom: 1px solid rgba(16, 24, 40, 0.04);
+      }
+      .cb-dash-item-row:last-child {
+        border-bottom: 0;
+      }
+      .cb-dash-item-info {
+        flex: 1;
+      }
+      .cb-dash-item-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--cb-text);
+      }
+      .cb-dash-item-price {
+        font-size: 12px;
+        color: #78716c;
+        margin-top: 2px;
+      }
+      .cb-dash-item-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .cb-dash-qty-btn {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        border: 1px solid var(--cb-border);
+        background: #fcfbf9;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        font-weight: 600;
+        transition: all 120ms ease;
+      }
+      .cb-dash-qty-btn:hover {
+        background: #f5f4f0;
+        border-color: rgba(16, 24, 40, 0.2);
+      }
+      .cb-dash-item-qty {
+        font-size: 14px;
+        font-weight: 700;
+        min-width: 16px;
+        text-align: center;
+      }
+      .cb-dash-item-delete {
+        border: 0;
+        background: transparent;
+        color: #ef4444;
+        cursor: pointer;
+        padding: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.75;
+        transition: opacity 120ms ease;
+      }
+      .cb-dash-item-delete:hover {
+        opacity: 1;
+      }
+      
+      .cb-dash-empty-state {
+        text-align: center;
+        padding: 24px 12px;
+        color: #78716c;
+      }
+      .cb-dash-empty-text {
+        font-size: 14px;
+        margin-bottom: 12px;
+      }
+      .cb-dash-btn-first {
+        background: var(--cb-primary);
+        color: #fff;
+        border: 0;
+        border-radius: 999px;
+        padding: 8px 16px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      }
+      
+      /* Suggestions Section */
+      .cb-section-title {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--cb-text);
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .cb-suggestion-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        max-height: 200px;
+        overflow-y: auto;
+        padding-right: 4px;
+      }
+      .cb-suggestion-card {
+        background: #fff;
+        border: 1px solid var(--cb-border);
+        border-radius: 12px;
+        padding: 10px;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        transition: all 120ms ease;
+      }
+      .cb-suggestion-card:hover {
+        border-color: var(--cb-primary);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+      }
+      .cb-sug-name {
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--cb-text);
+        line-height: 1.3;
+      }
+      .cb-sug-price {
+        font-size: 11px;
+        color: #78716c;
+        margin-top: 4px;
+      }
+      
+      /* Search Area */
+      .cb-dash-search-container {
+        position: relative;
+      }
+      .cb-dash-search-input {
+        width: 100%;
+        border: 1.5px solid var(--cb-border);
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-size: 13.5px;
+        outline: none;
+        transition: border-color 150ms ease;
+      }
+      .cb-dash-search-input:focus {
+        border-color: var(--cb-primary);
+      }
+      .cb-search-status {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 12px;
+        color: #78716c;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .cb-search-spinner {
+        width: 12px;
+        height: 12px;
+        border: 2px solid rgba(0, 0, 0, 0.1);
+        border-top-color: var(--cb-primary);
+        border-radius: 50%;
+        animation: cb-spin 0.6s linear infinite;
+      }
+      @keyframes cb-spin {
+        to { transform: rotate(360deg); }
+      }
+      
+      .cb-search-results-list {
+        margin-top: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 160px;
+        overflow-y: auto;
+      }
+      .cb-search-result-row {
+        background: #fff;
+        border: 1px solid var(--cb-border);
+        border-radius: 10px;
+        padding: 8px 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 13px;
+        cursor: pointer;
+        transition: background 100ms;
+      }
+      .cb-search-result-row:hover {
+        background: #fbfaf8;
+        border-color: var(--cb-primary);
+      }
+      
+      /* Address Form */
+      .cb-address-prompt {
+        font-size: 14px;
+        line-height: 1.45;
+        color: #44403c;
+        margin-bottom: 12px;
+      }
+      .cb-address-textarea {
+        width: 100%;
+        height: 80px;
+        border: 1.5px solid var(--cb-border);
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-size: 13.5px;
+        outline: none;
+        resize: none;
+        font-family: inherit;
+        transition: border-color 150ms ease;
+      }
+      .cb-address-textarea:focus {
+        border-color: var(--cb-primary);
+      }
+      
+      /* Confirm/Action Bar */
+      .cb-dash-action-bar {
+        padding: 12px 16px;
+        background: #fff;
+        border-top: 1px solid var(--cb-border);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cb-dash-btn-primary {
+        background: var(--cb-primary);
+        color: #fff;
+        border: 0;
+        border-radius: 999px;
+        padding: 12px;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        text-align: center;
+        width: 100%;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+        transition: transform 120ms ease;
+      }
+      .cb-dash-btn-primary:active {
+        transform: scale(0.98);
+      }
+      .cb-dash-btn-primary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
+      
+      /* Floating Order Badge in Chat View */
+      .cb-active-order-badge {
+        background: rgba(23, 68, 58, 0.08);
+        border-bottom: 1px solid rgba(23, 68, 58, 0.12);
+        padding: 8px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 12.5px;
+        color: var(--cb-primary);
+        font-weight: 600;
+        animation: cb-slide-down 200ms ease;
+      }
+      @keyframes cb-slide-down {
+        from { transform: translateY(-100%); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
+      .cb-active-order-badge button {
+        background: var(--cb-primary);
+        color: #fff;
+        border: 0;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 11.5px;
+        cursor: pointer;
+        font-weight: 700;
+      }
+      
+      /* Premium Inline Confirmation View */
+      .cb-dash-confirm-screen {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 32px 24px;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(12px);
+        animation: cb-fade-in 200ms ease;
+      }
+      @keyframes cb-fade-in {
+        from { opacity: 0; transform: scale(0.98); }
+        to { opacity: 1; transform: scale(1); }
+      }
+      .cb-dash-confirm-icon {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 20px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+      }
+      .cb-dash-confirm-icon-danger {
+        background: #fee2e2;
+        color: #ef4444;
+      }
+      .cb-dash-confirm-icon-warning {
+        background: #fef3c7;
+        color: #d97706;
+      }
+      .cb-dash-confirm-title {
+        font-size: 18px;
+        font-weight: 800;
+        color: #1c1917;
+        margin: 0 0 10px 0;
+      }
+      .cb-dash-confirm-text {
+        font-size: 13.5px;
+        color: #78716c;
+        line-height: 1.5;
+        margin: 0 0 24px 0;
+      }
+      .cb-dash-confirm-actions {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        gap: 10px;
+      }
+      .cb-dash-confirm-btn-danger {
+        background: #ef4444;
+        color: #fff;
+        border: 0;
+        border-radius: 999px;
+        padding: 12px;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: background 150ms;
+        width: 100%;
+      }
+      .cb-dash-confirm-btn-danger:hover {
+        background: #dc2626;
+      }
+      .cb-dash-confirm-btn-secondary {
+        background: #f5f5f4;
+        color: #44403c;
+        border: 1px solid var(--cb-border);
+        border-radius: 999px;
+        padding: 12px;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: background 150ms;
+        width: 100%;
+      }
+      .cb-dash-confirm-btn-secondary:hover {
+        background: #e7e5e4;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -587,14 +1056,15 @@
 
   function setInputPlaceholder() {
     if (!refs || !refs.input) return;
-    refs.input.placeholder = (state.automated && state.uiState.input_locked)
+    const isLocked = state.automated && state.uiState.input_locked && (!state.uiState.order_draft || state.orderDashboardActive);
+    refs.input.placeholder = isLocked
       ? (state.language === 'ar' ? 'اختر من الخيارات الظاهرة' : 'Choose one of the visible options')
       : (state.language === 'ar' ? 'اكتب رسالتك...' : 'Type your message...');
   }
 
   function syncComposerState() {
     if (!refs) return;
-    const locked = state.automated ? state.uiState.input_locked : false;
+    const locked = state.automated ? (state.uiState.input_locked && (!state.uiState.order_draft || state.orderDashboardActive)) : false;
     refs.input.disabled = locked;
     refs.send.disabled = locked || state.isSending;
   }
@@ -617,10 +1087,10 @@
   }
 
   function renderSuggestions(list) {
-    state.currentSuggestions = Array.isArray(list) ? list.slice(0, 10) : [];
+    const suggestions = Array.isArray(list) ? list.slice(0, 10) : [];
     refs.suggestions.innerHTML = '';
     if (!state.automated) return;
-    state.currentSuggestions.forEach((text) => {
+    suggestions.forEach((text) => {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'cb-chip';
@@ -632,6 +1102,9 @@
 
   function renderChoiceButtons(buttons) {
     refs.choices.innerHTML = '';
+    if (state.uiState.order_draft && !state.orderDashboardActive) {
+      return;
+    }
     buttons.forEach((button) => {
       const choice = document.createElement('button');
       choice.type = 'button';
@@ -648,99 +1121,30 @@
 
   function renderOrderDraft(orderDraft, addressPreview) {
     refs.order.innerHTML = '';
-    if (!orderDraft) return;
-
-    const card = document.createElement('div');
-    card.className = 'cb-order-card';
-
-    const title = document.createElement('div');
-    title.className = 'cb-order-title';
-    title.textContent = `${state.language === 'ar' ? 'رقم الطلب' : 'Order ID'}: ${orderDraft.order_id}`;
-    card.appendChild(title);
-
-    if (Array.isArray(orderDraft.items) && orderDraft.items.length) {
-      const itemsList = document.createElement('div');
-      itemsList.className = 'cb-order-items';
-
-      orderDraft.items.forEach((item) => {
-        const row = document.createElement('div');
-        row.className = 'cb-order-row';
-
-        const name = document.createElement('div');
-        name.className = 'cb-order-name';
-        name.textContent = item.title;
-        row.appendChild(name);
-
-        const qty = document.createElement('div');
-        qty.className = 'cb-order-qty';
-
-        const dec = document.createElement('button');
-        dec.type = 'button';
-        dec.className = 'cb-qty-btn';
-        dec.textContent = '-';
-        dec.addEventListener('click', () => {
-          item.quantity = Math.max(0, item.quantity - 1);
-          if (item.quantity === 0) {
-            orderDraft.items = orderDraft.items.filter(i => i.order_item_id !== item.order_item_id);
-          }
-          renderOrderDraft(orderDraft, addressPreview);
-          scheduleCartSync(orderDraft);
-        });
-
-        const count = document.createElement('span');
-        count.textContent = item.quantity;
-
-        const inc = document.createElement('button');
-        inc.type = 'button';
-        inc.className = 'cb-qty-btn';
-        inc.textContent = '+';
-        inc.addEventListener('click', () => {
-          item.quantity++;
-          renderOrderDraft(orderDraft, addressPreview);
-          scheduleCartSync(orderDraft);
-        });
-
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'cb-order-remove';
-        remove.textContent = state.language === 'ar' ? 'حذف' : 'Remove';
-        remove.addEventListener('click', () => {
-          orderDraft.items = orderDraft.items.filter(i => i.order_item_id !== item.order_item_id);
-          renderOrderDraft(orderDraft, addressPreview);
-          scheduleCartSync(orderDraft);
-        });
-
-        qty.appendChild(dec);
-        qty.appendChild(count);
-        qty.appendChild(inc);
-        qty.appendChild(remove);
-        row.appendChild(qty);
-        itemsList.appendChild(row);
-      });
-      card.appendChild(itemsList);
-    } else {
-      const empty = document.createElement('div');
-      empty.className = 'cb-order-empty';
-      empty.textContent = orderDraft.empty_label || (state.language === 'ar' ? 'الطلب فارغ حالياً' : 'This order is empty right now');
-      card.appendChild(empty);
-    }
-
-    if (addressPreview) {
-      const address = document.createElement('div');
-      address.className = 'cb-order-address';
-      address.textContent = `${state.language === 'ar' ? 'العنوان' : 'Address'}: ${addressPreview}`;
-      card.appendChild(address);
-    }
-
-    refs.order.appendChild(card);
   }
 
   function applyUiState(uiState) {
-    state.uiState = normalizeUiState(uiState || emptyUiState());
+    const previousDraft = state.uiState.order_draft;
+    const normalized = normalizeUiState(uiState || emptyUiState());
+    if (state.cartSyncPending && state.uiState.order_draft) {
+      normalized.order_draft = state.uiState.order_draft;
+    }
+    state.uiState = normalized;
+    
+    // Automatically open dashboard when a draft order exists and is newly loaded, otherwise close it
+    if (state.uiState.order_draft && !previousDraft) {
+      state.orderDashboardActive = true;
+    } else if (!state.uiState.order_draft) {
+      state.orderDashboardActive = false;
+    }
+    
     renderChoiceButtons(state.uiState.choice_buttons);
     renderOrderDraft(state.uiState.order_draft, state.uiState.address_preview);
     setInputPlaceholder();
     syncComposerState();
+    
+    // Renders the full screen dashboard overlay if orderDashboardActive is true
+    updateDashboardUi();
   }
 
   function updateChatModeUi() {
@@ -753,12 +1157,577 @@
     syncComposerState();
   }
 
+  function renderFloatingOrderBadge() {
+    const draft = state.uiState.order_draft;
+    if (!draft) {
+      removeFloatingOrderBadge();
+      return;
+    }
+    
+    const existing = refs.root.querySelector('.cb-active-order-badge');
+    if (existing) {
+      const orderIdAttr = existing.getAttribute('data-order-id');
+      if (orderIdAttr === String(draft.order_id)) {
+        return;
+      }
+      existing.remove();
+    }
+    
+    const badge = document.createElement('div');
+    badge.className = 'cb-active-order-badge';
+    badge.setAttribute('data-order-id', draft.order_id);
+    badge.innerHTML = `
+      <span>🛒 ${state.language === 'ar' ? `طلب نشط قيد التنفيذ (#${draft.order_id})` : `Order in progress (#${draft.order_id})`}</span>
+      <button type="button">${state.language === 'ar' ? 'عرض الطلب' : 'View Order'}</button>
+    `;
+    
+    badge.querySelector('button').addEventListener('click', () => {
+      state.orderDashboardActive = true;
+      updateDashboardUi();
+    });
+    
+    refs.messages.parentNode.insertBefore(badge, refs.messages);
+  }
+
+  function removeFloatingOrderBadge() {
+    const existing = refs.root.querySelector('.cb-active-order-badge');
+    if (existing) existing.remove();
+  }
+
+  async function addCatalogItem(title) {
+    if (state.uiState.order_draft && state.uiState.order_draft.status !== 'draft') {
+      return;
+    }
+    
+    if (state.uiState.order_draft && state.uiState.order_draft.items.length > 0) {
+      await sendMessage({ value: '__order__:add_more', silent: true });
+    }
+    
+    await sendMessage({ value: title, silent: true });
+  }
+
+  function updateDashboardUi() {
+    if (!refs || !refs.dashboard) return;
+    
+    const draft = state.uiState.order_draft;
+    const addressPreview = state.uiState.address_preview;
+    
+    if (!draft || !state.orderDashboardActive) {
+      refs.root.querySelector('.cb-panel').classList.remove('order-dashboard-mode');
+      
+      // Clear data-stage attribute when leaving dashboard
+      refs.dashboard.removeAttribute('data-stage');
+      refs.dashboard.innerHTML = '';
+      
+      // Clean up chat view order UI elements and unlock composer
+      renderChoiceButtons(state.uiState.choice_buttons);
+      renderSuggestions(state.currentSuggestions);
+      setInputPlaceholder();
+      syncComposerState();
+      
+      renderFloatingOrderBadge();
+      return;
+    }
+    
+    removeFloatingOrderBadge();
+    refs.root.querySelector('.cb-panel').classList.add('order-dashboard-mode');
+
+    // Modals/screens override the stage and rebuild entirely
+    if (state.confirmCancelActive) {
+      refs.dashboard.removeAttribute('data-stage');
+      refs.dashboard.innerHTML = `
+        <div class="cb-dash-confirm-screen">
+          <div class="cb-dash-confirm-icon cb-dash-confirm-icon-danger">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="15" y1="9" x2="9" y2="15"></line>
+              <line x1="9" y1="9" x2="15" y2="15"></line>
+            </svg>
+          </div>
+          <h3 class="cb-dash-confirm-title">${state.language === 'ar' ? 'إلغاء الطلب?' : 'Cancel Order?'}</h3>
+          <p class="cb-dash-confirm-text">
+            ${state.language === 'ar' ? 'هل أنت متأكد من إلغاء هذا الطلب؟ سيتم مسح جميع الأصناف من سلتك.' : 'Are you sure you want to cancel this order? All items in your cart will be permanently removed.'}
+          </p>
+          <div class="cb-dash-confirm-actions">
+            <button type="button" class="cb-dash-confirm-btn-danger cb-dash-cancel-yes">${state.language === 'ar' ? 'نعم، إلغاء الطلب' : 'Yes, Cancel Order'}</button>
+            <button type="button" class="cb-dash-confirm-btn-secondary cb-dash-cancel-no">${state.language === 'ar' ? 'لا، تراجع' : 'No, Keep Order'}</button>
+          </div>
+        </div>
+      `;
+
+      refs.dashboard.querySelector('.cb-dash-cancel-yes').addEventListener('click', async () => {
+        state.confirmCancelActive = false;
+        state.orderDashboardActive = false;
+        await sendMessage({ value: '__order__:cancel', silent: false });
+      });
+
+      refs.dashboard.querySelector('.cb-dash-cancel-no').addEventListener('click', () => {
+        state.confirmCancelActive = false;
+        updateDashboardUi();
+      });
+      return;
+    }
+
+    if (state.confirmDeleteItem) {
+      refs.dashboard.removeAttribute('data-stage');
+      const itemToDelete = state.confirmDeleteItem;
+      refs.dashboard.innerHTML = `
+        <div class="cb-dash-confirm-screen">
+          <div class="cb-dash-confirm-icon cb-dash-confirm-icon-warning">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </div>
+          <h3 class="cb-dash-confirm-title">${state.language === 'ar' ? 'إزالة الصنف؟' : 'Remove Item?'}</h3>
+          <p class="cb-dash-confirm-text">
+            ${state.language === 'ar' 
+              ? `هل أنت متأكد من إزالة "${itemToDelete.title}" من السلة؟` 
+              : `Are you sure you want to remove "${itemToDelete.title}" from your cart?`}
+          </p>
+          <div class="cb-dash-confirm-actions">
+            <button type="button" class="cb-dash-confirm-btn-danger cb-dash-delete-yes">${state.language === 'ar' ? 'إزالة' : 'Yes, Remove'}</button>
+            <button type="button" class="cb-dash-confirm-btn-secondary cb-dash-delete-no">${state.language === 'ar' ? 'إلغاء' : 'No, Keep It'}</button>
+          </div>
+        </div>
+      `;
+
+      refs.dashboard.querySelector('.cb-dash-delete-yes').addEventListener('click', () => {
+        const itemId = itemToDelete.order_item_id;
+        state.confirmDeleteItem = null;
+        state.cartSyncPending = true;
+        state.lastCartEditTime = Date.now();
+        draft.items = draft.items.filter(i => i.order_item_id !== itemId);
+        updateDashboardUi();
+        scheduleCartSync(draft);
+      });
+
+      refs.dashboard.querySelector('.cb-dash-delete-no').addEventListener('click', () => {
+        state.confirmDeleteItem = null;
+        updateDashboardUi();
+      });
+      return;
+    }
+
+    const status = draft.status;
+    const currentStage = refs.dashboard.getAttribute('data-stage');
+
+    // If stage changed, build the shell HTML once
+    if (currentStage !== status) {
+      refs.dashboard.setAttribute('data-stage', status);
+      
+      let shellHtml = `
+        <header class="cb-dash-header">
+          <button type="button" class="cb-dash-back">${state.language === 'ar' ? '← الدردشة' : '← Back'}</button>
+          <span class="cb-dash-title">${state.language === 'ar' ? 'تفاصيل الطلب' : 'Order Details'} #${draft.order_id}</span>
+          <button type="button" class="cb-dash-cancel">${state.language === 'ar' ? 'إلغاء' : 'Cancel'}</button>
+        </header>
+        <div class="cb-dash-content">
+      `;
+      
+      if (status === 'draft') {
+        shellHtml += `
+          <div class="cb-card">
+            <div class="cb-card-title">${state.language === 'ar' ? 'السلة' : 'Shopping Cart'}</div>
+            <div class="cb-dash-cart-list"></div>
+          </div>
+          
+          <div class="cb-suggestions-section">
+            <div class="cb-section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+              </svg>
+              <span>${state.language === 'ar' ? 'اقتراحات لك' : 'Recommended for You'}</span>
+            </div>
+            <div class="cb-suggestion-grid"></div>
+          </div>
+          
+          <div class="cb-card cb-dash-search-container">
+            <div class="cb-card-title">${state.language === 'ar' ? 'بحث سريع' : 'Quick Search'}</div>
+            <input type="text" class="cb-dash-search-input" placeholder="${state.language === 'ar' ? 'ابحث عن أصناف أخرى...' : 'Search for other items...'}" value="${state.searchQuery || ''}">
+            <div class="cb-search-status" style="display: none;">
+              <div class="cb-search-spinner"></div>
+              <span>${state.language === 'ar' ? 'جاري البحث...' : 'Searching...'}</span>
+            </div>
+            <div class="cb-search-results-list" style="display: none;"></div>
+          </div>
+        `;
+      } else if (status === 'awaiting_address') {
+        shellHtml += `
+          <div class="cb-card">
+            <div class="cb-card-title">${state.language === 'ar' ? 'عنوان التوصيل' : 'Delivery Address'}</div>
+            <div class="cb-address-prompt">
+              ${state.language === 'ar' ? 'من فضلك أرسل عنوان التوصيل الكامل والواضح للمتابعة:' : 'Please enter your complete and clear delivery address to proceed:'}
+            </div>
+            <textarea class="cb-address-textarea" placeholder="${state.language === 'ar' ? 'مثال: شارع التسعين، التجمع الخامس، القاهرة، شقة ٥...' : 'e.g., 90th Street, Fifth Settlement, Cairo, Apt 5...'}">${state.typedAddress || ''}</textarea>
+          </div>
+        `;
+      } else if (status === 'address_confirmation') {
+        shellHtml += `
+          <div class="cb-card">
+            <div class="cb-card-title">${state.language === 'ar' ? 'تأكيد العنوان' : 'Confirm Address'}</div>
+            <div class="cb-address-prompt" style="font-weight:600;color:var(--cb-primary);background:rgba(23,68,58,0.04);padding:12px;border-radius:10px;border-left:4px solid var(--cb-primary);">
+              ${addressPreview}
+            </div>
+            <div style="font-size:13px;color:#78716c;margin-top:12px;line-height:1.4;">
+              ${state.language === 'ar' ? 'هل هذا العنوان صحيح؟ يمكنك تأكيد الطلب أو تعديل العنوان إذا لزم الأمر.' : 'Is this address correct? You can confirm or rewrite if needed.'}
+            </div>
+          </div>
+        `;
+      } else if (status === 'pending') {
+        shellHtml += `
+          <div class="cb-card cb-dash-pending-status-card" style="background: rgba(23,68,58,0.04); border-left: 4px solid var(--cb-primary); padding: 16px; border-radius: 12px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+            <div style="background: var(--cb-primary); color: #fff; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+              </svg>
+            </div>
+            <div>
+              <div style="font-weight: 700; color: var(--cb-primary); font-size: 15px;">
+                ${state.language === 'ar' ? 'تم تأكيد الطلب بنجاح!' : 'Order Confirmed successfully!'}
+              </div>
+              <div style="font-size: 13px; color: #4b5563; margin-top: 2px;">
+                ${state.language === 'ar' ? 'طلبك قيد التجهيز والتوصيل حالياً.' : 'Your order is currently being prepared & delivered.'}
+              </div>
+            </div>
+          </div>
+          
+          <div class="cb-card">
+            <div class="cb-card-title">${state.language === 'ar' ? 'الأصناف المطلوبة' : 'Ordered Items'}</div>
+            <div class="cb-dash-cart-list cb-dash-cart-list-readonly"></div>
+          </div>
+          
+          <div class="cb-card">
+            <div class="cb-card-title">${state.language === 'ar' ? 'عنوان التوصيل' : 'Delivery Address'}</div>
+            <div class="cb-address-prompt" style="font-weight:600; color:#1f2937; padding: 12px; background: rgba(0,0,0,0.02); border-radius: 8px; font-size: 14px;">
+              ${draft.address || ''}
+            </div>
+          </div>
+        `;
+      }
+      
+      shellHtml += `
+        </div>
+        <div class="cb-dash-action-bar"></div>
+      `;
+      
+      refs.dashboard.innerHTML = shellHtml;
+      
+      // Bind stage-invariant header listeners
+      refs.dashboard.querySelector('.cb-dash-back').addEventListener('click', () => {
+        state.orderDashboardActive = false;
+        updateDashboardUi();
+      });
+      
+      refs.dashboard.querySelector('.cb-dash-cancel').addEventListener('click', () => {
+        state.confirmCancelActive = true;
+        updateDashboardUi();
+      });
+      
+      // Bind stage-specific listeners for inputs
+      if (status === 'draft') {
+        const searchInput = refs.dashboard.querySelector('.cb-dash-search-input');
+        if (searchInput) {
+          searchInput.addEventListener('input', (e) => {
+            const value = e.target.value;
+            state.searchQuery = value;
+            
+            if (state.searchDebounceTimer) clearTimeout(state.searchDebounceTimer);
+            
+            if (!value.trim()) {
+              state.isSearching = false;
+              state.searchResults = [];
+              updateDashboardUi();
+              return;
+            }
+            
+            state.isSearching = true;
+            const statusEl = refs.dashboard.querySelector('.cb-search-status');
+            if (statusEl) statusEl.style.display = 'flex';
+            
+            state.searchDebounceTimer = setTimeout(async () => {
+              try {
+                const res = await postJson('/api/search', {
+                  query: value,
+                  lang: state.language,
+                  context: {
+                    recent_item_ids: state.uiState.order_draft?.items?.map(i => i.order_item_id) || []
+                  }
+                });
+                state.searchResults = res.items || [];
+              } catch (e) {
+                state.searchResults = [];
+              } finally {
+                state.isSearching = false;
+                updateDashboardUi();
+              }
+            }, 1000);
+          });
+        }
+      } else if (status === 'awaiting_address') {
+        const textarea = refs.dashboard.querySelector('.cb-address-textarea');
+        if (textarea) {
+          textarea.addEventListener('input', (e) => {
+            const val = e.target.value;
+            state.typedAddress = val;
+            const btn = refs.dashboard.querySelector('.cb-dash-btn-confirm-address');
+            if (btn) btn.disabled = val.trim().length < 6;
+          });
+        }
+      }
+    }
+
+    // Now perform dynamic, incremental updates to DOM elements without rewriting the shell!
+    if (status === 'draft' || status === 'pending') {
+      // 1. Update Cart Items List
+      const cartListEl = refs.dashboard.querySelector('.cb-dash-cart-list');
+      if (cartListEl) {
+        let cartHtml = '';
+        if (Array.isArray(draft.items) && draft.items.length > 0) {
+          draft.items.forEach((item) => {
+            if (status === 'pending') {
+              cartHtml += `
+                <div class="cb-dash-item-row" data-item-id="${item.order_item_id}" style="padding: 10px 0; border-bottom: 1px dashed rgba(0,0,0,0.06);">
+                  <div class="cb-dash-item-info">
+                    <div class="cb-dash-item-name" style="font-weight: 600; color: #1f2937;">${item.title}</div>
+                  </div>
+                  <div class="cb-dash-item-controls" style="font-weight: 700; color: var(--cb-primary); font-size: 15px;">
+                    <span>x ${item.quantity}</span>
+                  </div>
+                </div>
+              `;
+            } else {
+              cartHtml += `
+                <div class="cb-dash-item-row" data-item-id="${item.order_item_id}">
+                  <div class="cb-dash-item-info">
+                    <div class="cb-dash-item-name">${item.title}</div>
+                  </div>
+                  <div class="cb-dash-item-controls">
+                    <button type="button" class="cb-dash-qty-btn cb-dash-qty-dec" data-item-id="${item.order_item_id}">-</button>
+                    <span class="cb-dash-item-qty">${item.quantity}</span>
+                    <button type="button" class="cb-dash-qty-btn cb-dash-qty-inc" data-item-id="${item.order_item_id}">+</button>
+                    <button type="button" class="cb-dash-item-delete" data-item-id="${item.order_item_id}" title="${state.language === 'ar' ? 'حذف' : 'Delete'}">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              `;
+            }
+          });
+        } else {
+          cartHtml += `
+            <div class="cb-dash-empty-state">
+              <div class="cb-dash-empty-text">${state.language === 'ar' ? 'الطلب فارغ حالياً' : 'Your order is currently empty'}</div>
+              <button type="button" class="cb-dash-btn-first">${state.language === 'ar' ? 'أضف صنفك الأول' : 'Add Your First Item'}</button>
+            </div>
+          `;
+        }
+        cartListEl.innerHTML = cartHtml;
+
+        // Bind cart action listeners
+        if (status === 'draft') {
+          cartListEl.querySelectorAll('.cb-dash-qty-dec').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const itemId = Number(btn.getAttribute('data-item-id'));
+              const item = draft.items.find(i => i.order_item_id === itemId);
+              if (item) {
+                state.cartSyncPending = true;
+                state.lastCartEditTime = Date.now();
+                item.quantity = Math.max(0, item.quantity - 1);
+                if (item.quantity === 0) {
+                  draft.items = draft.items.filter(i => i.order_item_id !== itemId);
+                }
+                updateDashboardUi();
+                scheduleCartSync(draft);
+              }
+            });
+          });
+
+          cartListEl.querySelectorAll('.cb-dash-qty-inc').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const itemId = Number(btn.getAttribute('data-item-id'));
+              const item = draft.items.find(i => i.order_item_id === itemId);
+              if (item) {
+                state.cartSyncPending = true;
+                state.lastCartEditTime = Date.now();
+                item.quantity++;
+                updateDashboardUi();
+                scheduleCartSync(draft);
+              }
+            });
+          });
+
+          cartListEl.querySelectorAll('.cb-dash-item-delete').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const itemId = Number(btn.getAttribute('data-item-id'));
+              const item = draft.items.find(i => i.order_item_id === itemId);
+              if (item) {
+                state.confirmDeleteItem = item;
+                updateDashboardUi();
+              }
+            });
+          });
+
+          const btnFirst = cartListEl.querySelector('.cb-dash-btn-first');
+          if (btnFirst) {
+            btnFirst.addEventListener('click', () => {
+              const searchInput = refs.dashboard.querySelector('.cb-dash-search-input');
+              if (searchInput) searchInput.focus();
+            });
+          }
+        }
+      }
+
+      // 2. Update Recommendations
+      const sugGridEl = refs.dashboard.querySelector('.cb-suggestion-grid');
+      if (sugGridEl) {
+        let sugHtml = '';
+        state.orderSuggestions.forEach((text) => {
+          sugHtml += `
+            <div class="cb-suggestion-card" data-title="${text}">
+              <div class="cb-sug-name">${text}</div>
+              <div class="cb-sug-price">${state.language === 'ar' ? 'اضغط للإضافة' : 'Tap to add'}</div>
+            </div>
+          `;
+        });
+        sugGridEl.innerHTML = sugHtml;
+
+        sugGridEl.querySelectorAll('.cb-suggestion-card').forEach((card) => {
+          card.addEventListener('click', async () => {
+            const title = card.getAttribute('data-title');
+            card.style.transform = 'scale(0.96)';
+            setTimeout(() => card.style.transform = '', 100);
+            playNotifySound();
+            await addCatalogItem(title);
+          });
+        });
+      }
+
+      // 3. Update Search Status & Results
+      const searchStatusEl = refs.dashboard.querySelector('.cb-search-status');
+      const resultsListEl = refs.dashboard.querySelector('.cb-search-results-list');
+      if (searchStatusEl) {
+        searchStatusEl.style.display = state.isSearching ? 'flex' : 'none';
+      }
+      if (resultsListEl) {
+        let resHtml = '';
+        if (state.searchResults.length > 0) {
+          state.searchResults.forEach((item) => {
+            const title = state.language === 'ar' ? item.title_ar || item.title_en : item.title_en || item.title_ar;
+            const priceStr = item.price !== null && item.price !== undefined ? `${item.price} ${item.currency}` : '';
+            resHtml += `
+              <div class="cb-search-result-row" data-title="${title}">
+                <span>${title}</span>
+                <strong style="color:var(--cb-primary);">${priceStr}</strong>
+              </div>
+            `;
+          });
+          resultsListEl.style.display = 'flex';
+        } else if (state.searchQuery && !state.isSearching) {
+          resHtml += `
+            <div style="font-size:12.5px;color:#78716c;text-align:center;padding:8px 0;">
+              ${state.language === 'ar' ? 'لم يتم العثور على نتائج' : 'No items found'}
+            </div>
+          `;
+          resultsListEl.style.display = 'flex';
+        } else {
+          resultsListEl.style.display = 'none';
+        }
+        resultsListEl.innerHTML = resHtml;
+
+        resultsListEl.querySelectorAll('.cb-search-result-row').forEach((row) => {
+          row.addEventListener('click', async () => {
+            const title = row.getAttribute('data-title');
+            playNotifySound();
+            await addCatalogItem(title);
+          });
+        });
+      }
+
+      // 4. Update Bottom Action Bar
+      const actionBarEl = refs.dashboard.querySelector('.cb-dash-action-bar');
+      if (actionBarEl) {
+        const hasItems = Array.isArray(draft.items) && draft.items.length > 0;
+        actionBarEl.innerHTML = `
+          <button type="button" class="cb-dash-btn-primary cb-dash-btn-confirm-items" ${hasItems ? '' : 'disabled'}>
+            ${state.language === 'ar' ? 'تأكيد أصناف الطلب' : 'Confirm Order Items'}
+          </button>
+        `;
+
+        const btnConfirm = actionBarEl.querySelector('.cb-dash-btn-confirm-items');
+        if (btnConfirm) {
+          btnConfirm.addEventListener('click', async () => {
+            btnConfirm.disabled = true;
+            btnConfirm.textContent = state.language === 'ar' ? 'جاري التأكيد...' : 'Confirming...';
+            await sendMessage({ value: '__order__:confirm', silent: false });
+          });
+        }
+      }
+    } else if (status === 'awaiting_address') {
+      const actionBarEl = refs.dashboard.querySelector('.cb-dash-action-bar');
+      if (actionBarEl) {
+        const isAddressValid = String(state.typedAddress || '').trim().length >= 6;
+        actionBarEl.innerHTML = `
+          <button type="button" class="cb-dash-btn-primary cb-dash-btn-confirm-address" ${isAddressValid ? '' : 'disabled'}>
+            ${state.language === 'ar' ? 'تأكيد العنوان' : 'Confirm Address'}
+          </button>
+        `;
+
+        const btnConfirmAddr = actionBarEl.querySelector('.cb-dash-btn-confirm-address');
+        if (btnConfirmAddr) {
+          btnConfirmAddr.addEventListener('click', async () => {
+            btnConfirmAddr.disabled = true;
+            btnConfirmAddr.textContent = state.language === 'ar' ? 'جاري الحفظ...' : 'Saving...';
+            await sendMessage({ value: state.typedAddress, silent: false });
+          });
+        }
+      }
+    } else if (status === 'address_confirmation') {
+      const actionBarEl = refs.dashboard.querySelector('.cb-dash-action-bar');
+      if (actionBarEl) {
+        actionBarEl.innerHTML = `
+          <button type="button" class="cb-dash-btn-primary cb-dash-btn-final-confirm">
+            ${state.language === 'ar' ? 'تأكيد نهائي وإرسال الطلب' : 'Confirm and Place Order'}
+          </button>
+          <button type="button" class="cb-choice secondary cb-dash-btn-rewrite-address" style="width:100%;padding:11px;font-weight:600;margin:0;">
+            ${state.language === 'ar' ? 'تعديل العنوان' : 'Rewrite Address'}
+          </button>
+        `;
+
+        actionBarEl.querySelector('.cb-dash-btn-final-confirm').addEventListener('click', async () => {
+          const btn = actionBarEl.querySelector('.cb-dash-btn-final-confirm');
+          btn.disabled = true;
+          btn.textContent = state.language === 'ar' ? 'جاري إرسال الطلب...' : 'Submitting order...';
+          await sendMessage({ value: '__order__:confirm_address', silent: false });
+        });
+
+        actionBarEl.querySelector('.cb-dash-btn-rewrite-address').addEventListener('click', async () => {
+          await sendMessage({ value: '__order__:rewrite_address', silent: false });
+        });
+      }
+    }
+  }
+
   function openPanel(force) {
     state.open = force !== undefined ? force : !state.open;
     refs.root.classList.toggle('open', state.open);
     if (state.open) {
       refs.bubble.classList.remove('has-unread');
-      if (!refs.input.disabled) refs.input.focus();
+      if (!state.orderDashboardActive && !refs.input.disabled) {
+        refs.input.focus();
+      } else if (state.orderDashboardActive) {
+        const searchInput = refs.dashboard.querySelector('.cb-dash-search-input');
+        if (searchInput) {
+          searchInput.focus();
+        } else {
+          const textarea = refs.dashboard.querySelector('.cb-address-textarea');
+          if (textarea) textarea.focus();
+        }
+      }
     }
   }
 
@@ -812,6 +1781,7 @@
             <button class="cb-send" type="button" aria-label="Send message">&#10148;</button>
           </div>
         </footer>
+        <div class="cb-order-dashboard"></div>
       </section>
     `;
 
@@ -830,13 +1800,18 @@
       footer: root.querySelector('.cb-footer'),
       input: root.querySelector('.cb-input'),
       send: root.querySelector('.cb-send'),
+      dashboard: root.querySelector('.cb-order-dashboard'),
     };
   }
 
   async function initSession(forceNew) {
     let payload;
     try {
-      payload = await postJson('/api/init', { session_key: state.sessionKey, force_new: Boolean(forceNew) });
+      payload = await postJson('/api/init', {
+        session_key: state.sessionKey,
+        force_new: Boolean(forceNew),
+        order_dashboard_active: state.orderDashboardActive,
+      });
     } catch (error) {
       if (error && error.payload && error.payload.error === 'invalid_token') return;
       return;
@@ -852,8 +1827,19 @@
   }
 
   function applyPayloadUi(payload) {
-    applyUiState(payload && payload.ui_state ? payload.ui_state : emptyUiState());
-    renderSuggestions(payload && Array.isArray(payload.suggestions) ? payload.suggestions : []);
+    if (!payload) return;
+
+    if (payload.order_suggestions) {
+      state.orderSuggestions = Array.isArray(payload.order_suggestions) ? payload.order_suggestions.slice(0, 10) : [];
+    } else if (payload.response && payload.response.order_suggestions) {
+      state.orderSuggestions = Array.isArray(payload.response.order_suggestions) ? payload.response.order_suggestions.slice(0, 10) : [];
+    }
+
+    const incomingSuggestions = payload.suggestions || (payload.response && payload.response.suggestions) || [];
+    state.chitchatSuggestions = Array.isArray(incomingSuggestions) ? incomingSuggestions.slice(0, 10) : [];
+    state.currentSuggestions = state.chitchatSuggestions;
+
+    applyUiState(payload.ui_state || (payload.response && payload.response.ui_state) || emptyUiState());
     setInputPlaceholder();
     updateChatModeUi();
   }
@@ -895,10 +1881,12 @@
     const requestText = isObjectInput ? String(forcedInput.value || '').trim() : String(forcedInput || refs.input.value || '').trim();
     const displayText = isObjectInput ? String(forcedInput.displayText || forcedInput.value || '').trim() : requestText;
     const silent = Boolean(isObjectInput && forcedInput.silent);
+    const syncEditTime = state.lastCartEditTime;
 
     if (!requestText) return;
     if (!forcedInput && refs.send.disabled) return;
-    if (state.automated && state.uiState.input_locked && !forcedInput) return;
+    const isLocked = state.automated && state.uiState.input_locked && (!state.uiState.order_draft || state.orderDashboardActive);
+    if (isLocked && !forcedInput) return;
 
     if (!silent) {
       refs.input.value = '';
@@ -919,10 +1907,15 @@
       const payload = await postJson('/api/message', {
         session_key: state.sessionKey,
         message: requestText,
+        order_dashboard_active: state.orderDashboardActive,
       });
 
       // If a newer silent request was sent, ignore this one's UI update to prevent flicker
       if (silent && startTime < state.lastRequestTime) return;
+
+      if (silent && syncEditTime === state.lastCartEditTime) {
+        state.cartSyncPending = false;
+      }
 
       const elapsed = Date.now() - startTime;
       if (!silent && elapsed < 800) {
@@ -935,10 +1928,7 @@
 
       if (payload.reset) {
         renderHistory(payload.history || [], state.language);
-        applyPayloadUi({
-          suggestions: payload.response?.suggestions || [],
-          ui_state: payload.response?.ui_state || emptyUiState(),
-        });
+        applyPayloadUi(payload);
         return;
       }
 
@@ -946,10 +1936,11 @@
         renderButtons(payload.response.buttons);
       }
 
-      applyPayloadUi({
-        suggestions: payload.response?.suggestions || payload.suggestions || [],
-        ui_state: payload.response?.ui_state || payload.ui_state || emptyUiState(),
-      });
+      if (payload.intent === 'order_existing' || payload.intent === 'order_started') {
+        state.orderDashboardActive = true;
+      }
+
+      applyPayloadUi(payload);
 
       if (payload.response && payload.response.text) {
         state.history.push({ role: 'bot', content: payload.response.text });
@@ -968,7 +1959,7 @@
       state.isSending = false;
       state.isTypingReply = false;
       syncComposerState();
-      if (!refs.input.disabled) refs.input.focus();
+      if (!state.orderDashboardActive && !refs.input.disabled) refs.input.focus();
     }
   }
 

@@ -52,7 +52,7 @@ function parseContext(value) {
 
 router.post('/', tokenValidator, (req, res) => {
   try {
-    const { session_key: sessionKey, force_new: forceNew } = req.body || {};
+    const { session_key: sessionKey, force_new: forceNew, order_dashboard_active: orderDashboardActive } = req.body || {};
     const business = req.business;
     const brain = getBrain(business.service_type);
     const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '')
@@ -87,13 +87,25 @@ router.post('/', tokenValidator, (req, res) => {
     const language = session.language === 'ar' ? 'ar' : 'en';
     const history = getMessages.all(session.id);
     const context = parseContext(session.context);
-    const suggestions = session.phase === 'active'
+    const suggestions = (session.phase === 'active' || String(session.phase || '').startsWith('order_'))
       ? (parseSuggestions(context.last_suggestions).length
         ? parseSuggestions(context.last_suggestions)
         : parseSuggestions(business[`suggestions_${language}`]))
       : [];
+    
     const orderState = resolveOrderUiState({ business, session, context, lang: language });
-    const finalSuggestions = orderState.suggestions.length ? orderState.suggestions : suggestions;
+    const orderSuggestions = orderState.suggestions || [];
+    
+    const dashboardActive = orderDashboardActive !== false;
+    let finalUiState = orderState.ui_state;
+    if (!dashboardActive) {
+      finalUiState = {
+        input_locked: false,
+        choice_buttons: [],
+        address_preview: '',
+        order_draft: orderState.ui_state?.order_draft || null,
+      };
+    }
 
     const payloadBusiness = {
       id: business.id,
@@ -120,8 +132,9 @@ router.post('/', tokenValidator, (req, res) => {
       business: payloadBusiness,
       cafe: payloadBusiness,
       history,
-      suggestions: Number(session.automated) !== 0 ? finalSuggestions : [],
-      ui_state: orderState.ui_state,
+      suggestions: Number(session.automated) !== 0 ? suggestions : [],
+      ui_state: finalUiState,
+      order_suggestions: Number(session.automated) !== 0 ? orderSuggestions : [],
     });
   } catch (error) {
     console.error('[init]', error);

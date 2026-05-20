@@ -9,6 +9,8 @@ const ARABIC_TO_ENGLISH_DICT = {
   'عصير': 'juice',
   'ماء': 'water',
   'مياه': 'water',
+  'ماية': 'water',
+  'مايه': 'water',
   'فراخ': 'chicken',
   'دجاج': 'chicken',
   'لحم': 'meat',
