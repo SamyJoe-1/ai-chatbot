@@ -576,7 +576,7 @@ function buildValidAddressMessage({ lang }) {
 }
 
 function serializeOrderState({ lang, stage, order, items, context }) {
-  const suggestions = stage === 'add_item' ? getOrderItemSuggestions(context, order.business_id, lang) : [];
+  const suggestions = (stage === 'add_item' || stage === 'review') ? getOrderItemSuggestions(context, order.business_id, lang) : [];
   const addressPreview = stage === 'address_confirmation' ? context?.order_flow?.pending_address || '' : '';
   return {
     suggestions,

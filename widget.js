@@ -47,6 +47,7 @@
     typingId: 0,
     cartSyncPending: false,
     lastCartEditTime: 0,
+    orderInputMode: null,
   };
 
   let refs;
@@ -503,11 +504,11 @@
       .cb-dash-header {
         background: var(--cb-primary);
         color: #fff;
-        padding: 14px 16px;
+        padding: 8px 12px;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 12px;
+        gap: 8px;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
       }
       .cb-dash-back {
@@ -549,10 +550,10 @@
       .cb-dash-content {
         flex: 1;
         overflow-y: auto;
-        padding: 16px;
+        padding: 8px 10px;
         display: flex;
         flex-direction: column;
-        gap: 16px;
+        gap: 8px;
       }
       .cb-dash-content::-webkit-scrollbar {
         width: 4px;
@@ -564,8 +565,8 @@
       .cb-card {
         background: #fff;
         border: 1px solid var(--cb-border);
-        border-radius: 16px;
-        padding: 16px;
+        border-radius: 12px;
+        padding: 10px 12px;
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
       }
       .cb-card-title {
@@ -574,13 +575,13 @@
         letter-spacing: 0.5px;
         font-weight: 700;
         color: #78716c;
-        margin-bottom: 12px;
+        margin-bottom: 6px;
       }
       .cb-dash-item-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 10px 0;
+        padding: 6px 0;
         border-bottom: 1px solid rgba(16, 24, 40, 0.04);
       }
       .cb-dash-item-row:last-child {
@@ -670,7 +671,7 @@
         font-size: 14px;
         font-weight: 700;
         color: var(--cb-text);
-        margin-bottom: 8px;
+        margin-bottom: 4px;
         display: flex;
         align-items: center;
         gap: 6px;
@@ -678,16 +679,16 @@
       .cb-suggestion-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
-        gap: 8px;
-        max-height: 200px;
+        gap: 6px;
+        max-height: 160px;
         overflow-y: auto;
         padding-right: 4px;
       }
       .cb-suggestion-card {
         background: #fff;
         border: 1px solid var(--cb-border);
-        border-radius: 12px;
-        padding: 10px;
+        border-radius: 8px;
+        padding: 6px 8px;
         cursor: pointer;
         display: flex;
         flex-direction: column;
@@ -800,20 +801,20 @@
       
       /* Confirm/Action Bar */
       .cb-dash-action-bar {
-        padding: 12px 16px;
+        padding: 8px 10px;
         background: #fff;
         border-top: 1px solid var(--cb-border);
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 6px;
       }
       .cb-dash-btn-primary {
         background: var(--cb-primary);
         color: #fff;
         border: 0;
         border-radius: 999px;
-        padding: 12px;
-        font-size: 14px;
+        padding: 9px 12px;
+        font-size: 13.5px;
         font-weight: 700;
         cursor: pointer;
         text-align: center;
@@ -828,6 +829,37 @@
         opacity: 0.5;
         cursor: not-allowed;
         transform: none;
+      }
+      
+      /* Toggle Tabs */
+      .cb-dash-toggle-tabs {
+        display: flex;
+        background: #f0edea;
+        padding: 2px;
+        border-radius: 999px;
+        gap: 2px;
+        margin-bottom: 6px;
+      }
+      .cb-dash-tab {
+        flex: 1;
+        border: 0;
+        background: transparent;
+        padding: 6px 12px;
+        font-size: 12px;
+        font-weight: 700;
+        border-radius: 999px;
+        cursor: pointer;
+        color: #78716c;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        transition: all 150ms ease;
+      }
+      .cb-dash-tab.active {
+        background: #ffffff;
+        color: var(--cb-primary);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
       }
       
       /* Floating Order Badge in Chat View */
@@ -1134,8 +1166,10 @@
     // Automatically open dashboard when a draft order exists and is newly loaded, otherwise close it
     if (state.uiState.order_draft && !previousDraft) {
       state.orderDashboardActive = true;
+      state.orderInputMode = null;
     } else if (!state.uiState.order_draft) {
       state.orderDashboardActive = false;
+      state.orderInputMode = null;
     }
     
     renderChoiceButtons(state.uiState.choice_buttons);
@@ -1332,7 +1366,16 @@
             <div class="cb-dash-cart-list"></div>
           </div>
           
-          <div class="cb-suggestions-section">
+          <div class="cb-dash-toggle-tabs" style="display: none;">
+            <button type="button" class="cb-dash-tab cb-dash-tab-suggestions">
+              ✨ ${state.language === 'ar' ? 'اقتراحات' : 'Suggestions'}
+            </button>
+            <button type="button" class="cb-dash-tab cb-dash-tab-search">
+              🔍 ${state.language === 'ar' ? 'بحث' : 'Search'}
+            </button>
+          </div>
+          
+          <div class="cb-suggestions-section" style="display: none;">
             <div class="cb-section-title">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
@@ -1342,7 +1385,7 @@
             <div class="cb-suggestion-grid"></div>
           </div>
           
-          <div class="cb-card cb-dash-search-container">
+          <div class="cb-card cb-dash-search-container" style="display: none;">
             <div class="cb-card-title">${state.language === 'ar' ? 'بحث سريع' : 'Quick Search'}</div>
             <input type="text" class="cb-dash-search-input" placeholder="${state.language === 'ar' ? 'ابحث عن أصناف أخرى...' : 'Search for other items...'}" value="${state.searchQuery || ''}">
             <div class="cb-search-status" style="display: none;">
@@ -1427,6 +1470,21 @@
       
       // Bind stage-specific listeners for inputs
       if (status === 'draft') {
+        const tabSuggestions = refs.dashboard.querySelector('.cb-dash-tab-suggestions');
+        const tabSearch = refs.dashboard.querySelector('.cb-dash-tab-search');
+        if (tabSuggestions && tabSearch) {
+          tabSuggestions.addEventListener('click', () => {
+            state.orderInputMode = 'suggestions';
+            updateDashboardUi();
+          });
+          tabSearch.addEventListener('click', () => {
+            state.orderInputMode = 'search';
+            updateDashboardUi();
+            const input = refs.dashboard.querySelector('.cb-dash-search-input');
+            if (input) input.focus();
+          });
+        }
+
         const searchInput = refs.dashboard.querySelector('.cb-dash-search-input');
         if (searchInput) {
           searchInput.addEventListener('input', (e) => {
@@ -1575,9 +1633,46 @@
           const btnFirst = cartListEl.querySelector('.cb-dash-btn-first');
           if (btnFirst) {
             btnFirst.addEventListener('click', () => {
+              state.orderInputMode = 'search';
+              updateDashboardUi();
               const searchInput = refs.dashboard.querySelector('.cb-dash-search-input');
               if (searchInput) searchInput.focus();
             });
+          }
+        }
+      }
+
+      // Show/Hide inputs depending on orderSuggestions length and orderInputMode
+      const toggleTabsEl = refs.dashboard.querySelector('.cb-dash-toggle-tabs');
+      const sugSectionEl = refs.dashboard.querySelector('.cb-suggestions-section');
+      const searchContainerEl = refs.dashboard.querySelector('.cb-dash-search-container');
+      
+      if (toggleTabsEl && sugSectionEl && searchContainerEl) {
+        if (!state.orderSuggestions || state.orderSuggestions.length === 0) {
+          // If empty, directly hide suggestions toggle and suggestions section, show search box
+          toggleTabsEl.style.display = 'none';
+          sugSectionEl.style.display = 'none';
+          searchContainerEl.style.display = 'block';
+        } else {
+          // If not empty, show toggle tabs and toggle active view
+          toggleTabsEl.style.display = 'flex';
+          if (!state.orderInputMode) {
+            state.orderInputMode = 'suggestions';
+          }
+          
+          const tabSug = toggleTabsEl.querySelector('.cb-dash-tab-suggestions');
+          const tabSrc = toggleTabsEl.querySelector('.cb-dash-tab-search');
+          
+          if (state.orderInputMode === 'suggestions') {
+            tabSug.classList.add('active');
+            tabSrc.classList.remove('active');
+            sugSectionEl.style.display = 'block';
+            searchContainerEl.style.display = 'none';
+          } else {
+            tabSrc.classList.add('active');
+            tabSug.classList.remove('active');
+            sugSectionEl.style.display = 'none';
+            searchContainerEl.style.display = 'block';
           }
         }
       }
@@ -1835,6 +1930,12 @@
       state.orderSuggestions = Array.isArray(payload.response.order_suggestions) ? payload.response.order_suggestions.slice(0, 10) : [];
     }
 
+    if (state.orderSuggestions.length === 0) {
+      state.orderInputMode = 'search';
+    } else if (!state.orderInputMode) {
+      state.orderInputMode = 'suggestions';
+    }
+
     const incomingSuggestions = payload.suggestions || (payload.response && payload.response.suggestions) || [];
     state.chitchatSuggestions = Array.isArray(incomingSuggestions) ? incomingSuggestions.slice(0, 10) : [];
     state.currentSuggestions = state.chitchatSuggestions;
@@ -1964,6 +2065,7 @@
   }
 
   async function startNewChat() {
+    state.orderInputMode = null;
     clearStoredSession();
     const payload = await initSession(true);
     if (!payload) return;

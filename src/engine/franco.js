@@ -188,8 +188,11 @@ function recoverFranco(text, items) {
     let bestArKey = null;
     let bestDist = 999;
     for (const arKey of Object.keys(ARABIC_TO_ENGLISH_DICT)) {
-      const dist = levenshtein(normalizedArText, arabicPhoneticNormalize(arKey));
-      if (dist < bestDist && dist <= 2) {
+      const normalizedKey = arabicPhoneticNormalize(arKey);
+      const dist = levenshtein(normalizedArText, normalizedKey);
+      const minLen = Math.min(normalizedArText.length, normalizedKey.length);
+      const maxAllowed = minLen <= 2 ? 0 : (minLen <= 4 ? 1 : 2);
+      if (dist < bestDist && dist <= maxAllowed) {
         bestArKey = arKey;
         bestDist = dist;
       }
@@ -202,8 +205,11 @@ function recoverFranco(text, items) {
     let bestCatalogEnWord = null;
     let bestCatalogDist = 999;
     for (const entry of catalogWords) {
-      const dist = levenshtein(normalizedArText, arabicPhoneticNormalize(entry.ar));
-      if (dist < bestCatalogDist && dist <= 2) {
+      const normalizedEntry = arabicPhoneticNormalize(entry.ar);
+      const dist = levenshtein(normalizedArText, normalizedEntry);
+      const minLen = Math.min(normalizedArText.length, normalizedEntry.length);
+      const maxAllowed = minLen <= 2 ? 0 : (minLen <= 4 ? 1 : 2);
+      if (dist < bestCatalogDist && dist <= maxAllowed) {
         bestCatalogEnWord = entry.en;
         bestCatalogDist = dist;
       }
@@ -237,13 +243,16 @@ function recoverFranco(text, items) {
         }
       }
 
-      // Allow distance 1 only for hashes of length >= 3
+      // Allow distance 1 only for hashes of length >= 3 and with close string distance
       if (dist === 1 && wHash.length >= 3 && v.hash.length >= 3) {
         const strDist = levenshtein(lowerW, v.word);
-        if (dist < bestScore || (dist === bestScore && strDist < bestStrDist)) {
-          bestMatch = v.word;
-          bestScore = dist;
-          bestStrDist = strDist;
+        const maxStrAllowed = Math.min(lowerW.length, v.word.length) <= 4 ? 1 : 2;
+        if (strDist <= maxStrAllowed) {
+          if (dist < bestScore || (dist === bestScore && strDist < bestStrDist)) {
+            bestMatch = v.word;
+            bestScore = dist;
+            bestStrDist = strDist;
+          }
         }
       }
     }
