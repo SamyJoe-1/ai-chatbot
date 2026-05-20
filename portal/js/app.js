@@ -542,6 +542,10 @@ function parseMetadataInput(value) {
 
 function openCatalogItemModal(item = {}) {
   const isNew = !item.id;
+  const metadata = item.metadata || {};
+  const hasSizes = Array.isArray(metadata.sizes) && metadata.sizes.length > 0;
+  const isMultiSize = hasSizes && (metadata.sizes.length > 1 || (metadata.sizes[0] !== 'Regular'));
+
   Swal.fire({
     title: isNew ? 'Add Catalog Item' : 'Edit Catalog Item',
     html: `
@@ -554,13 +558,246 @@ function openCatalogItemModal(item = {}) {
         <div><label style="font-weight:600;display:block;margin-bottom:4px">Currency</label><input id="swal-currency" class="swal2-input" style="margin:0;width:100%" value="${esc(item.currency || 'EGP')}"></div>
         <div style="grid-column:1/-1"><label style="font-weight:600;display:block;margin-bottom:4px">Description EN</label><textarea id="swal-desc-en" class="swal2-textarea" style="margin:0;width:100%;min-height:50px">${esc(item.description_en || '')}</textarea></div>
         <div style="grid-column:1/-1"><label style="font-weight:600;display:block;margin-bottom:4px">Description AR</label><textarea id="swal-desc-ar" class="swal2-textarea" style="margin:0;width:100%;min-height:50px" dir="rtl">${esc(item.description_ar || '')}</textarea></div>
-        <div style="grid-column:1/-1"><label style="font-weight:600;display:block;margin-bottom:4px">Metadata JSON</label><textarea id="swal-metadata" class="swal2-textarea" style="margin:0;width:100%;min-height:120px">${esc(normalizeMetadataForForm(item))}</textarea></div>
+        
+        <div style="grid-column:1/-1; border-top:1px solid #d0d7de; padding-top:12px; margin-top:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px">
+            <span style="font-weight:600; font-size:13px; color:#24292f">Item Customizations</span>
+            <div style="display:flex; gap:4px">
+              <button type="button" id="tab-btn-sizes" style="background:#0969da; color:#fff; border:none; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer">Size Details</button>
+              <button type="button" id="tab-btn-json" style="background:#f6f8fa; color:#24292f; border:1px solid #d0d7de; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer">Raw JSON</button>
+            </div>
+          </div>
+          
+          <div id="tab-content-sizes" style="display:block">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
+              <label style="font-size:12px; color:#57606a; display:flex; align-items:center; gap:6px; cursor:pointer">
+                <input type="checkbox" id="chk-enable-sizes" style="margin:0; width:14px; height:14px" ${isMultiSize ? 'checked' : ''}> Enable Multiple Sizes
+              </label>
+              <button type="button" id="btn-add-size" style="background:#f6f8fa; color:#24292f; border:1px solid #d0d7de; padding:4px 8px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer; display: ${isMultiSize ? 'inline-block' : 'none'}"><i class="fas fa-plus"></i> Add Size</button>
+            </div>
+            <div id="sizes-editor-list" style="display:${isMultiSize ? 'flex' : 'none'}; flex-direction:column; gap:10px; max-height:220px; overflow-y:auto; padding-right:5px"></div>
+          </div>
+          
+          <div id="tab-content-json" style="display:none">
+            <textarea id="swal-metadata" class="swal2-textarea" style="margin:0; width:100%; min-height:120px; font-family:monospace; font-size:12px; box-sizing:border-box; padding:8px">${esc(normalizeMetadataForForm(item))}</textarea>
+          </div>
+        </div>
+
         <div><label style="font-weight:600;display:block;margin-bottom:4px">Available</label><select id="swal-avail" class="swal2-input" style="margin:0;width:100%;padding:8px"><option value="1" ${item.available !== 0 ? 'selected' : ''}>Yes</option><option value="0" ${item.available === 0 ? 'selected' : ''}>No</option></select></div>
       </div>`,
     width: 640,
     showCancelButton: true,
     confirmButtonText: isNew ? 'Create' : 'Save',
     showLoaderOnConfirm: true,
+    didOpen: () => {
+      const tabBtnSizes = document.getElementById('tab-btn-sizes');
+      const tabBtnJson = document.getElementById('tab-btn-json');
+      const tabContentSizes = document.getElementById('tab-content-sizes');
+      const tabContentJson = document.getElementById('tab-content-json');
+      const chkEnableSizes = document.getElementById('chk-enable-sizes');
+      const btnAddSize = document.getElementById('btn-add-size');
+      const sizesList = document.getElementById('sizes-editor-list');
+      const metadataTextarea = document.getElementById('swal-metadata');
+
+      function serializeSizesToMetadata() {
+        if (!chkEnableSizes.checked) {
+          metadataTextarea.value = JSON.stringify({ sizes: ["Regular"] }, null, 2);
+          return;
+        }
+
+        const sizes = [];
+        const sizeDetails = {};
+        const cards = sizesList.querySelectorAll('.size-card');
+        
+        cards.forEach(card => {
+          const keyField = card.querySelector('.size-key');
+          const key = (keyField ? keyField.value.trim() : '').toLowerCase();
+          if (!key) return;
+
+          const nameEnField = card.querySelector('.size-name-en');
+          const nameArField = card.querySelector('.size-name-ar');
+          const priceField = card.querySelector('.size-price');
+          const diameterEnField = card.querySelector('.size-diameter-en');
+          const diameterArField = card.querySelector('.size-diameter-ar');
+          const weightEnField = card.querySelector('.size-weight-en');
+          const weightArField = card.querySelector('.size-weight-ar');
+          const servesEnField = card.querySelector('.size-serves-en');
+          const servesArField = card.querySelector('.size-serves-ar');
+
+          const name_en = nameEnField ? nameEnField.value.trim() : '';
+          const name_ar = nameArField ? nameArField.value.trim() : '';
+          const priceVal = priceField ? priceField.value.trim() : '';
+          const price = priceVal !== '' ? parseFloat(priceVal) : null;
+          const diameter_en = diameterEnField ? diameterEnField.value.trim() : '';
+          const diameter_ar = diameterArField ? diameterArField.value.trim() : '';
+          const weight_en = weightEnField ? weightEnField.value.trim() : '';
+          const weight_ar = weightArField ? weightArField.value.trim() : '';
+          const serves_en = servesEnField ? servesEnField.value.trim() : '';
+          const serves_ar = servesArField ? servesArField.value.trim() : '';
+
+          const displaySizeName = name_en || (key.charAt(0).toUpperCase() + key.slice(1));
+          sizes.push(displaySizeName);
+
+          sizeDetails[key] = {
+            name_en: displaySizeName,
+            name_ar: name_ar,
+            diameter_en: diameter_en,
+            diameter_ar: diameter_ar,
+            weight_en: weight_en,
+            weight_ar: weight_ar,
+            serves_en: serves_en,
+            serves_ar: serves_ar,
+            price: price
+          };
+        });
+
+        metadataTextarea.value = JSON.stringify({
+          sizes: sizes,
+          size_details: sizeDetails
+        }, null, 2);
+      }
+
+      function addSizeCard(details = {}) {
+        const card = document.createElement('div');
+        card.className = 'size-card';
+        card.style.cssText = 'border:1px solid #d0d7de; border-radius:6px; padding:10px; background:#f6f8fa; position:relative; display:flex; flex-direction:column; gap:8px;';
+        
+        card.innerHTML = `
+          <button type="button" class="btn-remove-size" style="position:absolute; right:8px; top:8px; background:none; border:none; color:#cf222e; cursor:pointer; font-size:13px;" title="Remove size"><i class="fas fa-trash-can"></i></button>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; font-size:11px; text-align:left;">
+            <div>
+              <label style="font-weight:600;display:block;margin-bottom:2px;color:#24292f">Key (e.g. small)</label>
+              <input class="size-key" style="margin:0;width:100%;height:28px;font-size:12px;padding:4px;box-sizing:border-box;border:1px solid #d0d7de;border-radius:4px;background:#fff;color:#24292f" placeholder="small" value="${esc(details.key || '')}">
+            </div>
+            <div>
+              <label style="font-weight:600;display:block;margin-bottom:2px;color:#24292f">Name (EN)</label>
+              <input class="size-name-en" style="margin:0;width:100%;height:28px;font-size:12px;padding:4px;box-sizing:border-box;border:1px solid #d0d7de;border-radius:4px;background:#fff;color:#24292f" placeholder="Small" value="${esc(details.name_en || '')}">
+            </div>
+            <div>
+              <label style="font-weight:600;display:block;margin-bottom:2px;color:#24292f">Name (AR)</label>
+              <input class="size-name-ar" style="margin:0;width:100%;height:28px;font-size:12px;padding:4px;box-sizing:border-box;border:1px solid #d0d7de;border-radius:4px;background:#fff;color:#24292f" dir="rtl" placeholder="صغير" value="${esc(details.name_ar || '')}">
+            </div>
+            <div>
+              <label style="font-weight:600;display:block;margin-bottom:2px;color:#24292f">Price (EGP)</label>
+              <input type="number" class="size-price" style="margin:0;width:100%;height:28px;font-size:12px;padding:4px;box-sizing:border-box;border:1px solid #d0d7de;border-radius:4px;background:#fff;color:#24292f" placeholder="100" value="${details.price ?? ''}">
+            </div>
+            <div>
+              <label style="font-weight:600;display:block;margin-bottom:2px;color:#24292f">Diameter (EN)</label>
+              <input class="size-diameter-en" style="margin:0;width:100%;height:28px;font-size:12px;padding:4px;box-sizing:border-box;border:1px solid #d0d7de;border-radius:4px;background:#fff;color:#24292f" placeholder="9 inches" value="${esc(details.diameter_en || '')}">
+            </div>
+            <div>
+              <label style="font-weight:600;display:block;margin-bottom:2px;color:#24292f">Diameter (AR)</label>
+              <input class="size-diameter-ar" style="margin:0;width:100%;height:28px;font-size:12px;padding:4px;box-sizing:border-box;border:1px solid #d0d7de;border-radius:4px;background:#fff;color:#24292f" dir="rtl" placeholder="٢٣ سم" value="${esc(details.diameter_ar || '')}">
+            </div>
+            <div>
+              <label style="font-weight:600;display:block;margin-bottom:2px;color:#24292f">Weight (EN)</label>
+              <input class="size-weight-en" style="margin:0;width:100%;height:28px;font-size:12px;padding:4px;box-sizing:border-box;border:1px solid #d0d7de;border-radius:4px;background:#fff;color:#24292f" placeholder="300g" value="${esc(details.weight_en || '')}">
+            </div>
+            <div>
+              <label style="font-weight:600;display:block;margin-bottom:2px;color:#24292f">Weight (AR)</label>
+              <input class="size-weight-ar" style="margin:0;width:100%;height:28px;font-size:12px;padding:4px;box-sizing:border-box;border:1px solid #d0d7de;border-radius:4px;background:#fff;color:#24292f" dir="rtl" placeholder="٣٠٠ جرام" value="${esc(details.weight_ar || '')}">
+            </div>
+            <div>
+              <label style="font-weight:600;display:block;margin-bottom:2px;color:#24292f">Servings (EN)</label>
+              <input class="size-serves-en" style="margin:0;width:100%;height:28px;font-size:12px;padding:4px;box-sizing:border-box;border:1px solid #d0d7de;border-radius:4px;background:#fff;color:#24292f" placeholder="Serves 1 person" value="${esc(details.serves_en || '')}">
+            </div>
+            <div style="grid-column:span 2">
+              <label style="font-weight:600;display:block;margin-bottom:2px;color:#24292f">Servings (AR)</label>
+              <input class="size-serves-ar" style="margin:0;width:100%;height:28px;font-size:12px;padding:4px;box-sizing:border-box;border:1px solid #d0d7de;border-radius:4px;background:#fff;color:#24292f" dir="rtl" placeholder="يكفي فرد واحد" value="${esc(details.serves_ar || '')}">
+            </div>
+          </div>
+        `;
+
+        card.querySelectorAll('input').forEach(input => {
+          input.addEventListener('input', serializeSizesToMetadata);
+        });
+
+        card.querySelector('.btn-remove-size').addEventListener('click', () => {
+          card.remove();
+          serializeSizesToMetadata();
+        });
+
+        sizesList.appendChild(card);
+      }
+
+      function deserializeMetadataToForm() {
+        let metadataObj = {};
+        try {
+          metadataObj = JSON.parse(metadataTextarea.value || '{}');
+        } catch {}
+
+        const hasSizes = Array.isArray(metadataObj.sizes) && metadataObj.sizes.length > 0;
+        const isMulti = hasSizes && (metadataObj.sizes.length > 1 || (metadataObj.sizes[0] !== 'Regular'));
+
+        chkEnableSizes.checked = isMulti;
+        sizesList.style.display = isMulti ? 'flex' : 'none';
+        btnAddSize.style.display = isMulti ? 'inline-block' : 'none';
+        sizesList.innerHTML = '';
+
+        if (isMulti) {
+          const sizeDetails = metadataObj.size_details || {};
+          metadataObj.sizes.forEach(sizeName => {
+            const key = sizeName.toLowerCase();
+            const details = sizeDetails[key] || {};
+            addSizeCard({
+              key: key,
+              name_en: details.name_en || sizeName,
+              name_ar: details.name_ar || '',
+              price: details.price ?? '',
+              diameter_en: details.diameter_en || '',
+              diameter_ar: details.diameter_ar || '',
+              weight_en: details.weight_en || '',
+              weight_ar: details.weight_ar || '',
+              serves_en: details.serves_en || '',
+              serves_ar: details.serves_ar || ''
+            });
+          });
+        }
+      }
+
+      deserializeMetadataToForm();
+
+      btnAddSize.addEventListener('click', () => {
+        addSizeCard({ key: '', name_en: '', name_ar: '', price: '' });
+        serializeSizesToMetadata();
+      });
+
+      chkEnableSizes.addEventListener('change', () => {
+        const isMulti = chkEnableSizes.checked;
+        sizesList.style.display = isMulti ? 'flex' : 'none';
+        btnAddSize.style.display = isMulti ? 'inline-block' : 'none';
+        if (isMulti && sizesList.children.length === 0) {
+          addSizeCard({ key: 'small', name_en: 'Small', name_ar: 'صغير', price: '' });
+          addSizeCard({ key: 'medium', name_en: 'Medium', name_ar: 'وسط', price: '' });
+          addSizeCard({ key: 'large', name_en: 'Large', name_ar: 'كبير', price: '' });
+        }
+        serializeSizesToMetadata();
+      });
+
+      tabBtnSizes.addEventListener('click', () => {
+        tabBtnSizes.style.background = '#0969da';
+        tabBtnSizes.style.color = '#fff';
+        tabBtnSizes.style.border = 'none';
+        tabBtnJson.style.background = '#f6f8fa';
+        tabBtnJson.style.color = '#24292f';
+        tabBtnJson.style.border = '1px solid #d0d7de';
+        tabContentSizes.style.display = 'block';
+        tabContentJson.style.display = 'none';
+        deserializeMetadataToForm();
+      });
+
+      tabBtnJson.addEventListener('click', () => {
+        tabBtnJson.style.background = '#0969da';
+        tabBtnJson.style.color = '#fff';
+        tabBtnJson.style.border = 'none';
+        tabBtnSizes.style.background = '#f6f8fa';
+        tabBtnSizes.style.color = '#24292f';
+        tabBtnSizes.style.border = '1px solid #d0d7de';
+        tabContentJson.style.display = 'block';
+        tabContentSizes.style.display = 'none';
+        serializeSizesToMetadata();
+      });
+    },
     preConfirm: async () => {
       let metadata;
       try {

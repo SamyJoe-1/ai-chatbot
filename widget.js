@@ -482,7 +482,7 @@
       }
       @media (max-width: 640px) {
         .cb-root { right: 12px; bottom: 12px; left: 12px; }
-        .cb-panel { width: 100%; height: min(60vh, 540px); }
+        .cb-panel { width: 100%; height: min(80vh, 540px); }
         .cb-bubble::after { display: none; }
       }
       
