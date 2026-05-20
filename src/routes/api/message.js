@@ -248,7 +248,8 @@ router.post('/', tokenValidator, (req, res) => {
       }
     }
 
-    if (isCafeOrderingEnabled(business) && session.phase === 'active' && (looksLikeOrderIntent(text, lang) || isInternalOrderCommand(text))) {
+    const isOrderIntent = looksLikeOrderIntent(text, lang) || (lang === 'ar' && looksLikeOrderIntent(require('../../engine/translation').translateArabicToEnglish(text), 'en'));
+    if (isCafeOrderingEnabled(business) && session.phase === 'active' && (isOrderIntent || isInternalOrderCommand(text))) {
       const orderSeedItems = matchItemsForOrder({
         text,
         lang,

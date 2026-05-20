@@ -58,6 +58,8 @@ const FRANCO_DICT = {
   'هاي': 'hi',
   'اوكي': 'okay',
   'ثانكس': 'thanks',
+  'اوردر': 'order',
+  'وردر': 'order',
 };
 
 function buildPhoneticVocabularyList(items) {
@@ -87,7 +89,7 @@ function buildPhoneticVocabularyList(items) {
 
 function recoverFranco(text, items) {
   if (!text) return text;
-  
+
   // 1. Direct dictionary matches first (for extreme shortcuts)
   let processedText = text;
   for (const [k, v] of Object.entries(FRANCO_DICT)) {
@@ -98,26 +100,26 @@ function recoverFranco(text, items) {
   const arToEnText = transliterateArToEn(processedText);
   const words = arToEnText.split(/[\s,،.!?؟:\/\\()[\]{}"'-]+/);
   const vocabList = buildPhoneticVocabularyList(items);
-  
+
   // 3. Match each transliterated word's phonetic hash against the catalog's phonetic hashes
   const recoveredWords = words.map(w => {
     if (w.length < 2) return w;
     const wHash = phoneticHash(w);
     if (!wHash) return w;
-    
+
     let bestMatch = null;
     let bestScore = 999;
     let bestStrDist = 999;
-    
+
     for (const v of vocabList) {
       if (!v.hash) continue;
-      
+
       const dist = levenshtein(wHash, v.hash);
-      
+
       if (dist === 0) {
         return v.word; // immediate perfect phonetic match
       }
-      
+
       // Allow distance 1 for hashes of sufficient length
       if (dist === 1 && wHash.length >= 1 && v.hash.length >= 1) {
         const strDist = levenshtein(w, v.word);
@@ -128,10 +130,10 @@ function recoverFranco(text, items) {
         }
       }
     }
-    
+
     return bestMatch ? bestMatch : w;
   });
-  
+
   return recoveredWords.join(' ').trim();
 }
 

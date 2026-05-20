@@ -46,6 +46,8 @@ const ARABIC_TO_ENGLISH_DICT = {
   'نعناع': 'mint',
   'خضار': 'vegetable',
   'خضروات': 'vegetables',
+  'اوردر': 'order',
+  'وردر': 'order',
 
   // Real Estate
   'شقة': 'apartment',

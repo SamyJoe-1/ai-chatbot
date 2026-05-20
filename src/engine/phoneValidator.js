@@ -1,6 +1,5 @@
 'use strict';
 
-const { phone } = require('phone');
 const { normalizeArabicDigits } = require('./detector');
 
 function validatePhone(input) {
@@ -14,33 +13,13 @@ function validatePhone(input) {
   }
 
   const digits = clean.replace(/\D/g, '');
-  if (digits.length < 8 || /^(\d)\1+$/.test(digits)) {
+
+  if (digits.length < 6 || digits.length > 14 || /^(\d)\1+$/.test(digits)) {
     return { valid: false, normalized: null };
   }
 
-  if (clean.startsWith('+')) {
-    const intlResult = phone(clean);
-    if (intlResult.isValid) {
-      return { valid: true, normalized: intlResult.phoneNumber };
-    }
-    return { valid: false, normalized: null };
-  }
-
-  if (digits.startsWith('20')) {
-    const egyptIntlResult = phone(`+${digits}`);
-    if (egyptIntlResult.isValid) {
-      return { valid: true, normalized: egyptIntlResult.phoneNumber };
-    }
-  }
-
-  const egyptResult = phone(clean, { country: 'EGY' });
-  if (egyptResult.isValid) {
-    // If it's a valid Egyptian mobile number and user typed it starting with '0', keep their format
-    const normalized = (clean.startsWith('0') && clean.length >= 11) ? clean : egyptResult.phoneNumber;
-    return { valid: true, normalized };
-  }
-
-  return { valid: false, normalized: null };
+  const normalized = clean.startsWith('+') ? clean : digits;
+  return { valid: true, normalized };
 }
 
 module.exports = { validatePhone };

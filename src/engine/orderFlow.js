@@ -92,7 +92,7 @@ const ADD_MORE_PATTERNS = {
 
 const ORDER_INTENT_PATTERNS = {
   en: [/\b(order|place order|make order|i want to order|i wanna order|can i order|delivery order|take my order|checkout)\b/i],
-  ar: [/(اطلب|أطلب|عايز اطلب|عاوز اطلب|عايز أطلب|عاوز أطلب|حابب اطلب|بدي اطلب|بدي طلب|عايز عمل طلب|عاوز عمل طلب|طلب دليفري|توصيل|ابغى اطلب|ابغي اطلب)/],
+  ar: [/(اطلب|أطلب|عايز اطلب|عاوز اطلب|عايز أطلب|عاوز أطلب|حابب اطلب|بدي اطلب|بدي طلب|عايز عمل طلب|عاوز عمل طلب|طلب دليفري|توصيل|ابغى اطلب|ابغي اطلب|اوردر|أوردر|الاوردر|الأوردر)/],
 };
 
 function isCafeOrderingEnabled(business) {
@@ -346,8 +346,7 @@ function mergeRecentItemsIntoContext(context, items) {
   };
 }
 
-function matchItemsForOrder({ text, lang, businessId, context = {} }) {
-  const items = getBusinessItems(businessId);
+function getMatchesForText(text, lang, items, context) {
   const normalizedText = normalize(text, lang);
   const seenTitles = new Set();
   const uniqueByTitle = (entries) => entries.filter((item) => {
@@ -392,6 +391,45 @@ function matchItemsForOrder({ text, lang, businessId, context = {} }) {
   }
 
   return uniqueByTitle(uniqueById(scored.slice(0, 3).map((entry) => entry.item)));
+}
+
+function matchItemsForOrder({ text, lang, businessId, context = {} }) {
+  const items = getBusinessItems(businessId);
+  if (!items.length) return [];
+
+  // Try matching original text first
+  let matches = getMatchesForText(text, lang, items, context);
+  if (matches.length) {
+    return matches;
+  }
+
+  // 1. Try explicit Arabic-to-English literal translation
+  if (lang === 'ar') {
+    const { translateArabicToEnglish } = require('./translation');
+    const translatedDictText = translateArabicToEnglish(text);
+    if (translatedDictText !== text) {
+      matches = getMatchesForText(translatedDictText, 'en', items, context);
+      if (matches.length) return matches;
+    }
+  }
+
+  // 2. Try algorithmic Franco-Arabic phonetic recovery
+  const { recoverFranco } = require('./franco');
+  const francoText = recoverFranco(text, items);
+  if (francoText && francoText !== text) {
+    matches = getMatchesForText(francoText, 'en', items, context);
+    if (matches.length) return matches;
+  }
+
+  // 3. Try standard query recovery (Levenshtein)
+  const { recoverUserQuery } = require('./queryRecovery');
+  const recoveredText = recoverUserQuery(text, lang, businessId);
+  if (recoveredText && recoveredText !== text) {
+    matches = getMatchesForText(recoveredText, lang, items, context);
+    if (matches.length) return matches;
+  }
+
+  return [];
 }
 
 function addItemsToOrder(orderId, itemsToAdd) {
