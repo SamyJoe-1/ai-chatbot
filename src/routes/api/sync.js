@@ -21,44 +21,24 @@ const insertItem = db.prepare(`
 router.post('/', tokenValidator, async (req, res) => {
   const business = req.business;
   const brain = getBrain(business.service_type);
-
-  if (!business.sheet_id) {
-    return res.status(400).json({ error: 'no_sheet_id' });
-  }
-
-  try {
-    const sheetName = req.body?.sheet_name || business.sheet_name || brain.defaultSheetName;
-    const records = await readRecordsFromSheet(business.sheet_id, sheetName);
+  try{
+    let records = [];
+    if (req.body?.json_data && Array.isArray(req.body.json_data)) {
+      records = req.body.json_data;
+    } else {
+      if (!business.sheet_id) {
+        return res.status(400).json({ error: 'no_sheet_id' });
+      }
+      const sheetName = req.body?.sheet_name || business.sheet_name || brain.defaultSheetName;
+      records = await readRecordsFromSheet(business.sheet_id, sheetName);
+    }
     const items = brain.mapSheetRecords(records);
 
     if (!items.length) {
       return res.json({ synced: 0, message: 'No rows found in the sheet.' });
     }
 
-    const transaction = db.transaction(() => {
-      deleteItems.run(business.id);
-      items.forEach((item) => {
-        insertItem.run(
-          business.id,
-          business.service_type,
-          item.title_en,
-          item.title_ar,
-          item.category_en,
-          item.category_ar,
-          item.description_en,
-          item.description_ar,
-          item.price,
-          item.currency,
-          item.metadata,
-          item.available
-        );
-      });
-    });
 
-    transaction();
-    invalidateBusinessItemsCache(business.id);
-
-    return res.json({ synced: items.length, message: `Synced ${items.length} catalog items.` });
   } catch (error) {
     console.error('[sync]', error);
     return res.status(500).json({ error: 'sync_failed', message: error.message });

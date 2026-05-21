@@ -203,14 +203,20 @@ router.delete('/catalog/:itemId', (req, res) => {
 
 router.post('/catalog/sync', async (req, res) => {
   const business = db.prepare('SELECT * FROM businesses WHERE id = ?').get(req.business.id);
-  if (!business?.sheet_id) {
-    return res.status(400).json({ error: 'no_sheet_id' });
+  let records = [];
+  if (req.body?.json_data && Array.isArray(req.body.json_data)) {
+    records = req.body.json_data;
+  } else {
+    if (!business?.sheet_id) {
+      return res.status(400).json({ error: 'no_sheet_id' });
+    }
+    const brain = getBrain(business.service_type);
+    const sheetName = req.body?.sheet_name || business.sheet_name || brain.defaultSheetName;
+    records = await readRecordsFromSheet(business.sheet_id, sheetName);
   }
 
   try {
     const brain = getBrain(business.service_type);
-    const sheetName = req.body?.sheet_name || business.sheet_name || brain.defaultSheetName;
-    const records = await readRecordsFromSheet(business.sheet_id, sheetName);
     const items = brain.mapSheetRecords(records);
     const deleteItems = db.prepare('DELETE FROM service_items WHERE business_id = ?');
     const insertItem = db.prepare(`

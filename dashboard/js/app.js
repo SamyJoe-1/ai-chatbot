@@ -330,6 +330,35 @@ document.getElementById('sync-menu-btn').addEventListener('click', async () => {
   finally { btnLoad(btn, false); }
 });
 
+document.getElementById('sync-json-menu-btn').addEventListener('click', async () => {
+  const { value: jsonText } = await Swal.fire({
+    title: 'Sync from JSON',
+    input: 'textarea',
+    inputLabel: 'Paste your raw JSON catalog array here',
+    inputPlaceholder: '[{"title_en": "Item 1", "price": 100}]',
+    inputAttributes: {
+      'aria-label': 'Type your JSON here'
+    },
+    showCancelButton: true
+  });
+  
+  if (jsonText) {
+    try {
+      const parsed = JSON.parse(jsonText);
+      if (!Array.isArray(parsed)) throw new Error("JSON must be an array");
+      
+      const btn = document.getElementById('sync-json-menu-btn');
+      btnLoad(btn, true);
+      const r = await api(`/dashboard/catalog/${state.selectedCafe.id}/sync`, { method: 'POST', body: JSON.stringify({ json_data: parsed }) });
+      toast(`Synced ${r.synced || 0} catalog items from JSON!`);
+      await loadMenu();
+      btnLoad(btn, false);
+    } catch (err) {
+      toastErr('Sync failed: ' + err.message);
+    }
+  }
+});
+
 document.getElementById('add-menu-btn').addEventListener('click', () => {
   openMenuItemModal({
     title_en: '',

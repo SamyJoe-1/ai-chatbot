@@ -95,8 +95,8 @@ const ORDER_INTENT_PATTERNS = {
   ar: [/(اطلب|أطلب|عايز اطلب|عاوز اطلب|عايز أطلب|عاوز أطلب|حابب اطلب|بدي اطلب|بدي طلب|عايز عمل طلب|عاوز عمل طلب|طلب دليفري|توصيل|ابغى اطلب|ابغي اطلب|اوردر|أوردر|الاوردر|الأوردر)/],
 };
 
-function isCafeOrderingEnabled(business) {
-  return String(business?.service_type || '') === 'cafe';
+function isOrderingEnabled(business) {
+  return ['cafe', 'ecommerce'].includes(String(business?.service_type || ''));
 }
 
 function looksLikeOrderIntent(text, lang) {
@@ -197,7 +197,7 @@ function normalizeOrderContext(context) {
   };
 }
 
-function buildChoiceButtons(lang, stage, hasItems) {
+function buildChoiceButtons(lang, stage, hasItems, business) {
   if (stage === 'review') {
     const buttons = [
       {
@@ -232,13 +232,21 @@ function buildChoiceButtons(lang, stage, hasItems) {
   }
 
   if (stage === 'address') {
-    return [
+    const buttons = [
       {
         label: lang === 'ar' ? 'إلغاء الطلب' : 'Cancel',
         value: buildCommand('cancel'),
         style: 'danger',
       },
     ];
+    if (business && String(business.service_type || '') === 'ecommerce') {
+      buttons.push({
+        label: lang === 'ar' ? 'تخطي العنوان' : 'Skip Address',
+        value: buildCommand('skip_address'),
+        style: 'secondary',
+      });
+    }
+    return buttons;
   }
 
   if (stage === 'address_confirmation') {
@@ -264,10 +272,10 @@ function buildChoiceButtons(lang, stage, hasItems) {
   return [];
 }
 
-function buildUiState({ lang, stage, order, items, addressPreview }) {
+function buildUiState({ lang, stage, order, items, addressPreview, business }) {
   return {
     input_locked: stage !== 'address',
-    choice_buttons: buildChoiceButtons(lang, stage, items.length > 0),
+    choice_buttons: buildChoiceButtons(lang, stage, items.length > 0, business),
     address_preview: addressPreview || '',
     order_draft: order ? {
       order_id: order.id,
@@ -575,12 +583,12 @@ function buildValidAddressMessage({ lang }) {
     : 'Please send a clearer delivery address before I continue the order.';
 }
 
-function serializeOrderState({ lang, stage, order, items, context }) {
+function serializeOrderState({ lang, stage, order, items, context, business }) {
   const suggestions = (stage === 'add_item' || stage === 'review') ? getOrderItemSuggestions(context, order.business_id, lang) : [];
   const addressPreview = stage === 'address_confirmation' ? context?.order_flow?.pending_address || '' : '';
   return {
     suggestions,
-    ui_state: buildUiState({ lang, stage, order, items, addressPreview }),
+    ui_state: buildUiState({ lang, stage, order, items, addressPreview, business }),
   };
 }
 
@@ -613,7 +621,7 @@ function startOrderFlow({ business, session, context, lang, seedItems = [] }) {
         text: responseText,
         type: 'text',
         buttons: [],
-        ...serializeOrderState({ lang, stage, order: existingOrder, items, context: updatedContext }),
+        ...serializeOrderState({ lang, stage, order: existingOrder, items, context: updatedContext, business }),
       },
       intent: 'order_existing',
     };
@@ -637,7 +645,7 @@ function startOrderFlow({ business, session, context, lang, seedItems = [] }) {
     .map((item) => (lang === 'ar' ? item.title_ar || item.title_en : item.title_en || item.title_ar))
     .filter(Boolean);
 
-  const orderState = serializeOrderState({ lang, stage, order, items, context: updatedContext });
+  const orderState = serializeOrderState({ lang, stage, order, items, context: updatedContext, business });
 
   return {
     phase: 'order_add_item',
@@ -655,7 +663,7 @@ function startOrderFlow({ business, session, context, lang, seedItems = [] }) {
 }
 
 function resolveOrderUiState({ business, session, context, lang }) {
-  if (!isCafeOrderingEnabled(business)) {
+  if (!isOrderingEnabled(business)) {
     return {
       ui_state: emptyUiState(),
       suggestions: [],
@@ -694,20 +702,20 @@ function resolveOrderUiState({ business, session, context, lang }) {
   }
 
   if (order.status === 'pending') {
-    return serializeOrderState({ lang, stage: 'pending', order, items, context });
+    return serializeOrderState({ lang, stage: 'pending', order, items, context, business });
   }
 
   if (session.phase === 'order_review') {
-    return serializeOrderState({ lang, stage: 'review', order, items, context });
+    return serializeOrderState({ lang, stage: 'review', order, items, context, business });
   }
   if (session.phase === 'order_add_item') {
-    return serializeOrderState({ lang, stage: 'add_item', order, items, context });
+    return serializeOrderState({ lang, stage: 'add_item', order, items, context, business });
   }
   if (session.phase === 'order_address') {
-    return serializeOrderState({ lang, stage: 'address', order, items, context });
+    return serializeOrderState({ lang, stage: 'address', order, items, context, business });
   }
   if (session.phase === 'order_address_confirm') {
-    return serializeOrderState({ lang, stage: 'address_confirmation', order, items, context });
+    return serializeOrderState({ lang, stage: 'address_confirmation', order, items, context, business });
   }
 
   return {
@@ -774,7 +782,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
           text: buildAddItemMessage({ lang, order, hasItems: items.length > 0 }),
           type: 'text',
           buttons: [],
-          ...serializeOrderState({ lang, stage: 'add_item', order, items, context: updatedContext }),
+          ...serializeOrderState({ lang, stage: 'add_item', order, items, context: updatedContext, business }),
         },
         intent: 'order_add_more',
       };
@@ -803,6 +811,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
             order,
             items,
             context: updatedContext,
+            business,
           }),
         },
         intent: 'order_address_rewrite',
@@ -872,6 +881,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
             order: getOrderById.get(order.id),
             items: nextItems,
             context: updatedContext,
+            business,
           }),
         },
         intent: 'order_empty_after_edit',
@@ -897,6 +907,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
           order: getOrderById.get(order.id),
           items: nextItems,
           context: updatedContext,
+          business,
         }),
       },
       intent: 'order_item_updated',
@@ -925,6 +936,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
             order: getOrderById.get(order.id),
             items,
             context: updatedContext,
+            business,
           }),
         },
         intent: 'order_address_requested',
@@ -940,7 +952,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
         text: buildLockedChoiceMessage({ lang }),
         type: 'text',
         buttons: [],
-        ...serializeOrderState({ lang, stage: 'review', order: getOrderById.get(order.id), items, context: normalizedContext }),
+        ...serializeOrderState({ lang, stage: 'review', order: getOrderById.get(order.id), items, context: normalizedContext, business }),
       },
       intent: 'order_review_locked',
       skipUserMessage: false,
@@ -964,7 +976,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
           text: buildOrderItemNotFoundMessage({ lang }),
           type: 'text',
           buttons: [],
-          ...serializeOrderState({ lang, stage: 'add_item', order, items, context: normalizedContext }),
+          ...serializeOrderState({ lang, stage: 'add_item', order, items, context: normalizedContext, business }),
         },
         intent: 'order_item_not_found',
         skipUserMessage: false,
@@ -988,7 +1000,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
         text: buildReviewMessage({ lang, order: getOrderById.get(order.id), items: nextItems, existingOrder: false }),
         type: 'text',
         buttons: [],
-        ...serializeOrderState({ lang, stage: 'review', order: getOrderById.get(order.id), items: nextItems, context: updatedContext }),
+        ...serializeOrderState({ lang, stage: 'review', order: getOrderById.get(order.id), items: nextItems, context: updatedContext, business }),
       },
       intent: 'order_items_added',
       skipUserMessage: false,
@@ -997,6 +1009,28 @@ function handleOrderMessage({ text, business, session, context, lang }) {
   }
 
   if (session.phase === 'order_address') {
+    if (orderCommand && orderCommand.action === 'skip_address') {
+      const address = lang === 'ar' ? 'تخطي / لم يحدد' : 'Skipped / Not specified';
+      updateOrderAddressAndStatus.run(address, 'pending', order.id);
+      const refreshedOrder = getOrderById.get(order.id);
+      const refreshedItems = getOrderItems(order.id);
+
+      return {
+        phase: 'active',
+        context: clearOrderContext(normalizedContext),
+        response: {
+          text: buildOrderCompleteMessage({ lang, order: refreshedOrder, items: refreshedItems, address }),
+          type: 'text',
+          buttons: [],
+          suggestions: [],
+          ui_state: emptyUiState(),
+        },
+        intent: 'order_confirmed',
+        skipUserMessage: false,
+        skipBotMessage: false,
+      };
+    }
+
     const address = String(text || '').trim();
     if (address.length < 6) {
       return {
@@ -1006,7 +1040,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
           text: buildValidAddressMessage({ lang }),
           type: 'text',
           buttons: [],
-          ...serializeOrderState({ lang, stage: 'address', order, items, context: normalizedContext }),
+          ...serializeOrderState({ lang, stage: 'address', order, items, context: normalizedContext, business }),
         },
         intent: 'order_invalid_address',
         skipUserMessage: false,
@@ -1033,6 +1067,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
           order: getOrderById.get(order.id),
           items,
           context: updatedContext,
+          business,
         }),
       },
       intent: 'order_address_confirmation',
@@ -1077,6 +1112,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
           order: getOrderById.get(order.id),
           items,
           context: normalizedContext,
+          business,
         }),
       },
       intent: 'order_address_locked',
@@ -1089,7 +1125,7 @@ function handleOrderMessage({ text, business, session, context, lang }) {
 }
 
 module.exports = {
-  isCafeOrderingEnabled,
+  isOrderingEnabled,
   isInternalOrderCommand,
   looksLikeOrderIntent,
   getExistingPhoneStatus,

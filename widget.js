@@ -977,11 +977,27 @@
     document.head.appendChild(style);
   }
 
-  function appendMessage(text, role, lang, allowAutoOpen) {
+  function appendMessage(text, role, lang, allowAutoOpen, thumbnail) {
     const message = document.createElement('div');
     message.className = `cb-msg ${role}`;
     message.dir = lang === 'ar' ? 'rtl' : 'ltr';
-    message.textContent = text;
+
+    if (thumbnail) {
+      const img = document.createElement('img');
+      img.src = thumbnail;
+      img.style.maxWidth = '100%';
+      img.style.borderRadius = '8px';
+      img.style.marginBottom = '8px';
+      img.style.display = 'block';
+      img.style.maxHeight = '200px';
+      img.style.objectFit = 'cover';
+      message.appendChild(img);
+    }
+
+    const textSpan = document.createElement('span');
+    textSpan.textContent = text;
+    message.appendChild(textSpan);
+
     refs.messages.appendChild(message);
     refs.messages.scrollTop = refs.messages.scrollHeight;
     if (allowAutoOpen !== false && role === 'bot' && !state.open) {
@@ -1006,21 +1022,22 @@
       return notice;
     }
 
-    const message = appendMessage(entry.content, entry.role, lang, allowAutoOpen);
+    const message = appendMessage(entry.content, entry.role, lang, allowAutoOpen, entry.thumbnail);
     if (entry.intent === 'admin_manual') {
       message.classList.add('support');
     }
     return message;
   }
 
-  async function typeMessage(text, role, lang) {
+  async function typeMessage(text, role, lang, thumbnail) {
     state.typingId++;
     const currentId = state.typingId;
-    const message = appendMessage('', role, lang, false);
+    const message = appendMessage('', role, lang, false, thumbnail);
+    const textSpan = message.querySelector('span');
 
     for (let i = 0; i < text.length; i++) {
       if (currentId !== state.typingId) return;
-      message.textContent += text[i];
+      textSpan.textContent += text[i];
       refs.messages.scrollTop = refs.messages.scrollHeight;
       await new Promise((resolve) => setTimeout(resolve, 12));
     }
@@ -2044,9 +2061,9 @@
       applyPayloadUi(payload);
 
       if (payload.response && payload.response.text) {
-        state.history.push({ role: 'bot', content: payload.response.text });
+        state.history.push({ role: 'bot', content: payload.response.text, thumbnail: payload.response.thumbnail });
         state.isTypingReply = true;
-        await typeMessage(payload.response.text, 'bot', state.language);
+        await typeMessage(payload.response.text, 'bot', state.language, payload.response.thumbnail);
       }
     } catch (_error) {
       removeTyping();

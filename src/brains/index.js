@@ -3,11 +3,13 @@
 const cafeBrain = require('./cafe');
 const realEstateBrain = require('./realEstate');
 const clinicBrain = require('./clinic');
+const ecommerceBrain = require('./ecommerce');
 
 const BRAINS = new Map([
   [cafeBrain.serviceType, cafeBrain],
   [realEstateBrain.serviceType, realEstateBrain],
   [clinicBrain.serviceType, clinicBrain],
+  [ecommerceBrain.serviceType, ecommerceBrain],
 ]);
 
 function getBrain(serviceType) {

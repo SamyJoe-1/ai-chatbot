@@ -9,7 +9,7 @@ const { validatePhone } = require('../../engine/phoneValidator');
 const { recoverUserQuery } = require('../../engine/queryRecovery');
 const { isSessionExpired, resetSessionState } = require('../../engine/sessionLifecycle');
 const {
-  isCafeOrderingEnabled,
+  isOrderingEnabled,
   isInternalOrderCommand,
   looksLikeOrderIntent,
   getExistingPhoneStatus,
@@ -224,7 +224,7 @@ router.post('/', tokenValidator, (req, res) => {
     }
 
     const isOrderCmd = isInternalOrderCommand(text);
-    if (isCafeOrderingEnabled(business) && String(session.phase || '').startsWith('order_') && (dashboardActive || isOrderCmd)) {
+    if (isOrderingEnabled(business) && String(session.phase || '').startsWith('order_') && (dashboardActive || isOrderCmd)) {
       const orderFlowResult = handleOrderMessage({ text, business, session, context, lang });
       if (orderFlowResult) {
         updateSession.run(
@@ -265,7 +265,7 @@ router.post('/', tokenValidator, (req, res) => {
     }
 
     const isOrderIntent = looksLikeOrderIntent(text, lang) || (lang === 'ar' && looksLikeOrderIntent(require('../../engine/translation').translateArabicToEnglish(text), 'en'));
-    if (isCafeOrderingEnabled(business) && (session.phase === 'active' || String(session.phase || '').startsWith('order_')) && (isOrderIntent || isInternalOrderCommand(text))) {
+    if (isOrderingEnabled(business) && (session.phase === 'active' || String(session.phase || '').startsWith('order_')) && (isOrderIntent || isInternalOrderCommand(text))) {
       const orderSeedItems = matchItemsForOrder({
         text,
         lang,
@@ -413,6 +413,7 @@ router.post('/', tokenValidator, (req, res) => {
         suggestions: payload.suggestions,
         ui_state: finalUiState,
         order_suggestions: orderSuggestions,
+        thumbnail: payload.thumbnail,
       },
       language: lang,
       phase: session.phase,
