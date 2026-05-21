@@ -461,6 +461,7 @@
         flex: 1;
         border: 1px solid var(--cb-border);
         border-radius: 999px;
+        color: #606060
         padding: 12px 14px;
         font-size: 14px;
         outline: none;
