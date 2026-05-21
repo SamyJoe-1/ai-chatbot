@@ -121,10 +121,22 @@ router.post('/:businessId/sync', async (req, res) => {
   if (!business) {
     return res.status(404).json({ error: 'not_found' });
   }
-  try{
+
+  const brain = getBrain(business.service_type);
+
+  try {
     let records = [];
     if (req.body?.json_data && Array.isArray(req.body.json_data)) {
       records = req.body.json_data;
+    } else if (req.body?.json_url) {
+      const response = await fetch(req.body.json_url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch JSON from API link: status ${response.status}`);
+      }
+      records = await response.json();
+      if (!Array.isArray(records)) {
+        throw new Error('API response must be a JSON array of items.');
+      }
     } else {
       if (!business.sheet_id) {
         return res.status(400).json({ error: 'no_sheet_id' });

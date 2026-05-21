@@ -54,6 +54,7 @@ function parseJsonArray(value) {
 function migrateLegacyCafeData() {
   ensureColumn('admins', 'business_id', 'business_id INTEGER');
   ensureColumn('sessions', 'business_id', 'business_id INTEGER');
+  ensureColumn('messages', 'thumbnail', 'thumbnail TEXT');
 
   if (tableExists('admins') && hasColumn('admins', 'cafe_id')) {
     rawDb.prepare('UPDATE admins SET business_id = COALESCE(business_id, cafe_id) WHERE business_id IS NULL').run();

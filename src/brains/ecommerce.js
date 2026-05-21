@@ -4,6 +4,34 @@ const { tokenize, normalize } = require('../engine/detector');
 const { getBusinessItems } = require('./shared/catalogStore');
 const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle } = require('./shared/matcher');
 
+const FEATURE_SYNONYMS = {
+  color: ['color', 'colors', 'لون', 'اللون', 'ألوان', 'الوان'],
+  material: ['material', 'materials', 'مادة', 'خامة', 'المادة', 'الخامة', 'صنع من'],
+  dimensions: ['dimensions', 'dimension', 'size', 'sizes', 'أبعاد', 'ابعاد', 'الحجم', 'حجم', 'مقاس', 'مقاسات'],
+  weight: ['weight', 'الوزن', 'وزن'],
+  shipping: ['shipping', 'delivery', 'شحن', 'الشحن', 'التوصيل', 'توصيل'],
+  country: ['country', 'origin', 'بلد', 'البلد', 'دولة', 'الدولة', 'منشأ', 'المنشأ'],
+};
+
+const FEATURE_LABELS = {
+  en: {
+    color: 'Color',
+    material: 'Material',
+    dimensions: 'Dimensions',
+    weight: 'Weight',
+    shipping: 'Shipping',
+    country: 'Country of Origin',
+  },
+  ar: {
+    color: 'اللون',
+    material: 'الخامة / المادة',
+    dimensions: 'الأبعاد / المقاس',
+    weight: 'الوزن',
+    shipping: 'الشحن',
+    country: 'بلد المنشأ',
+  }
+};
+
 const PATTERNS = {
   en: {
     greeting_hello: [/^(hi|hello|hey|hiya|howdy)\b/i, /^good (morning|afternoon|evening)\b/i],
@@ -21,12 +49,12 @@ const PATTERNS = {
     ecommerce_product_advantages: [/\badvantages\b/i, /\bbenefits\b/i, /\bwhy choose\b/i, /\bfeatures\b/i],
     ecommerce_check_availability: [/\bdo you have\b/i, /\bavailability\b/i, /\bavailable\b/i, /\bis there\b/i],
     ecommerce_country_info: [/\bmarketplace in\b/i, /\babout country\b/i, /\bcountry\b/i],
-    ecommerce_country_products: [/\bproducts in\b/i, /\bfrom country\b/i],
+    ecommerce_country_products: [/\bproducts in\b/i, /\bfrom country\b/i, /\bmarketplace in\b/i, /\bin the country\b/i],
     item_price: [/\bprice\b/i, /\bcost\b/i, /\bhow much\b/i],
   },
   ar: {
-    greeting_hello: [/^(مرحبا|مرحبتين|اهلا|أهلا|اهلين|أهلين|هلا|هالو|هلو|هاي|ألو|الو|حياك|حياكم|يا هلا|هلا والله|السلام عليكم|وعليكم السلام)/, /^(صباح الخير|مساء الخير|صباح النور|مساء النور)/],
-    greeting_how_are_you: [/^(ايه اخبارك|عامل ايه|عامل اية|انت كويس|كيفك|شلونك|اخبارك|ازيك|إزيك|ايش اخبارك|كيف حالك)/],
+    greeting_hello: [/^(مرحبا|مرحبتين|اهلا|أهلا|اهلين|أهلين|هلا|هالو|هلو|هاي|ألو|الو|حياك|حياكم|يا هلا|هلا والله|يا هلا والله|السلام عليكم|وعليكم السلام)/, /^(صباح الخير|مساء الخير|صباح النور|مساء النور)/],
+    greeting_how_are_you: [/^(ايه اخبارك|عامل ايه|عامل اية|انت كويس|كيفك|شلونك|شلونكم|شخباركم|اخبارك|ازيك|إزيك|ايش اخبارك|كيف حالك)/],
     greeting_yasta: [/^(يسطا|يا اسطى|ياسطى|ي زميلي|يا زميلي|يصاحبي|يا صاحبي)/],
     thanks: [/(شكرا|شكراً|تسلم|يسلمو|ممنون|يعطيك العافية)/],
     help: [/(مساعدة|ساعدني|كيف يشتغل|كيف يعمل|ماذا يمكنك|بتعمل ايه|تساعدني)/],
@@ -34,14 +62,14 @@ const PATTERNS = {
     working_hours: [/(ساعات|مواعيد|عمل|الدوام|شغالين|تفتح|تقفل|تفتحون|تغلقون|امتى|امتا|الساعة كام|الساعه كام)/],
     location: [/(العنوان|الموقع|وين|فين|أين|اتجاهات|خريطة|مكان|فروعكم|فرعكم)/],
     brand_info: [/(من انتم|مين انتم|نبذه عنكم|نبذة عنكم|من انتو|ماذا تقدمون|عن المتجر|عن المعرض|مين انت)/],
-    catalog_general: [/(كتالوج|المنتجات|ايش عندكم|شو عندكم|عندكم ايه|عندكو ايه|عندك ايه|الكتالوج)/],
-    ecommerce_search_hot: [/(الاكثر مبيعا|الأكثر مبيعا|تريند|ترند|ساخن|مشهور|مطلوب|اكتر مبيعا)/],
+    catalog_general: [/(كتالوج|المنتجات|ايش عندكم|شو عندكم|عندكم ايه|عندك ايه|الكتالوج|وش عندكم)/],
+    ecommerce_search_hot: [/(الاكثر مبيعا|الأكثر مبيعا|تريند|ترند|ساخن|مشهور|مطلوب|اكتر مبيعا|البيست سيلر|الاكثر طلبا|الاكثر مبيعاً)/],
     ecommerce_category_info: [/(عن القسم|القسم|قسم|صنف|تصنيف|تفاصيل القسم)/],
     ecommerce_product_advantages: [/(مميزات|مزايا|فوائد|ليه اشتري|مواصفات)/],
-    ecommerce_check_availability: [/(متاح|موجود|هل عندكم|هل يوجد|عندكم|متوفر)/],
+    ecommerce_check_availability: [/(متاح|موجود|هل عندكم|هل يوجد|عندكم|عندكو|عندك|متوفر|في|فيه)/],
     ecommerce_country_info: [/(سوق|اسواق|في بلد|في دوله|في دولة|السوق)/],
-    ecommerce_country_products: [/(منتجات من|من بلد|من دولة|منتجات في)/],
-    item_price: [/(سعر|اسعار|أسعار|بكام|بقديش|كم السعر|الثمن|حسابه|حسابها)/],
+    ecommerce_country_products: [/(منتجات من|من بلد|من دولة|منتجات في|في السعودية|في مصر|في الإمارات|السعودية|مصر|الإمارات)/],
+    item_price: [/(سعر|اسعار|أسعار|بكام|بقديش|كم السعر|الثمن|حسابه|حسابها|كم حقها|حقها كم)/],
   }
 };
 
@@ -78,6 +106,91 @@ function getDynamicFeaturesText(item) {
   return features;
 }
 
+function getCountryNames(items) {
+  const countriesEn = new Set();
+  const countriesAr = new Set();
+  items.forEach(item => {
+    const meta = item.metadata || {};
+    if (meta.country_en) countriesEn.add(meta.country_en.toLowerCase());
+    if (meta.country) countriesEn.add(meta.country.toLowerCase());
+    if (meta.country_ar) countriesAr.add(meta.country_ar);
+  });
+  return { en: Array.from(countriesEn), ar: Array.from(countriesAr) };
+}
+
+function detectCountry(text, lang, items) {
+  const { en, ar } = getCountryNames(items);
+  const searchList = lang === 'ar' ? ar : en;
+  const normalized = text.toLowerCase();
+  for (const country of searchList) {
+    if (normalized.includes(country.toLowerCase())) {
+      return country;
+    }
+  }
+  const altList = lang === 'ar' ? en : ar;
+  for (const country of altList) {
+    if (normalized.includes(country.toLowerCase())) {
+      return country;
+    }
+  }
+  return null;
+}
+
+function resolveMetadataValue(meta, canonicalKey, lang) {
+  if (meta[canonicalKey] !== undefined) return meta[canonicalKey];
+  const keyEn = `${canonicalKey}_en`;
+  const keyAr = `${canonicalKey}_ar`;
+  if (lang === 'ar') {
+    if (meta[keyAr] !== undefined) return meta[keyAr];
+    if (meta[keyEn] !== undefined) return meta[keyEn];
+  } else {
+    if (meta[keyEn] !== undefined) return meta[keyEn];
+    if (meta[keyAr] !== undefined) return meta[keyAr];
+  }
+  return null;
+}
+
+function detectFeatureInquiry(text, lang, item) {
+  if (!item || !item.metadata) return null;
+  const normalizedText = text.toLowerCase();
+  
+  let meta = item.metadata;
+  if (typeof meta === 'string') {
+    try { meta = JSON.parse(meta); } catch { meta = {}; }
+  }
+
+  for (const [canonicalKey, synonyms] of Object.entries(FEATURE_SYNONYMS)) {
+    for (const syn of synonyms) {
+      if (normalizedText.includes(syn.toLowerCase())) {
+        const val = resolveMetadataValue(meta, canonicalKey, lang);
+        if (val) {
+          return {
+            intent: 'ecommerce_inquire_feature',
+            item,
+            featureKey: canonicalKey,
+            featureLabel: canonicalKey,
+            featureValue: val,
+          };
+        }
+      }
+    }
+  }
+
+  for (const [key, value] of Object.entries(meta)) {
+    if (normalizedText.includes(key.toLowerCase())) {
+      return {
+        intent: 'ecommerce_inquire_feature',
+        item,
+        featureKey: key,
+        featureLabel: key,
+        featureValue: resolveMetadataValue(meta, key, lang),
+      };
+    }
+  }
+
+  return null;
+}
+
 function findEcommerceItems(text, lang, businessId, context = {}) {
   const items = getBusinessItems(businessId);
   const scoredMatchesAll = findScoredItems({
@@ -88,7 +201,10 @@ function findEcommerceItems(text, lang, businessId, context = {}) {
     getItemVariants: (item) => [item.title_en, item.title_ar],
     getCategoryVariants: (item) => [item.category_en, item.category_ar],
     getExtraVariants: (item) => {
-      const meta = item.metadata || {};
+      let meta = item.metadata || {};
+      if (typeof meta === 'string') {
+        try { meta = JSON.parse(meta); } catch { meta = {}; }
+      }
       const extras = [
         item.description_en,
         item.description_ar,
@@ -96,7 +212,6 @@ function findEcommerceItems(text, lang, businessId, context = {}) {
         meta.country_ar,
         meta.country_en
       ];
-      // Add dynamic feature values for fuzzy matching
       for (const [k, v] of Object.entries(meta)) {
         if (typeof v === 'string') extras.push(v);
       }
@@ -145,10 +260,55 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   if (matchesAny(normalizedText, patterns.working_hours)) return { intent: 'working_hours' };
   if (matchesAny(normalizedText, patterns.location)) return { intent: 'location' };
   if (matchesAny(normalizedText, patterns.brand_info)) return { intent: 'brand_info' };
-  
+
+  // Contextual or explicit dynamic feature inquiry check
+  const itemInContext = foundItem || (context.last_item ? items.find(i => i.id === context.last_item) : null);
+  if (itemInContext) {
+    const featureInquiry = detectFeatureInquiry(normalizedText, lang, itemInContext);
+    if (featureInquiry) return featureInquiry;
+  }
+
+  // Country checking
+  const countryForProducts = detectCountry(normalizedText, lang, items);
+  if (countryForProducts) {
+    const filterCountry = (i) => {
+      let meta = i.metadata || {};
+      if (typeof meta === 'string') {
+        try { meta = JSON.parse(meta); } catch { meta = {}; }
+      }
+      const cEn = String(meta.country_en || '').toLowerCase();
+      const cAr = String(meta.country_ar || '');
+      const c = String(meta.country || '').toLowerCase();
+      const target = countryForProducts.toLowerCase();
+      return cEn === target || cAr === countryForProducts || c === target;
+    };
+
+    if (matchesAny(normalizedText, patterns.ecommerce_search_hot)) {
+      const hotItems = items.filter(i => {
+        let meta = i.metadata || {};
+        if (typeof meta === 'string') {
+          try { meta = JSON.parse(meta); } catch { meta = {}; }
+        }
+        return String(meta.hot_selling) === 'true';
+      });
+      const filtered = hotItems.filter(filterCountry);
+      return { intent: 'ecommerce_search_hot', items: filtered, country: countryForProducts };
+    }
+
+    if (matchesAny(normalizedText, patterns.ecommerce_country_products) || tokensCount(normalizedText) <= 3) {
+      const filtered = items.filter(filterCountry);
+      return { intent: 'ecommerce_country_products', items: filtered, country: countryForProducts };
+    }
+  }
+
   if (matchesAny(normalizedText, patterns.ecommerce_search_hot)) {
-    const hotItems = items.filter(i => String(i.metadata?.hot_selling) === 'true');
-    // If category or country matched in context of hot selling
+    const hotItems = items.filter(i => {
+      let meta = i.metadata || {};
+      if (typeof meta === 'string') {
+        try { meta = JSON.parse(meta); } catch { meta = {}; }
+      }
+      return String(meta.hot_selling) === 'true';
+    });
     if (categoryMatches.length === 1) {
       return { intent: 'ecommerce_search_hot', items: hotItems.filter(i => getDisplayCategory(i, lang) === categoryMatches[0].display) };
     }
@@ -156,13 +316,11 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   }
 
   const asksPriceBase = matchesAny(normalizedText, patterns.item_price);
-  
-  // Specific dynamic feature queries checking
+
   if (foundItem) {
     const isAdvantage = matchesAny(normalizedText, patterns.ecommerce_product_advantages);
     if (isAdvantage) return { intent: 'ecommerce_product_advantages', item: foundItem };
-    
-    // Default to found item
+
     if (matchedItems.length === 1 || (matchedItems.length > 1 && topScore >= secondScore + 3)) {
       if (asksPriceBase) return { intent: 'item_price', item: foundItem };
       return { intent: 'item_found', item: foundItem };
@@ -199,6 +357,10 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   return { intent: 'unknown' };
 }
 
+function tokensCount(text) {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
 function buildResponse(intentResult, lang, business) {
   const locale = lang === 'ar' ? 'ar' : 'en';
   const parseSuggestions = () => {
@@ -219,17 +381,25 @@ function buildResponse(intentResult, lang, business) {
     context_update: {},
   };
 
+  const getItemThumbnail = (item) => {
+    let meta = item.metadata || {};
+    if (typeof meta === 'string') {
+      try { meta = JSON.parse(meta); } catch { meta = {}; }
+    }
+    return meta.thumbnail || null;
+  };
+
   switch (intentResult.intent) {
     case 'greeting_hello':
       payload.text = locale === 'ar'
-        ? `أهلاً بك في ${business.name_ar || business.name}. كيف أساعدك؟`
-        : `Hello from ${business.name}. How can I help you?`;
+        ? `أهلاً بك في ${business.name_ar || business.name}. كيف أساعدك اليوم؟`
+        : `Hello from ${business.name}. How can I help you today?`;
       payload.suggestions = suggestions.slice(0, 4);
       break;
     case 'greeting_how_are_you':
       payload.text = locale === 'ar'
-        ? `أنا بخير، شكراً لسؤالك! أهلاً بك في ${business.name_ar || business.name}. كيف أساعدك؟`
-        : `I'm doing great, thanks for asking! Welcome to ${business.name}. How can I help you?`;
+        ? `أنا بخير، شكراً لسؤالك! أهلاً بك في ${business.name_ar || business.name}. كيف أساعدك اليوم؟`
+        : `I'm doing great, thanks for asking! Welcome to ${business.name}. How can I help you today?`;
       payload.suggestions = suggestions.slice(0, 4);
       break;
     case 'greeting_yasta':
@@ -260,17 +430,71 @@ function buildResponse(intentResult, lang, business) {
         });
       }
       break;
+
+    case 'ecommerce_inquire_feature': {
+      const item = intentResult.item;
+      const title = getDisplayTitle(item, locale);
+      const label = FEATURE_LABELS[locale][intentResult.featureKey] || intentResult.featureLabel;
+      payload.text = locale === 'ar'
+        ? `${label} لـ **${title}** هو: ${intentResult.featureValue}`
+        : `The ${label} of **${title}** is: ${intentResult.featureValue}`;
+      const thumb = getItemThumbnail(item);
+      if (thumb) payload.thumbnail = thumb;
+      payload.suggestions = locale === 'ar' ? [`اطلب ${title}`, 'المميزات'] : [`Order ${title}`, 'Advantages'];
+      payload.context_update.last_item = item.id;
+      break;
+    }
+
+    case 'ecommerce_country_products':
+      if (intentResult.items && intentResult.items.length > 0) {
+        payload.messages = [];
+        payload.messages.push({
+          text: locale === 'ar' 
+            ? `إليك المنتجات المتوفرة في ${intentResult.country}:` 
+            : `Here are the products available in ${intentResult.country}:`,
+          thumbnail: null,
+        });
+        intentResult.items.slice(0, 6).forEach(item => {
+          const title = getDisplayTitle(item, locale);
+          const desc = getDisplayDescription(item, locale);
+          const priceText = item.price !== null && item.price !== undefined ? `\n${locale === 'ar' ? 'السعر' : 'Price'}: ${item.price} ${item.currency}` : '';
+          payload.messages.push({
+            text: `**${title}**\n${desc}${priceText}`,
+            thumbnail: getItemThumbnail(item),
+          });
+        });
+        payload.text = payload.messages.map(m => m.text).join('\n\n');
+        payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
+      } else {
+        payload.text = locale === 'ar'
+          ? `عذراً، لم نجد منتجات متوفرة في ${intentResult.country} حالياً.`
+          : `Sorry, we couldn't find any products in ${intentResult.country} at the moment.`;
+      }
+      break;
+
     case 'ecommerce_search_hot':
       if (intentResult.items && intentResult.items.length > 0) {
-        payload.text = [
-          locale === 'ar' ? 'إليك المنتجات الأكثر مبيعاً:' : 'Here are our hot selling products:',
-          ...intentResult.items.slice(0, 6).map(item => `- ${getDisplayTitle(item, locale)}`)
-        ].join('\n');
+        payload.messages = [];
+        const headline = intentResult.country 
+          ? (locale === 'ar' ? `إليك المنتجات الأكثر طلباً في ${intentResult.country}:` : `Here are the hot selling products in ${intentResult.country}:`)
+          : (locale === 'ar' ? 'إليك المنتجات الأكثر طلباً ومبيعاً لدينا:' : 'Here are our hot selling products:');
+        payload.messages.push({ text: headline, thumbnail: null });
+        intentResult.items.slice(0, 6).forEach(item => {
+          const title = getDisplayTitle(item, locale);
+          const desc = getDisplayDescription(item, locale);
+          const priceText = item.price !== null && item.price !== undefined ? `\n${locale === 'ar' ? 'السعر' : 'Price'}: ${item.price} ${item.currency}` : '';
+          payload.messages.push({
+            text: `**${title}**\n${desc}${priceText}`,
+            thumbnail: getItemThumbnail(item),
+          });
+        });
+        payload.text = payload.messages.map(m => m.text).join('\n\n');
         payload.suggestions = intentResult.items.slice(0, 3).map(item => getDisplayTitle(item, locale));
       } else {
         payload.text = locale === 'ar' ? 'لم نجد منتجات محددة كأكثر مبيعاً حالياً.' : 'No hot selling products specified at the moment.';
       }
       break;
+
     case 'ecommerce_category_info':
       payload.text = locale === 'ar' 
         ? `قسم ${intentResult.category} يحتوي على العديد من المنتجات الرائعة. هل تبحث عن شيء محدد؟`
@@ -291,7 +515,8 @@ function buildResponse(intentResult, lang, business) {
         lines.push(...features.map(f => `- ${f}`));
       }
       payload.text = lines.length > 0 ? lines.join('\n') : (locale === 'ar' ? 'لا تتوفر تفاصيل إضافية لهذا المنتج.' : 'No additional details available for this product.');
-      if (item.metadata?.thumbnail) payload.thumbnail = item.metadata.thumbnail;
+      const thumb = getItemThumbnail(item);
+      if (thumb) payload.thumbnail = thumb;
       payload.suggestions = [locale === 'ar' ? `اطلب ${getDisplayTitle(item, locale)}` : `Order ${getDisplayTitle(item, locale)}`];
       payload.context_update.last_item = item.id;
       break;
@@ -322,8 +547,9 @@ function buildResponse(intentResult, lang, business) {
       }
 
       payload.text = lines.join('\n');
-      if (item.metadata?.thumbnail) {
-        payload.thumbnail = item.metadata.thumbnail;
+      const thumb = getItemThumbnail(item);
+      if (thumb) {
+        payload.thumbnail = thumb;
       }
 
       payload.suggestions = locale === 'ar' ? [`اطلب ${title}`, 'المميزات'] : [`Order ${title}`, 'Advantages'];
@@ -340,7 +566,8 @@ function buildResponse(intentResult, lang, business) {
         : (locale === 'ar'
           ? `سعر ${getDisplayTitle(item, locale)} غير محدد حالياً. تواصل معنا للتفاصيل.`
           : `The price for ${getDisplayTitle(item, locale)} is not listed yet. Please contact us for details.`);
-      if (item.metadata?.thumbnail) payload.thumbnail = item.metadata.thumbnail;
+      const thumb = getItemThumbnail(item);
+      if (thumb) payload.thumbnail = thumb;
       payload.context_update.last_item = item.id;
       payload.context_update.last_category = getDisplayCategory(item, locale) || null;
       break;
@@ -359,25 +586,49 @@ function buildResponse(intentResult, lang, business) {
       }
       break;
     case 'category_items':
-      payload.text = [
-        locale === 'ar' ? `هذه المنتجات الموجودة في ${intentResult.category}:` : `Here are the products in ${intentResult.category}:`,
-        ...intentResult.items.slice(0, 8).map((item) => {
-          const price = item.price !== null && item.price !== undefined ? ` - ${item.price} ${item.currency}` : '';
-          return `- ${getDisplayTitle(item, locale)}${price}`;
-        }),
-      ].join('\n');
+      if (intentResult.items && intentResult.items.length > 0) {
+        payload.messages = [];
+        payload.messages.push({
+          text: locale === 'ar' ? `إليك المنتجات في قسم ${intentResult.category}:` : `Here are the products in ${intentResult.category}:`,
+          thumbnail: null,
+        });
+        intentResult.items.slice(0, 6).forEach(item => {
+          const title = getDisplayTitle(item, locale);
+          const desc = getDisplayDescription(item, locale);
+          const priceText = item.price !== null && item.price !== undefined ? `\n${locale === 'ar' ? 'السعر' : 'Price'}: ${item.price} ${item.currency}` : '';
+          payload.messages.push({
+            text: `**${title}**\n${desc}${priceText}`,
+            thumbnail: getItemThumbnail(item),
+          });
+        });
+        payload.text = payload.messages.map(m => m.text).join('\n\n');
+        payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
+      } else {
+        payload.text = locale === 'ar' ? `لا توجد منتجات في قسم ${intentResult.category} حالياً.` : `No products found in ${intentResult.category} category.`;
+      }
       payload.context_update.last_category = intentResult.category;
-      payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       break;
     case 'item_disambiguation':
-      payload.text = [
-        locale === 'ar' ? 'وجدت أكثر من منتج مطابق. أي واحد تقصد؟' : 'I found more than one matching product. Which would you like?',
-        ...intentResult.items.slice(0, 6).map((item) => {
-          const price = item.price !== null && item.price !== undefined ? ` - ${item.price} ${item.currency}` : '';
-          return `- ${getDisplayTitle(item, locale)}${price}`;
-        }),
-      ].join('\n');
-      payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
+      if (intentResult.items && intentResult.items.length > 0) {
+        payload.messages = [];
+        payload.messages.push({
+          text: locale === 'ar' ? 'وجدت أكثر من منتج مطابق. أي واحد تقصد؟' : 'I found more than one matching product. Which one did you mean?',
+          thumbnail: null,
+        });
+        intentResult.items.slice(0, 6).forEach(item => {
+          const title = getDisplayTitle(item, locale);
+          const desc = getDisplayDescription(item, locale);
+          const priceText = item.price !== null && item.price !== undefined ? `\n${locale === 'ar' ? 'السعر' : 'Price'}: ${item.price} ${item.currency}` : '';
+          payload.messages.push({
+            text: `**${title}**\n${desc}${priceText}`,
+            thumbnail: getItemThumbnail(item),
+          });
+        });
+        payload.text = payload.messages.map(m => m.text).join('\n\n');
+        payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
+      } else {
+        payload.text = locale === 'ar' ? 'وجدت مطابقات متعددة ولكن لم نتمكن من عرض التفاصيل.' : 'Multiple matches found but details could not be loaded.';
+      }
       break;
     case 'brand_info':
       payload.text = locale === 'ar'
@@ -415,13 +666,12 @@ function buildResponse(intentResult, lang, business) {
 
 function mapSheetRecords(records) {
   return records
-    .filter((record) => record.title || record.title_en || record.name || record.name_en)
+    .filter((record) => record.title || record.title_en || record.title_er || record.title_ar || record.name || record.name_en)
     .map((record) => {
-      // standard fields
       const standardKeys = [
-        'title', 'title_en', 'title_ar', 'name', 'name_en', 'name_ar',
-        'category', 'category_en', 'category_ar',
-        'description', 'description_en', 'description_ar',
+        'title', 'title_en', 'title_ar', 'title_er', 'name', 'name_en', 'name_ar',
+        'category', 'category_en', 'category_ar', 'category_er',
+        'description', 'description_en', 'description_ar', 'description_er',
         'price', 'currency', 'available', 'Metadata', 'metadata', 'METADATA'
       ];
 
@@ -437,20 +687,33 @@ function mapSheetRecords(records) {
         }
       }
 
-      // map any unknown keys from record into metadataObj for dynamic features
+      const lowerStandard = standardKeys.map(k => k.toLowerCase());
       for (const [k, v] of Object.entries(record)) {
-        if (!standardKeys.includes(k) && typeof v !== 'undefined') {
+        if (!lowerStandard.includes(k.toLowerCase()) && typeof v !== 'undefined') {
           metadataObj[k] = v;
         }
       }
 
+      if (record.thumbnail || record.thumbnail_url || record.image) {
+        metadataObj.thumbnail = record.thumbnail || record.thumbnail_url || record.image;
+      }
+      if (record.hot_selling !== undefined) {
+        metadataObj.hot_selling = ['1', 'true', 'yes', true].includes(record.hot_selling);
+      }
+      if (record.country_en || record.country) {
+        metadataObj.country_en = record.country_en || record.country;
+      }
+      if (record.country_ar) {
+        metadataObj.country_ar = record.country_ar;
+      }
+
       return {
         title_en: record.title_en || record.title || record.name_en || record.name || '',
-        title_ar: record.title_ar || record.name_ar || '',
+        title_ar: record.title_ar || record.title_er || record.name_ar || '',
         category_en: record.category_en || record.category || '',
-        category_ar: record.category_ar || '',
+        category_ar: record.category_ar || record.category_er || '',
         description_en: record.description_en || record.description || '',
-        description_ar: record.description_ar || '',
+        description_ar: record.description_ar || record.description_er || '',
         price: record.price ? Number(record.price) : null,
         currency: record.currency || 'EGP',
         metadata: JSON.stringify(metadataObj),

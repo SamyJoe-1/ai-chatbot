@@ -30,7 +30,12 @@ const updateSession = db.prepare(`
   SET phase = ?, language = ?, guest_name = ?, guest_phone = ?, context = ?, last_active = datetime('now')
   WHERE id = ?
 `);
-const insertMessage = db.prepare('INSERT INTO messages (session_id, role, content, intent) VALUES (?, ?, ?, ?)');
+const insertMessageStmt = db.prepare('INSERT INTO messages (session_id, role, content, intent, thumbnail) VALUES (?, ?, ?, ?, ?)');
+const insertMessage = {
+  run(sessionId, role, content, intent, thumbnail = null) {
+    return insertMessageStmt.run(sessionId, role, content, intent, thumbnail);
+  }
+};
 
 function parseContext(value) {
   try {
@@ -386,7 +391,13 @@ router.post('/', tokenValidator, (req, res) => {
       JSON.stringify(nextContext),
       session.id
     );
-    insertMessage.run(session.id, 'bot', payload.text, intentResult.intent);
+    if (Array.isArray(payload.messages) && payload.messages.length > 0) {
+      payload.messages.forEach((msg) => {
+        insertMessage.run(session.id, 'bot', msg.text, intentResult.intent, msg.thumbnail || null);
+      });
+    } else {
+      insertMessage.run(session.id, 'bot', payload.text, intentResult.intent, payload.thumbnail || null);
+    }
 
     const orderState = resolveOrderUiState({ business, session, context: nextContext, lang });
     const orderSuggestions = orderState.suggestions || [];
@@ -414,6 +425,7 @@ router.post('/', tokenValidator, (req, res) => {
         ui_state: finalUiState,
         order_suggestions: orderSuggestions,
         thumbnail: payload.thumbnail,
+        messages: payload.messages || null,
       },
       language: lang,
       phase: session.phase,

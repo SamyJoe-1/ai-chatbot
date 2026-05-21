@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS messages (
   role TEXT NOT NULL,
   content TEXT NOT NULL,
   intent TEXT,
+  thumbnail TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 

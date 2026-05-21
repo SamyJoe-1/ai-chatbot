@@ -30,10 +30,10 @@ function resetSessionState(db, sessionId, language, business) {
 
   db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
 
-  const insertMessage = db.prepare('INSERT INTO messages (session_id, role, content, intent) VALUES (?, ?, ?, ?)');
+  const insertMessage = db.prepare('INSERT INTO messages (session_id, role, content, intent, thumbnail) VALUES (?, ?, ?, ?, ?)');
   const freshMessages = buildFreshSessionMessages(business, language);
   freshMessages.forEach((message) => {
-    insertMessage.run(sessionId, message.role, message.content, message.intent);
+    insertMessage.run(sessionId, message.role, message.content, message.intent, message.thumbnail || null);
   });
 
   return freshMessages;

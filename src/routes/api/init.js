@@ -19,9 +19,9 @@ const createSession = db.prepare(`
   VALUES (?, ?, ?, ?, 'collect_name', '{}')
 `);
 const touchSession = db.prepare("UPDATE sessions SET last_active = datetime('now') WHERE id = ?");
-const insertMessage = db.prepare('INSERT INTO messages (session_id, role, content, intent) VALUES (?, ?, ?, ?)');
+const insertMessage = db.prepare('INSERT INTO messages (session_id, role, content, intent, thumbnail) VALUES (?, ?, ?, ?, ?)');
 const getMessages = db.prepare(`
-  SELECT role, content, intent, created_at
+  SELECT role, content, intent, thumbnail, created_at
   FROM messages
   WHERE session_id = ?
   ORDER BY id ASC
@@ -73,8 +73,8 @@ router.post('/', tokenValidator, (req, res) => {
       session = getSession.get(newKey, business.id);
       isNew = true;
 
-      insertMessage.run(session.id, 'bot', brain.getWelcomeMessage(business, language), 'welcome');
-      insertMessage.run(session.id, 'bot', COMMON_RESPONSES.collect_name[language](), 'collect_name');
+      insertMessage.run(session.id, 'bot', brain.getWelcomeMessage(business, language), 'welcome', null);
+      insertMessage.run(session.id, 'bot', COMMON_RESPONSES.collect_name[language](), 'collect_name', null);
     } else if (isSessionExpired(session.last_active)) {
       const language = session.guest_name ? detectLanguage(session.guest_name) : detectHeaderLanguage(req);
       resetSessionState(db, session.id, language, business);
