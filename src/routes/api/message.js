@@ -21,8 +21,23 @@ const {
 const { COMMON_RESPONSES } = require('../../brains/shared/commonResponses');
 const { getBrain } = require('../../brains');
 const { recoverFranco } = require('../../engine/franco');
+const {
+  assessAiRoutingNeed,
+  callAiClassifier,
+  isAiEnabledForBusiness,
+  parseAiPipeline,
+} = require('../../engine/aiRouting');
+const {
+  buildNotFoundPayload,
+  prefixAiFallbackPayload,
+  resolveAiPipeline,
+} = require('../../engine/aiPipelines');
+const { canUseAi, recordAiUse } = require('../../engine/aiRateLimiter');
+const { matchFaq } = require('../../engine/faqMatcher');
 
 const router = express.Router();
+
+const MAX_MESSAGE_LENGTH = Number(process.env.MAX_MESSAGE_LENGTH || 1000);
 
 const getSession = db.prepare('SELECT * FROM sessions WHERE session_key = ? AND business_id = ?');
 const updateSession = db.prepare(`
@@ -30,10 +45,10 @@ const updateSession = db.prepare(`
   SET phase = ?, language = ?, guest_name = ?, guest_phone = ?, context = ?, last_active = datetime('now')
   WHERE id = ?
 `);
-const insertMessageStmt = db.prepare('INSERT INTO messages (session_id, role, content, intent, thumbnail) VALUES (?, ?, ?, ?, ?)');
+const insertMessageStmt = db.prepare('INSERT INTO messages (session_id, role, content, intent, thumbnail, ai_score) VALUES (?, ?, ?, ?, ?, ?)');
 const insertMessage = {
-  run(sessionId, role, content, intent, thumbnail = null) {
-    return insertMessageStmt.run(sessionId, role, content, intent, thumbnail);
+  run(sessionId, role, content, intent, thumbnail = null, aiScore = null) {
+    return insertMessageStmt.run(sessionId, role, content, intent, thumbnail, aiScore);
   }
 };
 
@@ -93,6 +108,10 @@ function shouldRetryWithRecovery(intent) {
   return intent === 'unknown' || intent === 'item_not_found';
 }
 
+function hasUsablePayload(payload) {
+  return Boolean(payload && payload.text && !['unknown', 'item_not_found', 'need_item_context', 'ai_not_found'].includes(payload.intent));
+}
+
 function looksLikeName(text) {
   const clean = normalizeArabicDigits(String(text || '').trim()).replace(/\s+/g, ' ');
   if (!clean || /\d/.test(clean)) return false;
@@ -114,7 +133,7 @@ function looksLikeName(text) {
   return true;
 }
 
-router.post('/', tokenValidator, (req, res) => {
+router.post('/', tokenValidator, async (req, res) => {
   const business = req.business;
   const brain = getBrain(business.service_type);
 
@@ -136,6 +155,25 @@ router.post('/', tokenValidator, (req, res) => {
       lang = session.language === 'ar' ? 'ar' : 'en';
     }
 
+    // Per-IP + per-device identifiers for AI rate limiting.
+    const clientIp = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '')
+      .split(',')[0]
+      .trim();
+    const deviceId = String(req.body?.device_id || sessionKey || '').trim();
+
+    // Message length guard (skip internal order commands, which carry JSON carts).
+    if (!isInternalOrderCommand(text) && text.length > MAX_MESSAGE_LENGTH) {
+      const tooLong = lang === 'ar'
+        ? `الرسالة طويلة جدًا. من فضلك اختصرها إلى ${MAX_MESSAGE_LENGTH} حرف أو أقل.`
+        : `That message is a bit too long. Please keep it under ${MAX_MESSAGE_LENGTH} characters.`;
+      return res.json({
+        automated: true,
+        response: { text: tooLong, type: 'text', buttons: [], suggestions: [] },
+        language: lang,
+        phase: session.phase,
+      });
+    }
+
     if (isSessionExpired(session.last_active)) {
       const freshMessages = resetSessionState(db, session.id, lang, business);
       return res.json({
@@ -148,9 +186,10 @@ router.post('/', tokenValidator, (req, res) => {
     }
 
     const context = parseContext(session.context);
+    const aiAssessment = assessAiRoutingNeed({ text, lang, business });
     const internalOrderCommand = isInternalOrderCommand(text);
     if (!internalOrderCommand) {
-      insertMessage.run(session.id, 'user', text, null);
+      insertMessage.run(session.id, 'user', text, null, null, aiAssessment.score);
     }
 
     if (Number(session.automated) === 0) {
@@ -161,6 +200,156 @@ router.post('/', tokenValidator, (req, res) => {
         language: lang,
         phase: session.phase,
         suggestions: [],
+      });
+    }
+
+    let aiUnavailable = false;
+    async function tryAiPipeline(reason) {
+      if (aiUnavailable || !isAiEnabledForBusiness(business)) return { handled: false };
+
+      const gate = canUseAi({ businessId: business.id, ip: clientIp, deviceId });
+      if (!gate.allowed) {
+        console.warn('[ai-routing] rate limited, answering from rules', { reason, limit: gate.reason });
+        return { handled: false, rateLimited: true };
+      }
+      recordAiUse({ businessId: business.id, ip: clientIp, deviceId });
+
+      const aiResult = await callAiClassifier({ text, business, session });
+      if (!aiResult.ok) {
+        aiUnavailable = true;
+        console.warn('[ai-routing] classifier failed', { reason, error: aiResult.error, elapsed_ms: aiResult.elapsed_ms });
+        return { handled: false };
+      }
+
+      const pipeline = parseAiPipeline(aiResult.raw);
+      if (!pipeline.valid) {
+        return { handled: false, invalid: true, raw: aiResult.raw };
+      }
+      if (pipeline.code === 6) {
+        return { handled: false, forceOrder: true, raw: aiResult.raw };
+      }
+
+      if (pipeline.code === 10) {
+        const faqHit = matchFaq({ text, lang, business });
+        if (!faqHit) return { handled: false, raw: aiResult.raw };
+        const faqSuggestions = parseSuggestions(business, lang);
+        return {
+          handled: true,
+          intent: 'faq',
+          payload: {
+            text: faqHit.answer,
+            type: 'text',
+            buttons: [],
+            suggestions: faqSuggestions,
+            context_update: {},
+          },
+          raw: aiResult.raw,
+        };
+      }
+
+      const resolved = resolveAiPipeline({ pipeline, brain, business, lang, context });
+      if (!resolved || !resolved.payload) {
+        return { handled: false, invalid: true, raw: aiResult.raw };
+      }
+
+      return {
+        handled: true,
+        intent: resolved.intent,
+        payload: resolved.payload,
+        raw: aiResult.raw,
+      };
+    }
+
+    function sendPayloadResult({ payload, intent, nextContext, phase = session.phase }) {
+      updateSession.run(
+        phase,
+        lang,
+        session.guest_name,
+        session.guest_phone,
+        JSON.stringify(nextContext),
+        session.id
+      );
+
+      if (Array.isArray(payload.messages) && payload.messages.length > 0) {
+        payload.messages.forEach((msg) => {
+          insertMessage.run(session.id, 'bot', msg.text, intent, msg.thumbnail || null);
+        });
+      } else {
+        insertMessage.run(session.id, 'bot', payload.text, intent, payload.thumbnail || null);
+      }
+
+      const orderState = resolveOrderUiState({ business, session: { ...session, phase }, context: nextContext, lang });
+      const orderSuggestions = orderState.suggestions || [];
+      let finalUiState = orderState.ui_state;
+      if (!dashboardActive) {
+        finalUiState = {
+          input_locked: false,
+          choice_buttons: [],
+          address_preview: '',
+          order_draft: orderState.ui_state?.order_draft || null,
+        };
+      }
+
+      return res.json({
+        automated: true,
+        response: {
+          text: payload.text,
+          type: payload.type,
+          buttons: payload.buttons,
+          suggestions: payload.suggestions,
+          ui_state: finalUiState,
+          order_suggestions: orderSuggestions,
+          thumbnail: payload.thumbnail,
+          messages: payload.messages || null,
+        },
+        language: lang,
+        phase,
+        intent,
+        order_suggestions: orderSuggestions,
+      });
+    }
+
+    function startOrderResponse(seedItems) {
+      const orderStartResult = startOrderFlow({
+        business,
+        session,
+        context,
+        lang,
+        seedItems,
+      });
+
+      updateSession.run(
+        orderStartResult.phase,
+        lang,
+        session.guest_name,
+        session.guest_phone,
+        JSON.stringify(orderStartResult.context),
+        session.id
+      );
+
+      if (orderStartResult.response.text) {
+        insertMessage.run(session.id, 'bot', orderStartResult.response.text, orderStartResult.intent);
+      }
+
+      const lastSuggestions = orderStartResult.context.last_suggestions;
+      const chitchatSuggestions = Array.isArray(lastSuggestions) && lastSuggestions.length
+        ? lastSuggestions
+        : parseSuggestions(business, lang);
+
+      const orderSuggestions = orderStartResult.response.suggestions || [];
+      const finalResponse = {
+        ...orderStartResult.response,
+        suggestions: chitchatSuggestions,
+        order_suggestions: orderSuggestions,
+      };
+
+      return res.json({
+        automated: true,
+        response: finalResponse,
+        language: lang,
+        phase: orderStartResult.phase,
+        intent: orderStartResult.intent,
+        order_suggestions: orderSuggestions,
       });
     }
 
@@ -187,6 +376,28 @@ router.post('/', tokenValidator, (req, res) => {
         language: lang,
         phase: 'collect_phone',
       });
+    }
+
+    let forceOrderFromAi = false;
+    let aiInvalidClassification = false;
+    if (session.phase === 'active' && aiAssessment.route === 'ai') {
+      const aiPipeline = await tryAiPipeline('threshold');
+      if (aiPipeline.forceOrder) {
+        forceOrderFromAi = true;
+      } else if (aiPipeline.invalid) {
+        aiInvalidClassification = true;
+      } else if (aiPipeline.handled) {
+        const nextContext = {
+          ...context,
+          ...aiPipeline.payload.context_update,
+          last_suggestions: normalizeSuggestions(aiPipeline.payload.suggestions),
+        };
+        return sendPayloadResult({
+          payload: aiPipeline.payload,
+          intent: aiPipeline.intent,
+          nextContext,
+        });
+      }
     }
 
     if (session.phase === 'collect_phone') {
@@ -269,7 +480,7 @@ router.post('/', tokenValidator, (req, res) => {
       }
     }
 
-    const isOrderIntent = looksLikeOrderIntent(text, lang) || (lang === 'ar' && looksLikeOrderIntent(require('../../engine/translation').translateArabicToEnglish(text), 'en'));
+    const isOrderIntent = forceOrderFromAi || looksLikeOrderIntent(text, lang) || (lang === 'ar' && looksLikeOrderIntent(require('../../engine/translation').translateArabicToEnglish(text), 'en'));
     if (isOrderingEnabled(business) && (session.phase === 'active' || String(session.phase || '').startsWith('order_')) && (isOrderIntent || isInternalOrderCommand(text))) {
       const orderSeedItems = matchItemsForOrder({
         text,
@@ -277,48 +488,7 @@ router.post('/', tokenValidator, (req, res) => {
         businessId: business.id,
         context,
       });
-      const orderStartResult = startOrderFlow({
-        business,
-        session,
-        context,
-        lang,
-        seedItems: orderSeedItems,
-      });
-
-      updateSession.run(
-        orderStartResult.phase,
-        lang,
-        session.guest_name,
-        session.guest_phone,
-        JSON.stringify(orderStartResult.context),
-        session.id
-      );
-
-      if (orderStartResult.response.text) {
-        insertMessage.run(session.id, 'bot', orderStartResult.response.text, orderStartResult.intent);
-      }
-
-      const lastSuggestions = orderStartResult.context.last_suggestions;
-      const chitchatSuggestions = Array.isArray(lastSuggestions) && lastSuggestions.length
-        ? lastSuggestions
-        : parseSuggestions(business, lang);
-
-      const orderSuggestions = orderStartResult.response.suggestions || [];
-
-      const finalResponse = {
-        ...orderStartResult.response,
-        suggestions: chitchatSuggestions,
-        order_suggestions: orderSuggestions,
-      };
-
-      return res.json({
-        automated: true,
-        response: finalResponse,
-        language: lang,
-        phase: orderStartResult.phase,
-        intent: orderStartResult.intent,
-        order_suggestions: orderSuggestions,
-      });
+      return startOrderResponse(orderSeedItems);
     }
 
     let resolvedText = text;
@@ -365,6 +535,65 @@ router.post('/', tokenValidator, (req, res) => {
             intentResult = recoveredIntent;
           }
         }
+      }
+    }
+
+    if (aiInvalidClassification) {
+      const fallbackPayload = brain.buildResponse(intentResult, lang, business);
+      const fallbackIsUsable = hasUsablePayload({ ...fallbackPayload, intent: intentResult.intent });
+      const payload = fallbackIsUsable
+        ? prefixAiFallbackPayload(fallbackPayload, lang)
+        : buildNotFoundPayload(lang === 'ar' ? 'ar' : 'en', business);
+      const nextContext = {
+        ...context,
+        ...payload.context_update,
+        last_suggestions: normalizeSuggestions(payload.suggestions),
+      };
+      return sendPayloadResult({
+        payload,
+        intent: fallbackIsUsable ? intentResult.intent : 'ai_not_found',
+        nextContext,
+      });
+    }
+
+    if (aiAssessment.score > 0 && shouldRetryWithRecovery(intentResult.intent)) {
+      const aiPipeline = await tryAiPipeline('rules_fallback');
+      if (aiPipeline.forceOrder && isOrderingEnabled(business)) {
+        const orderSeedItems = matchItemsForOrder({
+          text,
+          lang,
+          businessId: business.id,
+          context,
+        });
+        return startOrderResponse(orderSeedItems);
+      }
+      if (aiPipeline.handled) {
+        const nextContext = {
+          ...context,
+          ...aiPipeline.payload.context_update,
+          last_suggestions: normalizeSuggestions(aiPipeline.payload.suggestions),
+        };
+        return sendPayloadResult({
+          payload: aiPipeline.payload,
+          intent: aiPipeline.intent,
+          nextContext,
+        });
+      }
+      if (aiPipeline.invalid) {
+        const fallbackPayload = brain.buildResponse(intentResult, lang, business);
+        const payload = hasUsablePayload({ ...fallbackPayload, intent: intentResult.intent })
+          ? prefixAiFallbackPayload(fallbackPayload, lang)
+          : buildNotFoundPayload(lang === 'ar' ? 'ar' : 'en', business);
+        const nextContext = {
+          ...context,
+          ...payload.context_update,
+          last_suggestions: normalizeSuggestions(payload.suggestions),
+        };
+        return sendPayloadResult({
+          payload,
+          intent: hasUsablePayload({ ...fallbackPayload, intent: intentResult.intent }) ? intentResult.intent : 'ai_not_found',
+          nextContext,
+        });
       }
     }
 

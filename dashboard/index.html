@@ -266,6 +266,13 @@
                   </select>
                 </div>
                 <div class="form-field">
+                  <label>AI Routing</label>
+                  <label class="toggle-field">
+                    <input type="checkbox" id="business-ai-enabled">
+                    <span>Enable AI classifier</span>
+                  </label>
+                </div>
+                <div class="form-field">
                   <label>Phone</label>
                   <input type="text" id="cafe-phone">
                 </div>
@@ -331,6 +338,21 @@
                     <button class="btn-ar-toggle" type="button" data-ar-target="cafe-suggestions-ar" title="Set Arabic"><span>ع</span></button>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section: FAQ -->
+          <div class="accordion-section">
+            <button class="accordion-header" type="button">
+              <span><i class="fas fa-circle-question"></i> FAQ</span>
+              <i class="fas fa-chevron-down accordion-arrow"></i>
+            </button>
+            <div class="accordion-body">
+              <div class="form-field full-width">
+                <label>FAQ <small>customers get instant answers — hit ع on any question to add its Arabic translation</small></label>
+                <div id="cafe-faq-list" class="faq-list"></div>
+                <button type="button" id="cafe-faq-add" class="faq-add-btn"><i class="fas fa-plus"></i> Add question</button>
               </div>
             </div>
           </div>

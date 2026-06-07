@@ -3,6 +3,16 @@
 const { tokenize, normalize } = require('../engine/detector');
 const { getBusinessItems } = require('./shared/catalogStore');
 const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle } = require('./shared/matcher');
+const { getItemThumbnail } = require('./shared/thumbnailMessages');
+
+// Filler words in a price/specs/location question. Leftover tokens => the user
+// named a specific (unknown) unit -> "not found", not a "which project?" dead-end.
+const QUERY_CONTEXT_FILLER = new Set([
+  'how', 'much', 'many', 'what', 'whats', 'is', 'are', 'the', 'a', 'an', 'of',
+  'for', 'it', 'this', 'that', 'your', 'do', 'you', 'have', 'price', 'cost',
+  'prices', 'costs', 'priced', 'and', 'to', 'me', 'i', 'we', 'about', 'in',
+  'where', 'which', 'located', 'location', 'specs', 'spec',
+]);
 
 const PATTERNS = {
   en: {
@@ -210,7 +220,10 @@ function detectIntent({ text, lang, business, context = {} }) {
   if (asksSpecs && lastItem) return { intent: 'item_specs', item: lastItem };
   if (asksFinance && lastItem) return { intent: 'item_finance', item: lastItem };
   if (asksLocation && lastItem) return { intent: 'item_location', item: lastItem };
-  if (asksPrice || asksLocation || asksSpecs || asksFinance) return { intent: 'need_item_context' };
+  if (asksPrice || asksLocation || asksSpecs || asksFinance) {
+    const residual = tokenize(normalizedText).filter((token) => token.length > 1 && !QUERY_CONTEXT_FILLER.has(token));
+    return { intent: residual.length ? 'item_not_found' : 'need_item_context' };
+  }
 
 
 
@@ -389,12 +402,15 @@ function buildResponse(intentResult, lang, business) {
       payload.suggestions = items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       break;
     }
-    case 'item_found':
+    case 'item_found': {
       payload.text = buildPropertySummary(intentResult.item, locale);
       payload.suggestions = buildItemSuggestions(intentResult.item, locale);
       payload.context_update.last_item = intentResult.item.id;
+      const thumbRe = getItemThumbnail(intentResult.item);
+      if (thumbRe) payload.thumbnail = thumbRe;
       payload.context_update.last_category = getDisplayCategory(intentResult.item, locale) || null;
       break;
+    }
     case 'item_price':
       payload.text = intentResult.item.price !== null && intentResult.item.price !== undefined
         ? (locale === 'ar'
@@ -532,6 +548,7 @@ function mapSheetRecords(records) {
         roi: record.roi || record.expected_roi || '',
         expected_roi: record.expected_roi || '',
         rent_frequency: record.rent_frequency || '',
+        thumbnail: record.thumbnail || record.thumbnail_url || record.image || '',
       }),
       available: ['0', 'false', 'no'].includes(String(record.available || '').toLowerCase()) ? 0 : 1,
     }));

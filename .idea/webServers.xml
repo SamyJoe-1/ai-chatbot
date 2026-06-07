@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="3371718e-000e-4a09-8d79-daaaa369c1e7" name="Clickshare">
+        <fileTransfer rootFolder="/home/projects/sftp/test" accessType="SFTP" host="76.13.153.5" port="6821" sshConfigId="d8f14eb4-aa7b-4b90-a9b1-091bb02e9f68" sshConfig="root@76.13.153.5:6821 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>

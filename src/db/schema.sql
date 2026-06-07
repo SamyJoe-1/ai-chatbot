@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS businesses (
   welcome_ar TEXT DEFAULT 'أهلاً! كيف يمكنني مساعدتك اليوم؟',
   suggestions_en TEXT DEFAULT '[]',
   suggestions_ar TEXT DEFAULT '[]',
+  faq_en TEXT DEFAULT '[]',
+  faq_ar TEXT DEFAULT '[]',
+  ai_enabled INTEGER NOT NULL DEFAULT 0,
   active INTEGER DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -75,6 +78,7 @@ CREATE TABLE IF NOT EXISTS messages (
   content TEXT NOT NULL,
   intent TEXT,
   thumbnail TEXT,
+  ai_score INTEGER,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -104,8 +108,19 @@ CREATE TABLE IF NOT EXISTS order_items (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Per-IP / per-device AI usage log, used to rate-limit AI calls so abuse
+-- cannot drain the AI balance. One row per AI classifier call.
+CREATE TABLE IF NOT EXISTS ai_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  business_id INTEGER NOT NULL,
+  scope TEXT NOT NULL,
+  identifier TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_business_phone_status ON orders (business_id, guest_phone, status, updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_order_items_unique_service_item ON order_items (order_id, service_item_id);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_lookup ON ai_usage (business_id, scope, identifier, created_at);
 
 INSERT OR IGNORE INTO admins (id, username, password, role)
 VALUES (1, 'admin', '$2a$10$kx69ZN/LvamVRScsPjB8aeDPF46oKClKAIsNFOXSw7bk6bSMle686', 'admin');

@@ -383,6 +383,104 @@ function parseTextareaList(v) {
   return String(v || '').split('\n').map(l => l.trim()).filter(Boolean);
 }
 
+/* ═══════ FAQ EDITOR (friendly Q/A repeater) ═══════
+   DB still stores two independent JSON arrays (faq_en / faq_ar). The UI pairs
+   them by row so each English question can carry its Arabic translation; rows
+   with no Arabic simply don't contribute to faq_ar (counts can differ). */
+function makeFaqRow(data = {}) {
+  const row = document.createElement('div');
+  row.className = 'faq-row';
+  const hasAr = Boolean(String(data.q_ar || '').trim() || String(data.a_ar || '').trim());
+  row.innerHTML = `
+    <div class="faq-row-main">
+      <span class="faq-row-num"></span>
+      <div class="faq-row-fields">
+        <input type="text" class="faq-q-en" placeholder="Question (EN) — e.g. Do you have wifi?" />
+        <textarea class="faq-a-en" rows="1" placeholder="Answer (EN)"></textarea>
+      </div>
+      <div class="faq-row-actions">
+        <button type="button" class="faq-ar-btn${hasAr ? ' open' : ''}" title="Arabic translation">ع</button>
+        <button type="button" class="faq-del-btn" title="Remove question">&times;</button>
+      </div>
+    </div>
+    <div class="faq-ar-fields"${hasAr ? '' : ' style="display:none"'}>
+      <input type="text" class="faq-q-ar" dir="rtl" placeholder="السؤال بالعربي" />
+      <textarea class="faq-a-ar" dir="rtl" rows="1" placeholder="الإجابة بالعربي"></textarea>
+    </div>`;
+  row.querySelector('.faq-q-en').value = data.q_en || '';
+  row.querySelector('.faq-a-en').value = data.a_en || '';
+  row.querySelector('.faq-q-ar').value = data.q_ar || '';
+  row.querySelector('.faq-a-ar').value = data.a_ar || '';
+  return row;
+}
+
+function renumberFaqRows() {
+  document.querySelectorAll('#cafe-faq-list .faq-row .faq-row-num')
+    .forEach((el, i) => { el.textContent = 'Q' + (i + 1); });
+}
+
+function renderFaqEditor(faqEn, faqAr) {
+  const list = document.getElementById('cafe-faq-list');
+  if (!list) return;
+  list.innerHTML = '';
+  const en = Array.isArray(faqEn) ? faqEn : [];
+  const ar = Array.isArray(faqAr) ? faqAr : [];
+  const count = Math.max(en.length, ar.length);
+  for (let i = 0; i < count; i++) {
+    list.appendChild(makeFaqRow({
+      q_en: en[i] && en[i].q, a_en: en[i] && en[i].a,
+      q_ar: ar[i] && ar[i].q, a_ar: ar[i] && ar[i].a,
+    }));
+  }
+  if (count === 0) list.appendChild(makeFaqRow());
+  renumberFaqRows();
+}
+
+function collectFaq() {
+  const faq_en = [];
+  const faq_ar = [];
+  document.querySelectorAll('#cafe-faq-list .faq-row').forEach((row) => {
+    const qen = row.querySelector('.faq-q-en').value.trim();
+    const aen = row.querySelector('.faq-a-en').value.trim();
+    const qar = row.querySelector('.faq-q-ar').value.trim();
+    const aar = row.querySelector('.faq-a-ar').value.trim();
+    if (qen && aen) faq_en.push({ q: qen, a: aen });
+    if (qar && aar) faq_ar.push({ q: qar, a: aar });
+  });
+  return { faq_en, faq_ar };
+}
+
+(function initFaqEditor() {
+  const list = document.getElementById('cafe-faq-list');
+  const addBtn = document.getElementById('cafe-faq-add');
+  if (addBtn) {
+    addBtn.addEventListener('click', () => {
+      document.getElementById('cafe-faq-list').appendChild(makeFaqRow());
+      renumberFaqRows();
+    });
+  }
+  if (list) {
+    list.addEventListener('click', (e) => {
+      const arBtn = e.target.closest('.faq-ar-btn');
+      if (arBtn) {
+        const fields = arBtn.closest('.faq-row').querySelector('.faq-ar-fields');
+        const show = fields.style.display === 'none' || !fields.style.display;
+        fields.style.display = show ? '' : 'none';
+        arBtn.classList.toggle('open', show);
+        return;
+      }
+      const delBtn = e.target.closest('.faq-del-btn');
+      if (delBtn) {
+        const row = delBtn.closest('.faq-row');
+        const parent = row.parentElement;
+        row.remove();
+        if (!parent.querySelector('.faq-row')) parent.appendChild(makeFaqRow());
+        renumberFaqRows();
+      }
+    });
+  }
+})();
+
 async function selectCafe(id, { updateHash = true } = {}) {
   showLoader();
   // Stop any previous poller when switching business
@@ -407,6 +505,7 @@ function fillEditor() {
   if (!c) return;
   document.getElementById('edit-cafe-title').textContent = 'Edit: ' + c.name;
   document.getElementById('business-service-type').value = c.service_type || 'cafe';
+  document.getElementById('business-ai-enabled').checked = Number(c.ai_enabled) === 1;
   document.getElementById('cafe-name').value = c.name || '';
   document.getElementById('cafe-name-ar').value = c.name_ar || '';
   document.getElementById('cafe-phone').value = c.phone || '';
@@ -421,6 +520,7 @@ function fillEditor() {
   document.getElementById('cafe-drive-folder').value = c.drive_folder_id || '';
   document.getElementById('cafe-suggestions-en').value = (Array.isArray(c.suggestions_en) ? c.suggestions_en : []).join('\n');
   document.getElementById('cafe-suggestions-ar').value = (Array.isArray(c.suggestions_ar) ? c.suggestions_ar : []).join('\n');
+  renderFaqEditor(c.faq_en, c.faq_ar);
   document.getElementById('cafe-about-en').value = c.about_en || '';
   document.getElementById('cafe-about-ar').value = c.about_ar || '';
   document.getElementById('cafe-address-en').value = c.address_en || '';
@@ -433,9 +533,11 @@ function fillEditor() {
 }
 
 function collectCafePayload() {
+  const faq = collectFaq();
   return {
     name: document.getElementById('cafe-name').value.trim(),
     service_type: document.getElementById('business-service-type').value,
+    ai_enabled: document.getElementById('business-ai-enabled').checked ? 1 : 0,
     name_ar: document.getElementById('cafe-name-ar').value.trim(),
     phone: document.getElementById('cafe-phone').value.trim(),
     email: document.getElementById('cafe-email').value.trim(),
@@ -448,6 +550,8 @@ function collectCafePayload() {
     drive_folder_id: document.getElementById('cafe-drive-folder').value.trim(),
     suggestions_en: parseTextareaList(document.getElementById('cafe-suggestions-en').value),
     suggestions_ar: parseTextareaList(document.getElementById('cafe-suggestions-ar').value),
+    faq_en: faq.faq_en,
+    faq_ar: faq.faq_ar,
     about_en: document.getElementById('cafe-about-en').value.trim(),
     about_ar: document.getElementById('cafe-about-ar').value.trim(),
     address_en: document.getElementById('cafe-address-en').value.trim(),

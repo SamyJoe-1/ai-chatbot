@@ -52,6 +52,25 @@ function phoneticHash(word) {
   return hash.replace(/(.)\1+/g, '$1');
 }
 
+// Real English words franco recovery must NEVER rewrite. Without this, short
+// English words collide phonetically with menu items (e.g. "do" -> "hot",
+// matching Hot Chocolate). Franco/Arabizi tokens are not in this set.
+const COMMON_ENGLISH = new Set([
+  'the', 'a', 'an', 'i', 'you', 'we', 'they', 'he', 'she', 'it', 'me', 'my',
+  'your', 'our', 'us', 'him', 'her', 'to', 'for', 'of', 'in', 'on', 'at', 'by',
+  'is', 'are', 'am', 'was', 'were', 'be', 'been', 'being', 'do', 'does', 'did',
+  'have', 'has', 'had', 'can', 'could', 'would', 'should', 'will', 'shall',
+  'may', 'might', 'must', 'want', 'wants', 'need', 'needs', 'get', 'got',
+  'give', 'take', 'make', 'like', 'please', 'pls', 'and', 'or', 'but', 'with',
+  'not', 'yes', 'yeah', 'yep', 'no', 'nope', 'ok', 'okay', 'sure', 'hi',
+  'hello', 'hey', 'thanks', 'thank', 'bye', 'goodbye', 'what', 'whats',
+  'which', 'how', 'when', 'where', 'why', 'who', 'this', 'that', 'these',
+  'those', 'there', 'here', 'see', 'show', 'tell', 'find', 'know', 'help',
+  'open', 'close', 'closed', 'hours', 'wifi', 'parking', 'price', 'cost',
+  'menu', 'order', 'table', 'book', 'booking', 'reserve', 'available',
+  'today', 'tomorrow', 'now', 'free', 'any', 'some', 'all',
+]);
+
 // Optionally define a small dictionary for direct overrides
 const FRANCO_DICT = {
   'هالو': 'hello',
@@ -170,6 +189,9 @@ function recoverFranco(text, items) {
   const recoveredWords = words.map(w => {
     if (w.length < 2) return w;
     const lowerW = w.toLowerCase();
+
+    // Never rewrite a legitimate English word (prevents "do" -> "hot").
+    if (COMMON_ENGLISH.has(lowerW)) return w;
 
     // Direct overrides
     const directDict = {

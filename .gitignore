@@ -4,3 +4,4 @@ google-service-account.json
 data/*.db
 data/*.db-shm
 data/*.db-wal
+public/aria_model

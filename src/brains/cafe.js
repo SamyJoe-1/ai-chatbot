@@ -3,6 +3,15 @@
 const { tokenize, normalize } = require('../engine/detector');
 const { getBusinessItems } = require('./shared/catalogStore');
 const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle } = require('./shared/matcher');
+const { getItemThumbnail, buildThumbnailMessages } = require('./shared/thumbnailMessages');
+
+// Filler words in a price/size question. Anything left over means the user
+// named a specific (unknown) item -> "not found", not "which item do you mean?".
+const PRICE_CONTEXT_FILLER = new Set([
+  'how', 'much', 'many', 'what', 'whats', 'is', 'are', 'the', 'a', 'an', 'of',
+  'for', 'it', 'this', 'that', 'your', 'do', 'you', 'have', 'price', 'cost',
+  'prices', 'costs', 'priced', 'and', 'to', 'me', 'i', 'we', 'about', 'in',
+]);
 
 const PATTERNS = {
   en: {
@@ -200,7 +209,13 @@ function runDetectIntent({ text, lang, business, context = {} }) {
 
   if (asksPrice && lastItem) return { intent: 'item_price', item: lastItem };
   if (asksSizes && lastItem) return { intent: 'item_sizes', item: lastItem };
-  if (asksPrice || asksSizes) return { intent: 'need_item_context' };
+  if (asksPrice || asksSizes) {
+    // If the user actually named something (residual content tokens) that we
+    // couldn't match, say "not found" — don't dead-end with "which item?" and
+    // no options. Only a bare "how much?" deserves the clarification prompt.
+    const residual = tokenize(normalizedText).filter((token) => token.length > 1 && !PRICE_CONTEXT_FILLER.has(token));
+    return { intent: residual.length ? 'item_not_found' : 'need_item_context' };
+  }
 
 
 
@@ -291,6 +306,8 @@ function buildResponse(intentResult, lang, business) {
       const category = getDisplayCategory(item, locale);
       if (category) lines.push(locale === 'ar' ? `الفئة: ${category}` : `Category: ${category}`);
       payload.text = lines.join('\n');
+      const thumb = getItemThumbnail(item);
+      if (thumb) payload.thumbnail = thumb;
       payload.suggestions = locale === 'ar' ? ['السعر', 'الأحجام', 'فتح القائمة'] : ['Price', 'Sizes', 'Open menu'];
       payload.context_update.last_item = item.id;
       payload.context_update.last_category = category || null;
@@ -336,6 +353,8 @@ function buildResponse(intentResult, lang, business) {
           payload.suggestions = sizes.map(s => locale === 'ar' ? `تفاصيل الحجم ${s}` : `Details of ${s}`);
         }
       }
+      const thumbSizes = getItemThumbnail(item);
+      if (thumbSizes) payload.thumbnail = thumbSizes;
       payload.context_update.last_item = item.id;
       payload.context_update.last_category = getDisplayCategory(item, locale) || null;
       break;
@@ -349,6 +368,8 @@ function buildResponse(intentResult, lang, business) {
         : (locale === 'ar'
           ? `سعر ${getDisplayTitle(item, locale)} غير مضاف حالياً. تواصل معنا للتفاصيل.`
           : `The price for ${getDisplayTitle(item, locale)} is not listed yet. Please contact us for details.`);
+      const thumbPrice = getItemThumbnail(item);
+      if (thumbPrice) payload.thumbnail = thumbPrice;
       payload.context_update.last_item = item.id;
       payload.context_update.last_category = getDisplayCategory(item, locale) || null;
       break;
@@ -369,27 +390,41 @@ function buildResponse(intentResult, lang, business) {
     case 'need_item_context':
       payload.text = locale === 'ar' ? 'تقصد أي صنف؟' : 'Which item do you mean?';
       break;
-    case 'category_items':
-      payload.text = [
-        locale === 'ar' ? `هذه الأصناف الموجودة في ${intentResult.category}:` : `Here are the items in ${intentResult.category}:`,
-        ...intentResult.items.slice(0, 8).map((item) => {
-          const price = item.price !== null && item.price !== undefined ? ` - ${item.price} ${item.currency}` : '';
-          return `- ${getDisplayTitle(item, locale)}${price}`;
-        }),
-      ].join('\n');
+    case 'category_items': {
+      const catItems = intentResult.items.slice(0, 8);
+      const catHeading = locale === 'ar' ? `هذه الأصناف الموجودة في ${intentResult.category}:` : `Here are the items in ${intentResult.category}:`;
+      const catItemLine = (item) => {
+        const price = item.price !== null && item.price !== undefined ? ` - ${item.price} ${item.currency}` : '';
+        return `- ${getDisplayTitle(item, locale)}${price}`;
+      };
+      const catThumbMsgs = buildThumbnailMessages(catItems, catHeading, catItemLine);
+      if (catThumbMsgs) {
+        payload.messages = catThumbMsgs;
+        payload.text = catThumbMsgs.map((m) => m.text).filter(Boolean).join('\n');
+      } else {
+        payload.text = [catHeading, ...catItems.map(catItemLine)].join('\n');
+      }
       payload.context_update.last_category = intentResult.category;
       payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       break;
-    case 'item_disambiguation':
-      payload.text = [
-        locale === 'ar' ? 'وجدت أكثر من صنف مطابق. أي واحد تقصد؟' : 'I found more than one matching item. Which would you like?',
-        ...intentResult.items.slice(0, 6).map((item) => {
-          const price = item.price !== null && item.price !== undefined ? ` - ${item.price} ${item.currency}` : '';
-          return `- ${getDisplayTitle(item, locale)}${price}`;
-        }),
-      ].join('\n');
+    }
+    case 'item_disambiguation': {
+      const disambItems = intentResult.items.slice(0, 6);
+      const disambHeading = locale === 'ar' ? 'وجدت أكثر من صنف مطابق. أي واحد تقصد؟' : 'I found more than one matching item. Which would you like?';
+      const disambItemLine = (item) => {
+        const price = item.price !== null && item.price !== undefined ? ` - ${item.price} ${item.currency}` : '';
+        return `- ${getDisplayTitle(item, locale)}${price}`;
+      };
+      const disambThumbMsgs = buildThumbnailMessages(disambItems, disambHeading, disambItemLine);
+      if (disambThumbMsgs) {
+        payload.messages = disambThumbMsgs;
+        payload.text = disambThumbMsgs.map((m) => m.text).filter(Boolean).join('\n');
+      } else {
+        payload.text = [disambHeading, ...disambItems.map(disambItemLine)].join('\n');
+      }
       payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       break;
+    }
     case 'brand_info':
       payload.text = locale === 'ar'
         ? (business.about_ar || `نحن ${business.name_ar || business.name}. تواصل معنا إذا أردت معرفة المزيد.`)
@@ -453,6 +488,11 @@ function mapSheetRecords(records) {
 
       if (!metadataObj.sizes || !metadataObj.sizes.length) {
         metadataObj.sizes = sizes;
+      }
+
+      const thumbUrl = record.thumbnail || record.thumbnail_url || record.image || record.image_url || record.photo || record.photo_url;
+      if (thumbUrl) {
+        metadataObj.thumbnail = thumbUrl;
       }
 
       return {

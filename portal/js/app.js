@@ -325,6 +325,7 @@ function fillBusiness() {
   document.getElementById('business-name').value = business.name || '';
   document.getElementById('business-name-ar').value = business.name_ar || '';
   document.getElementById('business-service-type').value = business.service_type || 'cafe';
+  document.getElementById('business-ai-enabled').checked = Number(business.ai_enabled) === 1;
   document.getElementById('business-phone').value = business.phone || '';
   document.getElementById('business-email').value = business.email || '';
   document.getElementById('business-primary-color').value = business.primary_color || '#d66020';
@@ -358,6 +359,7 @@ function collectBusinessPayload() {
     name: document.getElementById('business-name').value.trim(),
     name_ar: document.getElementById('business-name-ar').value.trim(),
     service_type: document.getElementById('business-service-type').value,
+    ai_enabled: document.getElementById('business-ai-enabled').checked ? 1 : 0,
     phone: document.getElementById('business-phone').value.trim(),
     email: document.getElementById('business-email').value.trim(),
     primary_color: document.getElementById('business-primary-color').value,
@@ -1112,10 +1114,13 @@ function renderSessionMessages(container, messages, { forceScroll = false } = {}
       return `<div class="chat-msg system">${esc(message.content)}</div>`;
     }
     const extraClass = message.intent === 'admin_manual' ? ' support' : '';
+    const aiScore = message.role === 'user' && message.ai_score !== null && message.ai_score !== undefined
+      ? `<span class="chat-ai-score" title="AI routing score">${Number(message.ai_score)}/10</span>`
+      : '';
     return `
       <div class="chat-msg ${message.role === 'user' ? 'user' : 'bot'}${extraClass}">
         ${esc(message.content)}
-        <div class="chat-msg-time">${message.created_at || ''}</div>
+        <div class="chat-msg-time">${message.created_at || ''}${aiScore}</div>
       </div>
     `;
   }).join('') || '<p style="color:var(--text-muted)">No messages yet</p>';

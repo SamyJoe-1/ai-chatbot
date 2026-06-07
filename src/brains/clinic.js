@@ -3,6 +3,16 @@
 const { tokenize, normalize } = require('../engine/detector');
 const { getBusinessItems } = require('./shared/catalogStore');
 const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle } = require('./shared/matcher');
+const { getItemThumbnail } = require('./shared/thumbnailMessages');
+
+// Filler words in a price/info question. Leftover tokens => the user named a
+// specific (unknown) service -> "not found", not a "which service?" dead-end.
+const QUERY_CONTEXT_FILLER = new Set([
+  'how', 'much', 'many', 'what', 'whats', 'is', 'are', 'the', 'a', 'an', 'of',
+  'for', 'it', 'this', 'that', 'your', 'do', 'you', 'have', 'price', 'cost',
+  'prices', 'costs', 'priced', 'and', 'to', 'me', 'i', 'we', 'about', 'in',
+  'who', 'which', 'doctor', 'specialization', 'specialist',
+]);
 
 const PATTERNS = {
   en: {
@@ -157,7 +167,10 @@ function detectIntent({ text, lang, business, context = {} }) {
   if (asksPrice && lastItem) return { intent: 'item_price', item: lastItem };
   if (asksDoctor && lastItem) return { intent: 'doctor_info', item: lastItem };
   if (asksSpecialization && lastItem) return { intent: 'specialization', item: lastItem };
-  if (asksPrice || asksDoctor || asksSpecialization) return { intent: 'need_item_context' };
+  if (asksPrice || asksDoctor || asksSpecialization) {
+    const residual = tokenize(normalizedText).filter((token) => token.length > 1 && !QUERY_CONTEXT_FILLER.has(token));
+    return { intent: residual.length ? 'item_not_found' : 'need_item_context' };
+  }
 
 
 
@@ -245,12 +258,15 @@ function buildResponse(intentResult, lang, business) {
         });
       }
       break;
-    case 'item_found':
+    case 'item_found': {
       payload.text = buildServiceSummary(intentResult.item, locale);
       payload.suggestions = locale === 'ar' ? ['السعر', 'الطبيب', 'التخصص'] : ['Price', 'Doctor', 'Specialization'];
       payload.context_update.last_item = intentResult.item.id;
+      const thumbCl = getItemThumbnail(intentResult.item);
+      if (thumbCl) payload.thumbnail = thumbCl;
       payload.context_update.last_category = getDisplayCategory(intentResult.item, locale) || null;
       break;
+    }
     case 'item_price':
       payload.text = intentResult.item.price !== null && intentResult.item.price !== undefined
         ? (locale === 'ar'
@@ -369,6 +385,7 @@ function mapSheetRecords(records) {
         branch: record.branch || record.location || '',
         duration_minutes: record.duration_minutes || record.duration || '',
         booking: record.booking || record.booking_notes || '',
+        thumbnail: record.thumbnail || record.thumbnail_url || record.image || '',
       }),
       available: ['0', 'false', 'no'].includes(String(record.available || '').toLowerCase()) ? 0 : 1,
     }));

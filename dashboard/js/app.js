@@ -481,10 +481,13 @@ function renderSessionMessages(container, messages, { forceScroll = false } = {}
       return `<div class="chat-msg system">${esc(m.content)}</div>`;
     }
     const extraClass = m.intent === 'admin_manual' ? ' support' : '';
+    const aiScore = m.role === 'user' && m.ai_score !== null && m.ai_score !== undefined
+      ? `<span class="chat-ai-score" title="AI routing score">${Number(m.ai_score)}/10</span>`
+      : '';
     return `
       <div class="chat-msg ${m.role === 'user' ? 'user' : 'bot'}${extraClass}">
         ${esc(m.content)}
-        <div class="chat-msg-time">${m.created_at || ''}</div>
+        <div class="chat-msg-time">${m.created_at || ''}${aiScore}</div>
       </div>
     `;
   }).join('') || '<p style="color:var(--text-muted)">No messages yet</p>';

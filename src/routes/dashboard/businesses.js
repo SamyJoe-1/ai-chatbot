@@ -9,6 +9,7 @@ const { authMiddleware, adminOnly } = require('../../middleware/auth');
 const { getBrain, listServiceTypes } = require('../../brains');
 const { invalidateBusinessItemsCache } = require('../../brains/shared/catalogStore');
 const { COMMON_RESPONSES } = require('../../brains/shared/commonResponses');
+const { parseFaqList } = require('../../engine/faqMatcher');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -20,15 +21,15 @@ const createBusiness = db.prepare(`
     token, service_type, name, name_ar, primary_color, secondary_color, logo_url,
     about_en, about_ar, phone, email, address_en, address_ar,
     working_hours_en, working_hours_ar, catalog_link, drive_folder_id, sheet_id, sheet_name,
-    welcome_en, welcome_ar, suggestions_en, suggestions_ar, active
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    welcome_en, welcome_ar, suggestions_en, suggestions_ar, faq_en, faq_ar, ai_enabled, active
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 const updateBusiness = db.prepare(`
   UPDATE businesses SET
     service_type = ?, name = ?, name_ar = ?, primary_color = ?, secondary_color = ?, logo_url = ?,
     about_en = ?, about_ar = ?, phone = ?, email = ?, address_en = ?, address_ar = ?,
     working_hours_en = ?, working_hours_ar = ?, catalog_link = ?, drive_folder_id = ?, sheet_id = ?, sheet_name = ?,
-    welcome_en = ?, welcome_ar = ?, suggestions_en = ?, suggestions_ar = ?, active = ?
+    welcome_en = ?, welcome_ar = ?, suggestions_en = ?, suggestions_ar = ?, faq_en = ?, faq_ar = ?, ai_enabled = ?, active = ?
   WHERE id = ?
 `);
 const deleteBusiness = db.prepare('DELETE FROM businesses WHERE id = ?');
@@ -49,11 +50,22 @@ function parseList(value) {
   return [];
 }
 
+function normalizeFaq(value) {
+  return parseFaqList(value)
+    .map((entry) => ({
+      q: String(entry.q || entry.question || '').trim(),
+      a: String(entry.a || entry.answer || '').trim(),
+    }))
+    .filter((entry) => entry.q && entry.a);
+}
+
 function serializeBusiness(business) {
   return {
     ...business,
     suggestions_en: parseList(business.suggestions_en),
     suggestions_ar: parseList(business.suggestions_ar),
+    faq_en: normalizeFaq(business.faq_en),
+    faq_ar: normalizeFaq(business.faq_ar),
   };
 }
 
@@ -165,7 +177,7 @@ router.get('/:id/sessions/:sessionId/messages', (req, res) => {
   }
 
   const messages = db.prepare(`
-    SELECT role, content, intent, created_at
+    SELECT role, content, intent, ai_score, created_at
     FROM messages
     WHERE session_id = ?
     ORDER BY id ASC
@@ -234,6 +246,9 @@ router.post('/', adminOnly, (req, res) => {
     body.welcome_ar || defaults.welcome_ar || getBrain(serviceType).getWelcomeMessage(welcomeSource, 'ar'),
     JSON.stringify(parseList(body.suggestions_en)),
     JSON.stringify(parseList(body.suggestions_ar)),
+    JSON.stringify(normalizeFaq(body.faq_en)),
+    JSON.stringify(normalizeFaq(body.faq_ar)),
+    body.ai_enabled === 1 || body.ai_enabled === true ? 1 : 0,
     body.active === 0 ? 0 : 1
   );
 
@@ -275,6 +290,9 @@ router.put('/:id', (req, res) => {
     body.welcome_ar ?? business.welcome_ar,
     JSON.stringify(body.suggestions_en !== undefined ? parseList(body.suggestions_en) : parseList(business.suggestions_en)),
     JSON.stringify(body.suggestions_ar !== undefined ? parseList(body.suggestions_ar) : parseList(business.suggestions_ar)),
+    JSON.stringify(body.faq_en !== undefined ? normalizeFaq(body.faq_en) : normalizeFaq(business.faq_en)),
+    JSON.stringify(body.faq_ar !== undefined ? normalizeFaq(body.faq_ar) : normalizeFaq(business.faq_ar)),
+    body.ai_enabled !== undefined ? Number(body.ai_enabled) : business.ai_enabled,
     body.active !== undefined ? Number(body.active) : business.active,
     business.id
   );

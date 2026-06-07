@@ -33,6 +33,10 @@ function detectHeaderLanguage(req) {
 }
 
 function parseSuggestions(value) {
+  // value may already be a parsed array (from context.last_suggestions) or a
+  // JSON string (from business.suggestions_*). Handle both — JSON.parsing an
+  // array throws and used to wipe contextual suggestions on every poll.
+  if (Array.isArray(value)) return value;
   try {
     const parsed = JSON.parse(value || '[]');
     return Array.isArray(parsed) ? parsed : [];
