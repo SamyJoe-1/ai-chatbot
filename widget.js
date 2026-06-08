@@ -2061,7 +2061,16 @@
 
       applyPayloadUi(payload);
 
-      if (payload.response && payload.response.text) {
+      if (payload.response && Array.isArray(payload.response.messages) && payload.response.messages.length > 0) {
+        // Multi-item reply: render each bubble with its own thumbnail, exactly as
+        // the backend split them (shared image once, or one image per item).
+        state.isTypingReply = true;
+        for (const msg of payload.response.messages) {
+          const thumb = msg.thumbnail || null;
+          state.history.push({ role: 'bot', content: msg.text, thumbnail: thumb });
+          await typeMessage(msg.text, 'bot', state.language, thumb);
+        }
+      } else if (payload.response && payload.response.text) {
         state.history.push({ role: 'bot', content: payload.response.text, thumbnail: payload.response.thumbnail });
         state.isTypingReply = true;
         await typeMessage(payload.response.text, 'bot', state.language, payload.response.thumbnail);

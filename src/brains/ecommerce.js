@@ -3,6 +3,7 @@
 const { tokenize, normalize } = require('../engine/detector');
 const { getBusinessItems } = require('./shared/catalogStore');
 const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle } = require('./shared/matcher');
+const { getItemThumbnail, buildThumbnailMessages } = require('./shared/thumbnailMessages');
 
 const FEATURE_SYNONYMS = {
   color: ['color', 'colors', 'لون', 'اللون', 'ألوان', 'الوان'],
@@ -381,12 +382,25 @@ function buildResponse(intentResult, lang, business) {
     context_update: {},
   };
 
-  const getItemThumbnail = (item) => {
-    let meta = item.metadata || {};
-    if (typeof meta === 'string') {
-      try { meta = JSON.parse(meta); } catch { meta = {}; }
+  // Shared builder for the four multi-item cases below. Collapses to a single
+  // image bubble when every item shares one thumbnail, splits to one bubble per
+  // item when the URLs differ, and returns null (plain text) when none have one.
+  const applyItemList = (items, heading) => {
+    const itemLine = (item) => {
+      const title = getDisplayTitle(item, locale);
+      const desc = getDisplayDescription(item, locale);
+      const priceText = item.price !== null && item.price !== undefined
+        ? `\n${locale === 'ar' ? 'السعر' : 'Price'}: ${item.price} ${item.currency}`
+        : '';
+      return `**${title}**\n${desc}${priceText}`;
+    };
+    const thumbMsgs = buildThumbnailMessages(items, heading, itemLine);
+    if (thumbMsgs) {
+      payload.messages = thumbMsgs;
+      payload.text = thumbMsgs.map((m) => m.text).filter(Boolean).join('\n\n');
+    } else {
+      payload.text = [heading, ...items.map(itemLine)].join('\n\n');
     }
-    return meta.thumbnail || null;
   };
 
   switch (intentResult.intent) {
@@ -447,23 +461,10 @@ function buildResponse(intentResult, lang, business) {
 
     case 'ecommerce_country_products':
       if (intentResult.items && intentResult.items.length > 0) {
-        payload.messages = [];
-        payload.messages.push({
-          text: locale === 'ar' 
-            ? `إليك المنتجات المتوفرة في ${intentResult.country}:` 
-            : `Here are the products available in ${intentResult.country}:`,
-          thumbnail: null,
-        });
-        intentResult.items.slice(0, 6).forEach(item => {
-          const title = getDisplayTitle(item, locale);
-          const desc = getDisplayDescription(item, locale);
-          const priceText = item.price !== null && item.price !== undefined ? `\n${locale === 'ar' ? 'السعر' : 'Price'}: ${item.price} ${item.currency}` : '';
-          payload.messages.push({
-            text: `**${title}**\n${desc}${priceText}`,
-            thumbnail: getItemThumbnail(item),
-          });
-        });
-        payload.text = payload.messages.map(m => m.text).join('\n\n');
+        const heading = locale === 'ar'
+          ? `إليك المنتجات المتوفرة في ${intentResult.country}:`
+          : `Here are the products available in ${intentResult.country}:`;
+        applyItemList(intentResult.items.slice(0, 6), heading);
         payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       } else {
         payload.text = locale === 'ar'
@@ -474,21 +475,10 @@ function buildResponse(intentResult, lang, business) {
 
     case 'ecommerce_search_hot':
       if (intentResult.items && intentResult.items.length > 0) {
-        payload.messages = [];
-        const headline = intentResult.country 
+        const headline = intentResult.country
           ? (locale === 'ar' ? `إليك المنتجات الأكثر طلباً في ${intentResult.country}:` : `Here are the hot selling products in ${intentResult.country}:`)
           : (locale === 'ar' ? 'إليك المنتجات الأكثر طلباً ومبيعاً لدينا:' : 'Here are our hot selling products:');
-        payload.messages.push({ text: headline, thumbnail: null });
-        intentResult.items.slice(0, 6).forEach(item => {
-          const title = getDisplayTitle(item, locale);
-          const desc = getDisplayDescription(item, locale);
-          const priceText = item.price !== null && item.price !== undefined ? `\n${locale === 'ar' ? 'السعر' : 'Price'}: ${item.price} ${item.currency}` : '';
-          payload.messages.push({
-            text: `**${title}**\n${desc}${priceText}`,
-            thumbnail: getItemThumbnail(item),
-          });
-        });
-        payload.text = payload.messages.map(m => m.text).join('\n\n');
+        applyItemList(intentResult.items.slice(0, 6), headline);
         payload.suggestions = intentResult.items.slice(0, 3).map(item => getDisplayTitle(item, locale));
       } else {
         payload.text = locale === 'ar' ? 'لم نجد منتجات محددة كأكثر مبيعاً حالياً.' : 'No hot selling products specified at the moment.';
@@ -587,21 +577,8 @@ function buildResponse(intentResult, lang, business) {
       break;
     case 'category_items':
       if (intentResult.items && intentResult.items.length > 0) {
-        payload.messages = [];
-        payload.messages.push({
-          text: locale === 'ar' ? `إليك المنتجات في قسم ${intentResult.category}:` : `Here are the products in ${intentResult.category}:`,
-          thumbnail: null,
-        });
-        intentResult.items.slice(0, 6).forEach(item => {
-          const title = getDisplayTitle(item, locale);
-          const desc = getDisplayDescription(item, locale);
-          const priceText = item.price !== null && item.price !== undefined ? `\n${locale === 'ar' ? 'السعر' : 'Price'}: ${item.price} ${item.currency}` : '';
-          payload.messages.push({
-            text: `**${title}**\n${desc}${priceText}`,
-            thumbnail: getItemThumbnail(item),
-          });
-        });
-        payload.text = payload.messages.map(m => m.text).join('\n\n');
+        const heading = locale === 'ar' ? `إليك المنتجات في قسم ${intentResult.category}:` : `Here are the products in ${intentResult.category}:`;
+        applyItemList(intentResult.items.slice(0, 6), heading);
         payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       } else {
         payload.text = locale === 'ar' ? `لا توجد منتجات في قسم ${intentResult.category} حالياً.` : `No products found in ${intentResult.category} category.`;
@@ -610,21 +587,8 @@ function buildResponse(intentResult, lang, business) {
       break;
     case 'item_disambiguation':
       if (intentResult.items && intentResult.items.length > 0) {
-        payload.messages = [];
-        payload.messages.push({
-          text: locale === 'ar' ? 'وجدت أكثر من منتج مطابق. أي واحد تقصد؟' : 'I found more than one matching product. Which one did you mean?',
-          thumbnail: null,
-        });
-        intentResult.items.slice(0, 6).forEach(item => {
-          const title = getDisplayTitle(item, locale);
-          const desc = getDisplayDescription(item, locale);
-          const priceText = item.price !== null && item.price !== undefined ? `\n${locale === 'ar' ? 'السعر' : 'Price'}: ${item.price} ${item.currency}` : '';
-          payload.messages.push({
-            text: `**${title}**\n${desc}${priceText}`,
-            thumbnail: getItemThumbnail(item),
-          });
-        });
-        payload.text = payload.messages.map(m => m.text).join('\n\n');
+        const heading = locale === 'ar' ? 'وجدت أكثر من منتج مطابق. أي واحد تقصد؟' : 'I found more than one matching product. Which one did you mean?';
+        applyItemList(intentResult.items.slice(0, 6), heading);
         payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       } else {
         payload.text = locale === 'ar' ? 'وجدت مطابقات متعددة ولكن لم نتمكن من عرض التفاصيل.' : 'Multiple matches found but details could not be loaded.';
