@@ -313,11 +313,19 @@
         max-height: 100px !important;
         overflow-y: scroll !important;
         overflow-x: hidden !important;
-        padding: 4px 0;
-        margin-top: 2px;
+        padding: 0;
+        margin-top: 5px;
       }
       .cb-suggestions::-webkit-scrollbar { width: 4px; }
       .cb-suggestions::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 2px; }
+      /* Collapse these footer containers when empty so they don't reserve a gap. */
+      .cb-order:empty,
+      .cb-choice-row:empty,
+      .cb-suggestions:empty {
+        display: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
       .cb-action, .cb-chip {
         display: inline-block !important;
         margin: 3px;
@@ -337,7 +345,7 @@
         flex-shrink: 0;
         display: flex;
         flex-direction: column;
-        padding: 14px;
+        padding: 1px 14px 14px 14px;
         background: rgba(255,255,255,0.9);
         border-top: 1px solid var(--cb-border);
         max-height: 55% !important;
