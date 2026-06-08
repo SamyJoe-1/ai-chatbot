@@ -12,7 +12,7 @@ function getItemThumbnail(item) {
  * Builds a messages array for multi-item responses based on thumbnail availability.
  * Returns null when no thumbnails exist — caller falls back to plain text.
  *
- * Same URL for all items  → [ {text:'', thumbnail:sharedUrl}, {text:fullList, thumbnail:null} ]
+ * Same URL for all items  → [ {text:fullList, thumbnail:sharedUrl} ]  (image + list in one bubble)
  * Multiple distinct URLs  → [ {text:heading, thumbnail:null}, ...one message per item ]
  *
  * @param {object[]} items      - catalog items already sliced to display limit
@@ -27,12 +27,12 @@ function buildThumbnailMessages(items, headingText, itemLineFn) {
   const uniqueThumbs = new Set(withThumb);
 
   if (uniqueThumbs.size === 1) {
-    // All thumbnails share the same URL — show image once, then the full combined list
+    // All thumbnails share the same URL — one bubble: image on top, full list below
+    // (same model as a single item: image + content together in one message).
     const sharedUrl = withThumb[0];
     const listText = [headingText, ...items.map(itemLineFn)].join('\n');
     return [
-      { text: '', thumbnail: sharedUrl },
-      { text: listText, thumbnail: null },
+      { text: listText, thumbnail: sharedUrl },
     ];
   }
 
