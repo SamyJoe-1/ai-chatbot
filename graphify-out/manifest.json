@@ -1,0 +1,307 @@
+{
+  "C:\\Users\\pc\\ai-chatbot\\.claude\\settings.local.json": {
+    "mtime": 1780985591.776068,
+    "ast_hash": "794caac9656e82afeee7bdf9776f32df",
+    "semantic_hash": "794caac9656e82afeee7bdf9776f32df"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\dashboard\\js\\app-core.js": {
+    "mtime": 1780751797.20232,
+    "ast_hash": "57e14522b85c77dac014ba5821cc02ff",
+    "semantic_hash": "57e14522b85c77dac014ba5821cc02ff"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\dashboard\\js\\app.js": {
+    "mtime": 1780486657.2469182,
+    "ast_hash": "f614941a15438247b9e6b5a478324df8",
+    "semantic_hash": "f614941a15438247b9e6b5a478324df8"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\drive\\sample-cafe\\brand-profile.json": {
+    "mtime": 1777890483.3630965,
+    "ast_hash": "077efc249ed1b1e97068a85e58f20a04",
+    "semantic_hash": "077efc249ed1b1e97068a85e58f20a04"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\drive\\sample-real-estate-pyramids\\business-profile.json": {
+    "mtime": 1778479005.724427,
+    "ast_hash": "2c9b1f95a3a5321015709f4123b0e9c4",
+    "semantic_hash": "2c9b1f95a3a5321015709f4123b0e9c4"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\package.json": {
+    "mtime": 1778413264.3037655,
+    "ast_hash": "bd66e3cd6ebe9863bf577c6c78b6070b",
+    "semantic_hash": "bd66e3cd6ebe9863bf577c6c78b6070b"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\portal\\js\\app.js": {
+    "mtime": 1780486657.3707712,
+    "ast_hash": "0cfc50f12d89e3d6eb26acebcb3307f6",
+    "semantic_hash": "0cfc50f12d89e3d6eb26acebcb3307f6"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\scripts\\build-sample-menu-xlsx.mjs": {
+    "mtime": 1777985567.8763824,
+    "ast_hash": "68657d1aa46c83bbf27fbfbbc7a7d22f",
+    "semantic_hash": "68657d1aa46c83bbf27fbfbbc7a7d22f"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\server.js": {
+    "mtime": 1779267965.4519577,
+    "ast_hash": "1469133352b63bbd98b6244bd59462bd",
+    "semantic_hash": "1469133352b63bbd98b6244bd59462bd"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\brains\\cafe.js": {
+    "mtime": 1780842019.8103538,
+    "ast_hash": "f608e3a509e39241de6d1eb765f4ef5e",
+    "semantic_hash": "f608e3a509e39241de6d1eb765f4ef5e"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\brains\\clinic.js": {
+    "mtime": 1780840033.7747416,
+    "ast_hash": "9e458931f8ef5e987caed683fdafecec",
+    "semantic_hash": "9e458931f8ef5e987caed683fdafecec"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\brains\\ecommerce.js": {
+    "mtime": 1780899165.7933133,
+    "ast_hash": "df02cdd5e0e0addb3b72915ee4842d25",
+    "semantic_hash": "df02cdd5e0e0addb3b72915ee4842d25"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\brains\\index.js": {
+    "mtime": 1779346738.0367641,
+    "ast_hash": "c277ea639d9b22394fd896185f268c9b",
+    "semantic_hash": "c277ea639d9b22394fd896185f268c9b"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\brains\\realEstate.js": {
+    "mtime": 1780839975.2987876,
+    "ast_hash": "f486178bba77579066ad41eb5f00e9d8",
+    "semantic_hash": "f486178bba77579066ad41eb5f00e9d8"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\brains\\shared\\catalogStore.js": {
+    "mtime": 1778412323.3043406,
+    "ast_hash": "7313c4f4db132815afa30a75b1cb5f1a",
+    "semantic_hash": "7313c4f4db132815afa30a75b1cb5f1a"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\brains\\shared\\commonResponses.js": {
+    "mtime": 1778761595.2820022,
+    "ast_hash": "de21d882a73405dd1c6d401661377cbb",
+    "semantic_hash": "de21d882a73405dd1c6d401661377cbb"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\brains\\shared\\matcher.js": {
+    "mtime": 1779282234.9336658,
+    "ast_hash": "99e9c927567599c46ab27da29b83c44d",
+    "semantic_hash": "99e9c927567599c46ab27da29b83c44d"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\brains\\shared\\thumbnailMessages.js": {
+    "mtime": 1780899401.5880847,
+    "ast_hash": "e01a81d75d957ebe8d399b2c0bf3a6d0",
+    "semantic_hash": "e01a81d75d957ebe8d399b2c0bf3a6d0"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\db\\db.js": {
+    "mtime": 1780732557.5589335,
+    "ast_hash": "c3cde1f97c0f6bbcc19960ec6d62347e",
+    "semantic_hash": "c3cde1f97c0f6bbcc19960ec6d62347e"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\db\\schema.sql": {
+    "mtime": 1780732551.066589,
+    "ast_hash": "0a6d655d5a9e4b6ff59d2b9f2161d685",
+    "semantic_hash": "0a6d655d5a9e4b6ff59d2b9f2161d685"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\aiPipelines.js": {
+    "mtime": 1780840055.3444488,
+    "ast_hash": "af16211a2c7ed3aa1eb26e9abfec4d2e",
+    "semantic_hash": "af16211a2c7ed3aa1eb26e9abfec4d2e"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\aiRateLimiter.js": {
+    "mtime": 1780731170.5285294,
+    "ast_hash": "4059d06384016b94986057e24a439d3f",
+    "semantic_hash": "4059d06384016b94986057e24a439d3f"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\aiRouting.js": {
+    "mtime": 1780838194.64564,
+    "ast_hash": "673044f6750804373a0d9e4a10dc3b54",
+    "semantic_hash": "673044f6750804373a0d9e4a10dc3b54"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\detector.js": {
+    "mtime": 1778483273.1259086,
+    "ast_hash": "9803fe4eed50c9bedde9deec5f2cad68",
+    "semantic_hash": "9803fe4eed50c9bedde9deec5f2cad68"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\faqMatcher.js": {
+    "mtime": 1780749829.5439968,
+    "ast_hash": "f22f83ad434a5809f201479315a5d60d",
+    "semantic_hash": "f22f83ad434a5809f201479315a5d60d"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\franco.js": {
+    "mtime": 1780740732.4961953,
+    "ast_hash": "756ef14827059c39661d9375632e7323",
+    "semantic_hash": "756ef14827059c39661d9375632e7323"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\intent.js": {
+    "mtime": 1778652146.0416834,
+    "ast_hash": "13c676133429a819e397c7d0b30a8a41",
+    "semantic_hash": "13c676133429a819e397c7d0b30a8a41"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\orderFlow.js": {
+    "mtime": 1779346809.1059923,
+    "ast_hash": "a46e96e9ce2ea8c0166d9e62b9edf824",
+    "semantic_hash": "a46e96e9ce2ea8c0166d9e62b9edf824"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\patterns.js": {
+    "mtime": 1778755257.032309,
+    "ast_hash": "f6722bb07eee6ee8b3781b1145a3ac8c",
+    "semantic_hash": "f6722bb07eee6ee8b3781b1145a3ac8c"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\phoneValidator.js": {
+    "mtime": 1779260052.2308195,
+    "ast_hash": "20faa4650476063b90eb95035914405a",
+    "semantic_hash": "20faa4650476063b90eb95035914405a"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\queryRecovery.js": {
+    "mtime": 1778653654.665161,
+    "ast_hash": "217894130a6f88ab8cfa1311c3d5db8a",
+    "semantic_hash": "217894130a6f88ab8cfa1311c3d5db8a"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\responder.js": {
+    "mtime": 1778652192.686948,
+    "ast_hash": "42371d233ed28c2b44386efbd4ed8c3e",
+    "semantic_hash": "42371d233ed28c2b44386efbd4ed8c3e"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\sessionLifecycle.js": {
+    "mtime": 1779351273.57728,
+    "ast_hash": "86842e0fc382b26f1a792ef452905cf3",
+    "semantic_hash": "86842e0fc382b26f1a792ef452905cf3"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\engine\\translation.js": {
+    "mtime": 1779280241.649969,
+    "ast_hash": "ed8bfe122b322e8352e525d1d00e9257",
+    "semantic_hash": "ed8bfe122b322e8352e525d1d00e9257"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\middleware\\auth.js": {
+    "mtime": 1778769975.8850043,
+    "ast_hash": "86ace886968ae2ba1b261970ddd2e352",
+    "semantic_hash": "86ace886968ae2ba1b261970ddd2e352"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\middleware\\tokenValidator.js": {
+    "mtime": 1778412649.221493,
+    "ast_hash": "aa864814539173b2f49219eb106b3922",
+    "semantic_hash": "aa864814539173b2f49219eb106b3922"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\routes\\api\\init.js": {
+    "mtime": 1780750760.9780788,
+    "ast_hash": "b7829146b9eade331a8b2855606bc96c",
+    "semantic_hash": "b7829146b9eade331a8b2855606bc96c"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\routes\\api\\message.js": {
+    "mtime": 1780838212.5905554,
+    "ast_hash": "73470293628007d67571d8fa34d73287",
+    "semantic_hash": "73470293628007d67571d8fa34d73287"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\routes\\api\\search.js": {
+    "mtime": 1779267960.2232306,
+    "ast_hash": "e93ddcf3713d00f1bd71e2d5c452ba74",
+    "semantic_hash": "e93ddcf3713d00f1bd71e2d5c452ba74"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\routes\\api\\sync.js": {
+    "mtime": 1779350753.4345803,
+    "ast_hash": "bb1a528d78c4c1601c687a51504736e1",
+    "semantic_hash": "bb1a528d78c4c1601c687a51504736e1"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\routes\\dashboard\\auth.js": {
+    "mtime": 1778413255.759524,
+    "ast_hash": "334684226829fe37c56e6443d3a71bd2",
+    "semantic_hash": "334684226829fe37c56e6443d3a71bd2"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\routes\\dashboard\\businesses.js": {
+    "mtime": 1780732650.821427,
+    "ast_hash": "dafabc4aab50b2196af2ed10770f2f07",
+    "semantic_hash": "dafabc4aab50b2196af2ed10770f2f07"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\routes\\dashboard\\cafes.js": {
+    "mtime": 1778141993.340228,
+    "ast_hash": "303d201af2fd2f13127e86c10ef73b93",
+    "semantic_hash": "303d201af2fd2f13127e86c10ef73b93"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\routes\\dashboard\\catalog.js": {
+    "mtime": 1779350760.83427,
+    "ast_hash": "39cb84624ed7ef2fe118d50374ed5348",
+    "semantic_hash": "39cb84624ed7ef2fe118d50374ed5348"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\routes\\dashboard\\database.js": {
+    "mtime": 1778145751.2943952,
+    "ast_hash": "6058a6137f31d55044b35bcfdc113c06",
+    "semantic_hash": "6058a6137f31d55044b35bcfdc113c06"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\routes\\dashboard\\menu.js": {
+    "mtime": 1777887701.1084301,
+    "ast_hash": "9e8c703003449b32c785ece621ccfe36",
+    "semantic_hash": "9e8c703003449b32c785ece621ccfe36"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\routes\\portal.js": {
+    "mtime": 1780486604.9297602,
+    "ast_hash": "6164f0cc61a726c2cd299d26a1268ae9",
+    "semantic_hash": "6164f0cc61a726c2cd299d26a1268ae9"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\src\\services\\googleSheets.js": {
+    "mtime": 1778412312.9330764,
+    "ast_hash": "be947913c08ea593d6e129335e425169",
+    "semantic_hash": "be947913c08ea593d6e129335e425169"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\widget.js": {
+    "mtime": 1780903537.820185,
+    "ast_hash": "2c32742c05c445271f91175ecf536bd7",
+    "semantic_hash": "2c32742c05c445271f91175ecf536bd7"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\CGC_REPORT.md": {
+    "mtime": 1779257135.496696,
+    "ast_hash": "aff9dafcf981866087adcb1dad5b15be",
+    "semantic_hash": "aff9dafcf981866087adcb1dad5b15be"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\PROJECT_MAP.md": {
+    "mtime": 1779258972.7636776,
+    "ast_hash": "433fbcb5d41460299d5e65774cc0c4ae",
+    "semantic_hash": "433fbcb5d41460299d5e65774cc0c4ae"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\README.md": {
+    "mtime": 1777984321.8420362,
+    "ast_hash": "467a02c802dff874fa2544891a961a17",
+    "semantic_hash": "467a02c802dff874fa2544891a961a17"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\SCORING_SYSTEM.md": {
+    "mtime": 1780480082.6005564,
+    "ast_hash": "3b3a7b333635a56b3b87e2b656959f16",
+    "semantic_hash": "3b3a7b333635a56b3b87e2b656959f16"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\dashboard\\index.html": {
+    "mtime": 1780751002.854503,
+    "ast_hash": "bb7b7a002fc6c44bab4e684f77a17045",
+    "semantic_hash": "bb7b7a002fc6c44bab4e684f77a17045"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\dashboard\\test-widget.html": {
+    "mtime": 1779197280.5634046,
+    "ast_hash": "cb99d3d4a9ff59c809ee07b9229c4f66",
+    "semantic_hash": "cb99d3d4a9ff59c809ee07b9229c4f66"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\drive\\README.md": {
+    "mtime": 1777985634.4899564,
+    "ast_hash": "13f53e935acffdcaa8b255b8ab2accf1",
+    "semantic_hash": "13f53e935acffdcaa8b255b8ab2accf1"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\drive\\sample-cafe\\menu-public-link.txt": {
+    "mtime": 1777890483.4367168,
+    "ast_hash": "03eb05d100ad2cf590f4ab783a7d3fc1",
+    "semantic_hash": "03eb05d100ad2cf590f4ab783a7d3fc1"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\drive\\sample-cafe\\notes-for-owner.md": {
+    "mtime": 1777985639.4174335,
+    "ast_hash": "d5a49e5763e6c38ee810e5eedeb37c42",
+    "semantic_hash": "d5a49e5763e6c38ee810e5eedeb37c42"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\drive\\sample-real-estate-pyramids\\notes-for-owner.md": {
+    "mtime": 1778479005.7254252,
+    "ast_hash": "5e04ec1c961969728c490c8c145a9af0",
+    "semantic_hash": "5e04ec1c961969728c490c8c145a9af0"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\implementation_plan_ecommerce.md": {
+    "mtime": 1779350282.5377011,
+    "ast_hash": "7835e39bbccd98462ba97ffdb9da7f7a",
+    "semantic_hash": "7835e39bbccd98462ba97ffdb9da7f7a"
+  },
+  "C:\\Users\\pc\\ai-chatbot\\portal\\index.html": {
+    "mtime": 1780486622.2131324,
+    "ast_hash": "f39f9846c9ca725ff3a2d33fd304461b",
+    "semantic_hash": "f39f9846c9ca725ff3a2d33fd304461b"
+  }
+}
