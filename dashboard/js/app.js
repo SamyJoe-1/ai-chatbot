@@ -200,8 +200,12 @@ function renderMenu() {
   slice.forEach(item => {
     const row = document.createElement('div');
     row.className = 'menu-row';
+    const thumb = item.metadata && item.metadata.thumbnail;
+    const thumbHtml = thumb
+      ? `<img class="mr-thumb" src="${esc(thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`
+      : '';
     row.innerHTML = `
-      <span class="mr-name">${esc(item.title_en || item.title_ar || 'Untitled')}</span>
+      <span class="mr-name">${thumbHtml}<span class="mr-name-text">${esc(item.title_en || item.title_ar || 'Untitled')}</span></span>
       <span class="mr-cat">${esc(item.category_en || item.category_ar || '-')}</span>
       <span class="mr-price">${item.price != null ? item.price + ' ' + (item.currency || 'EGP') : '-'}</span>
       <span class="mr-actions">

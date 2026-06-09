@@ -220,7 +220,9 @@ img{max-width:100%}
 .menu-row{display:flex;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);transition:background var(--transition);font-size:13px}
 .menu-row:last-child{border-bottom:none}
 .menu-row:hover{background:var(--bg-hover)}
-.mr-name{flex:2;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.mr-name{flex:2;font-weight:600;min-width:0;display:flex;align-items:center;gap:8px}
+.mr-name-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.mr-thumb{width:34px;height:34px;border-radius:6px;object-fit:cover;flex-shrink:0;background:var(--bg-hover);border:1px solid var(--border)}
 .mr-cat{flex:1.5;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .mr-price{flex:.8;color:var(--accent);font-weight:600;min-width:0}
 .mr-actions{width:80px;display:flex;gap:6px;justify-content:flex-end;flex-shrink:0}

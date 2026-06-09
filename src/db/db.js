@@ -70,6 +70,17 @@ function migrateLegacyCafeData() {
     try { rawDb.exec('ALTER TABLE sessions DROP COLUMN cafe_id'); } catch (e) { console.warn('Could not drop cafe_id from sessions:', e.message); }
   }
 
+  // The legacy data copy below (cafes -> businesses, menu_items -> service_items)
+  // must run AT MOST ONCE. It re-inserts legacy rows with their original IDs via
+  // INSERT OR IGNORE; if it runs on every boot it keeps resurrecting stale
+  // thumbnail-less menu rows that a Google-Sheet resync had already replaced,
+  // shadowing the freshly synced items (the matcher dedupes by title and keeps
+  // the lowest/legacy id). Gate it behind PRAGMA user_version so it happens once.
+  const legacyMigrationDone = rawDb.prepare('PRAGMA user_version').get().user_version >= 1;
+  if (legacyMigrationDone) {
+    return;
+  }
+
   if (tableExists('cafes')) {
     const legacyBusinesses = rawDb.prepare('SELECT * FROM cafes').all();
     const insertBusiness = rawDb.prepare(`
@@ -141,6 +152,9 @@ function migrateLegacyCafeData() {
       );
     });
   }
+
+  // Mark the one-time legacy data copy as complete so it never re-runs.
+  rawDb.exec('PRAGMA user_version = 1;');
 }
 
 migrateLegacyCafeData();
@@ -150,6 +164,21 @@ const defaultAdminHash = '$2a$10$kx69ZN/LvamVRScsPjB8aeDPF46oKClKAIsNFOXSw7bk6bS
 rawDb.prepare('UPDATE admins SET password = ? WHERE username = ? AND password = ?')
   .run(defaultAdminHash, 'admin', legacyAdminHash);
 
+// Fold the write-ahead log back into the main .db file. In WAL mode with
+// synchronous = NORMAL, committed rows live in the -wal sidecar until a
+// checkpoint moves them across. Without this, a freshly synced catalog (and
+// its thumbnails) exists only in the -wal file — if the restart tooling drops
+// or truncates that sidecar, SQLite reverts to the stale main file and the
+// data appears to vanish until the next resync. TRUNCATE also keeps the -wal
+// from growing without bound.
+function checkpoint() {
+  try {
+    rawDb.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+  } catch (error) {
+    console.warn('[db] wal_checkpoint failed:', error.message);
+  }
+}
+
 const db = {
   exec(sql) {
     return rawDb.exec(sql);
@@ -157,12 +186,16 @@ const db = {
   prepare(sql) {
     return rawDb.prepare(sql);
   },
+  checkpoint,
   transaction(fn) {
     return (...args) => {
       rawDb.exec('BEGIN');
       try {
         const result = fn(...args);
         rawDb.exec('COMMIT');
+        // Make the just-committed write durable in the main db file, not just
+        // the -wal sidecar, so it survives any kind of restart.
+        checkpoint();
         return result;
       } catch (error) {
         try {
@@ -173,5 +206,9 @@ const db = {
     };
   },
 };
+
+// Best-effort final checkpoint when the process is shutting down cleanly, so a
+// graceful stop also leaves the main db file fully up to date.
+process.once('exit', checkpoint);
 
 module.exports = db;
