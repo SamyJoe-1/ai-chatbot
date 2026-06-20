@@ -1055,18 +1055,27 @@
     return message;
   }
 
-  async function typeMessage(text, role, lang, thumbnail) {
+  async function typeMessage(text, role, lang, thumbnail, budgetMs = 2700) {
     state.typingId++;
     const currentId = state.typingId;
     const message = appendMessage('', role, lang, false, thumbnail);
     const textSpan = message.querySelector('span');
 
-    for (let i = 0; i < text.length; i++) {
+    // Cap the whole animation at budgetMs no matter how long the text is. Short
+    // messages keep the one-char-at-a-time feel; long ones reveal several chars
+    // per tick so they still finish on time — the full text is never cut.
+    const TICK_MS = 12;
+    const len = text.length;
+    const maxTicks = Math.max(1, Math.floor(budgetMs / TICK_MS));
+    const step = len <= maxTicks ? 1 : Math.ceil(len / maxTicks);
+
+    for (let i = 0; i < len; i += step) {
       if (currentId !== state.typingId) return;
-      textSpan.textContent += text[i];
+      textSpan.textContent = text.slice(0, i + step);
       refs.messages.scrollTop = refs.messages.scrollHeight;
-      await new Promise((resolve) => setTimeout(resolve, 12));
+      await new Promise((resolve) => setTimeout(resolve, TICK_MS));
     }
+    if (currentId === state.typingId) textSpan.textContent = text;
     if (!state.open) {
       refs.bubble.classList.add('has-unread');
       playNotifySound();
@@ -2095,9 +2104,11 @@
         state.cartSyncPending = false;
       }
 
+      // Brief floor so the typing indicator doesn't flash for instant replies,
+      // but small enough to keep the full response well under ~2s.
       const elapsed = Date.now() - startTime;
-      if (!silent && elapsed < 800) {
-        await new Promise((resolve) => setTimeout(resolve, 800 - elapsed));
+      if (!silent && elapsed < 350) {
+        await new Promise((resolve) => setTimeout(resolve, 350 - elapsed));
       }
 
       state.language = payload.language || state.language;
@@ -2124,10 +2135,13 @@
         // Multi-item reply: render each bubble with its own thumbnail, exactly as
         // the backend split them (shared image once, or one image per item).
         state.isTypingReply = true;
+        // Share the total typing budget across all bubbles so the whole reply
+        // finishes within ~2.7s, not 2.7s per bubble.
+        const perMsgBudget = Math.floor(2700 / payload.response.messages.length);
         for (const msg of payload.response.messages) {
           const thumb = msg.thumbnail || null;
           state.history.push({ role: 'bot', content: msg.text, thumbnail: thumb });
-          await typeMessage(msg.text, 'bot', state.language, thumb);
+          await typeMessage(msg.text, 'bot', state.language, thumb, perMsgBudget);
         }
       } else if (payload.response && payload.response.text) {
         state.history.push({ role: 'bot', content: payload.response.text, thumbnail: payload.response.thumbnail });
