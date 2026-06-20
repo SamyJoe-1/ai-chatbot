@@ -129,7 +129,7 @@ function parseOrderCommand(text) {
   const action = rest.slice(0, colon1);
   const remainder = rest.slice(colon1 + 1);
   
-  if (action === 'sync_cart') {
+  if (action === 'sync_cart' || action === 'add_item') {
     return { action, itemId: null, payload: remainder };
   }
 
@@ -785,6 +785,66 @@ function handleOrderMessage({ text, business, session, context, lang }) {
           ...serializeOrderState({ lang, stage: 'add_item', order, items, context: updatedContext, business }),
         },
         intent: 'order_add_more',
+      };
+    }
+  }
+
+  // Atomic Add Item: unlock + match + add in a single request, regardless of the
+  // current stage (review or add_item). The widget uses this for instant "tap to
+  // add" so it doesn't need the two-request add_more -> title handshake. Returns
+  // no bot text (skipBotMessage) so adding an item stays silent.
+  if (orderCommand && orderCommand.action === 'add_item') {
+    if (!order) {
+      order = getLatestActiveOrderByPhone.get(business.id, session.guest_phone);
+    }
+    if (order) {
+      const itemTitle = String(orderCommand.payload || '').trim();
+      const matchedItems = itemTitle
+        ? matchItemsForOrder({ text: itemTitle, lang, businessId: business.id, context: normalizedContext })
+        : [];
+
+      if (!matchedItems.length) {
+        const currentItems = getOrderItems(order.id);
+        const stage = currentItems.length ? 'review' : 'add_item';
+        const updatedContext = setOrderContext(normalizedContext, { order_id: order.id, stage });
+        return {
+          phase: currentItems.length ? 'order_review' : 'order_add_item',
+          context: updatedContext,
+          response: {
+            text: '',
+            type: 'text',
+            buttons: [],
+            ...serializeOrderState({ lang, stage, order: getOrderById.get(order.id), items: currentItems, context: updatedContext, business }),
+          },
+          intent: 'order_item_not_found',
+          skipUserMessage: true,
+          skipBotMessage: true,
+        };
+      }
+
+      if (order.status === 'pending') {
+        updateOrderStatus.run('draft', order.id);
+      }
+      const bestMatch = matchedItems[0];
+      addItemsToOrder(order.id, [bestMatch]);
+
+      const nextItems = getOrderItems(order.id);
+      const updatedContext = setOrderContext(
+        mergeRecentItemsIntoContext(normalizedContext, [bestMatch]),
+        { order_id: order.id, stage: 'review' }
+      );
+      return {
+        phase: 'order_review',
+        context: updatedContext,
+        response: {
+          text: '',
+          type: 'text',
+          buttons: [],
+          ...serializeOrderState({ lang, stage: 'review', order: getOrderById.get(order.id), items: nextItems, context: updatedContext, business }),
+        },
+        intent: 'order_item_added',
+        skipUserMessage: true,
+        skipBotMessage: true,
       };
     }
   }

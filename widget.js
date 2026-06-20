@@ -53,12 +53,29 @@
   let refs;
   let cartSyncTimer = null;
 
+  // Serialize cart mutations as WHOLE operations. Adding an item is a two-request
+  // handshake (add_more -> title, because the server rejects bare titles while in
+  // the review phase). If taps overlap, those requests interleave on the shared
+  // server session — add_more/add_more/title/title — and the second title lands
+  // in the wrong phase, so the wrong item (or no item) is added. Queuing each
+  // tap's full handshake as one unit guarantees a tap completes before the next
+  // one starts. Cart sync goes through the same queue so it can't slip between a
+  // handshake's two requests either.
+  let cartOpQueue = Promise.resolve();
+  function enqueueCartOp(op) {
+    const task = cartOpQueue.catch(() => {}).then(op);
+    cartOpQueue = task.catch(() => {});
+    return task;
+  }
+
   function scheduleCartSync(orderDraft) {
     if (cartSyncTimer) clearTimeout(cartSyncTimer);
-    cartSyncTimer = setTimeout(async () => {
-      if (!orderDraft || !orderDraft.items) return;
-      const items = orderDraft.items.map(i => ({ id: i.order_item_id, qty: i.quantity }));
-      await sendMessage({ value: `__order__:sync_cart:${JSON.stringify(items)}`, silent: true });
+    cartSyncTimer = setTimeout(() => {
+      enqueueCartOp(async () => {
+        if (!orderDraft || !orderDraft.items) return;
+        const items = orderDraft.items.map(i => ({ id: i.order_item_id, qty: i.quantity }));
+        await sendMessage({ value: `__order__:sync_cart:${JSON.stringify(items)}`, silent: true });
+      });
     }, 800);
   }
 
@@ -1254,16 +1271,50 @@
     if (existing) existing.remove();
   }
 
-  async function addCatalogItem(title) {
-    if (state.uiState.order_draft && state.uiState.order_draft.status !== 'draft') {
-      return;
+  function addCatalogItem(title) {
+    const draft = state.uiState.order_draft;
+    // An order that's already been placed (not a draft) is locked — ignore taps.
+    if (draft && draft.status !== 'draft') {
+      return Promise.resolve();
     }
-    
-    if (state.uiState.order_draft && state.uiState.order_draft.items.length > 0) {
-      await sendMessage({ value: '__order__:add_more', silent: true });
+
+    const items = draft && Array.isArray(draft.items) ? draft.items : null;
+
+    // Case 1: the item is already confirmed in the cart -> this is just a +1.
+    // Bump the quantity locally and re-render NOW, then sync in the background,
+    // exactly like the +/- buttons. No server handshake, so it feels instant.
+    const confirmed = items && items.find((i) => i.title === title && !i._optimistic);
+    if (confirmed) {
+      state.cartSyncPending = true;
+      state.lastCartEditTime = Date.now();
+      confirmed.quantity++;
+      updateDashboardUi();
+      scheduleCartSync(draft);
+      return Promise.resolve();
     }
-    
-    await sendMessage({ value: title, silent: true });
+
+    // Case 2: a brand-new item. Show it immediately as an optimistic row so the
+    // UI reacts on the tap, then create it on the server with a single atomic
+    // add_item request. The server response (real item, same title) seamlessly
+    // replaces the optimistic placeholder.
+    if (items) {
+      const pending = items.find((i) => i.title === title && i._optimistic);
+      if (pending) {
+        pending.quantity++;
+      } else {
+        items.push({ order_item_id: `temp-${Date.now()}`, title, quantity: 1, _optimistic: true });
+      }
+      updateDashboardUi();
+    }
+
+    // Queue the request so concurrent taps reconcile in order. One round-trip
+    // each now (vs the old add_more -> title two-request handshake).
+    return enqueueCartOp(async () => {
+      if (state.uiState.order_draft && state.uiState.order_draft.status !== 'draft') {
+        return;
+      }
+      await sendMessage({ value: `__order__:add_item:${title}`, silent: true });
+    });
   }
 
   function updateDashboardUi() {
@@ -2085,12 +2136,18 @@
       }
     } catch (_error) {
       removeTyping();
-      const fallback = state.language === 'ar'
-        ? `حدث خطأ ما. تواصل معنا على ${state.cafe && state.cafe.phone ? state.cafe.phone : 'رقم الهاتف'}.`
-        : `Something went wrong. Contact us at ${state.cafe && state.cafe.phone ? state.cafe.phone : 'our phone number'}.`;
-      appendMessage(fallback, 'bot', state.language);
-      state.history.push({ role: 'bot', content: fallback });
-      applyUiState(emptyUiState());
+      // A silent request is a background sync/add (cart sync, item add). If it
+      // fails we must NOT show the scary fallback or wipe the order container —
+      // that's what was kicking users out of the dashboard on rapid taps. Leave
+      // the current UI intact; the next user-driven request will re-sync state.
+      if (!silent) {
+        const fallback = state.language === 'ar'
+          ? `حدث خطأ ما. تواصل معنا على ${state.cafe && state.cafe.phone ? state.cafe.phone : 'رقم الهاتف'}.`
+          : `Something went wrong. Contact us at ${state.cafe && state.cafe.phone ? state.cafe.phone : 'our phone number'}.`;
+        appendMessage(fallback, 'bot', state.language);
+        state.history.push({ role: 'bot', content: fallback });
+        applyUiState(emptyUiState());
+      }
     } finally {
       state.isSending = false;
       state.isTypingReply = false;
