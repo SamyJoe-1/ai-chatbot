@@ -24,7 +24,6 @@ const { recoverFranco } = require('../../engine/franco');
 const {
   assessAiRoutingNeed,
   callAiClassifier,
-  callAiAnswer,
   recordAiCall,
   isAiEnabledForBusiness,
   parseAiPipeline,
@@ -53,6 +52,18 @@ const insertMessage = {
     return insertMessageStmt.run(sessionId, role, content, intent, thumbnail, aiScore);
   }
 };
+
+// Last few turns so the AI can resolve follow-up references ("what is the
+// ingredients" -> the item from the previous result). Call BEFORE inserting the
+// current message so it isn't included. 4 rows = ~2 exchanges; content trimmed
+// to keep the added tokens small.
+const getRecentMessagesStmt = db.prepare('SELECT role, content FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 4');
+function buildAiHistory(sessionId) {
+  const rows = getRecentMessagesStmt.all(sessionId).reverse();
+  return rows
+    .map((m) => `${m.role === 'user' ? 'Customer' : 'Assistant'}: ${String(m.content || '').slice(0, 200)}`)
+    .join('\n');
+}
 
 function parseContext(value) {
   try {
@@ -188,8 +199,12 @@ router.post('/', tokenValidator, async (req, res) => {
     }
 
     const context = parseContext(session.context);
-    const aiAssessment = assessAiRoutingNeed({ text, lang, business });
     const internalOrderCommand = isInternalOrderCommand(text);
+    // Capture prior turns before the current message is stored. Built first so
+    // the gate can route context-only follow-ups ("what's the ingredient?") to
+    // AI — they name no item, so without context they would score 0.
+    const aiHistory = buildAiHistory(session.id);
+    const aiAssessment = assessAiRoutingNeed({ text, lang, business, hasContext: Boolean(aiHistory) });
     if (!internalOrderCommand) {
       insertMessage.run(session.id, 'user', text, null, null, aiAssessment.score);
     }
@@ -216,7 +231,7 @@ router.post('/', tokenValidator, async (req, res) => {
       }
       recordAiUse({ businessId: business.id, ip: clientIp, deviceId });
 
-      const aiResult = await callAiClassifier({ text, business, session });
+      const aiResult = await callAiClassifier({ text, business, session, history: aiHistory });
       if (!aiResult.ok) {
         aiUnavailable = true;
         console.warn('[ai-routing] classifier failed', { reason, error: aiResult.error, elapsed_ms: aiResult.elapsed_ms });
@@ -250,35 +265,30 @@ router.post('/', tokenValidator, async (req, res) => {
         };
       }
 
-      // Greetings stay templated; everything content-related (search, category,
-      // filter, exclude, details, not-found) goes to answer mode so the AI reads
-      // the menu and replies with what the customer actually asked for — handling
-      // typos, meaning, and include-vs-exclude that the keyword pipeline gets wrong.
-      if (pipeline.code !== 1) {
-        // Narrow the menu we send to answer mode whenever the classifier gave us
-        // an item/category term — huge token saving. Skip exclude([5])/not-found([9])
-        // where the term isn't a thing to keep. Falls back to lean catalog if the
-        // hint matches nothing.
-        const f = pipeline.fields || {};
-        let categoryHint = '';
-        if (pipeline.code === 4) categoryHint = f.category || f.item || '';
-        else if (pipeline.code === 2 || pipeline.code === 3 || pipeline.code === 7) categoryHint = pipeline.item || '';
-        else if (pipeline.code === 8) categoryHint = pipeline.itemForDetail || '';
-        const answer = await callAiAnswer({ text, business, session, lang, categoryHint });
-        if (answer.ok) {
-          recordAiCall({ businessId: business.id, sessionId: session.id, message: text, mode: 'answer', result: answer });
-        }
-        if (answer.ok && answer.text) {
-          return {
-            handled: true,
-            intent: 'ai_answer',
-            payload: { text: answer.text, type: 'text', buttons: [], suggestions: [], context_update: {} },
-            raw: aiResult.raw,
-          };
-        }
-        console.warn('[ai-routing] answer mode failed, falling back to keyword pipeline', { error: answer.error });
+      // [11] direct answer: the classifier already wrote the reply inline as a
+      // last resort (an in-scope question none of [1]-[9] could express, e.g.
+      // "does this item have butter?"). Show it verbatim — no second AI call.
+      if (pipeline.code === 11) {
+        const direct = (pipeline.direct || '').trim();
+        if (!direct) return { handled: false, raw: aiResult.raw };
+        return {
+          handled: true,
+          intent: 'ai_answer',
+          payload: {
+            text: direct,
+            type: 'text',
+            buttons: [],
+            suggestions: parseSuggestions(business, lang),
+            context_update: {},
+          },
+          raw: aiResult.raw,
+        };
       }
 
+      // Everything else (search/category/filter/exclude/details/not-found, and
+      // greeting) is resolved LOCALLY: the classifier returned a structured
+      // query, we run it against our own catalog and format the reply. The menu
+      // is NEVER sent to the AI — only the tiny classify call costs tokens.
       const resolved = resolveAiPipeline({ pipeline, brain, business, lang, context });
       if (!resolved || !resolved.payload) {
         return { handled: false, invalid: true, raw: aiResult.raw };

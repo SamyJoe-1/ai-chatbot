@@ -603,6 +603,19 @@
         color: #78716c;
         margin-bottom: 6px;
       }
+      .cb-dash-cart-list {
+        max-height: 240px;
+        overflow-y: auto;
+        margin: 0 -4px;
+        padding: 0 4px;
+      }
+      .cb-dash-cart-list::-webkit-scrollbar {
+        width: 4px;
+      }
+      .cb-dash-cart-list::-webkit-scrollbar-thumb {
+        background: rgba(0,0,0,0.1);
+        border-radius: 2px;
+      }
       .cb-dash-item-row {
         display: flex;
         align-items: center;

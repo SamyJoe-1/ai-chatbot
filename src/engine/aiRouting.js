@@ -105,6 +105,8 @@ const W = {
   greeting_compound: 1,  // greeting glued to a real request
   category_and_item: 2,  // both a category AND an item named together
   composition: 3,        // "does X contain Y" / "meat in pizza" ingredient query
+  item_question: 2,      // "does/is/can ... <item> ...?" that isn't "do you have X"
+  followup_context: 4,   // "what's the ingredient?" / "is it spicy?" — refers to a prior item
   modifier_cap: 3,
   long_message: 2,       // > LONG_WORDS words
   medium_message: 1,     // > MEDIUM_WORDS words
@@ -197,6 +199,23 @@ const FILTRATION_TERMS = [
 ];
 const MODIFIER_TERMS = ['but', 'and also', 'with extra', 'instead of', 'as well', 'plus', 'add', 'extra', 'w kaman', 'w bdoun', 'zeyada'];
 const OPEN_QUESTION_TERMS = ['why', 'how come', 'what would you', 'what should i', 'is it worth', 'suitable for', 'good for', 'tell me about', 'which one'];
+
+// Interrogative openers (yes/no questions). When asked ABOUT a catalog item
+// ("does the pizza have cheese", "is the latte sweet") these usually need AI to
+// reason — the keyword pipeline can only match/list, not judge contents/quality.
+const QUESTION_AUX_RE = /^(?:do|does|did|is|are|was|were|can|could|would|will|should|may|might|has|have)\b/i;
+const QUESTION_AR_RE = /(?:^|\s)هل\s/; // Arabic yes/no particle "hal"
+// Plain existence / availability — "do you have X", "is there X", "available".
+// The keyword pipeline answers these fine, so they must NOT trigger the AI
+// question boost even though they start with an interrogative.
+const EXISTENCE_RE = /\b(?:do|does|did|are|is)\s+(?:you|u|ya|yall|we|they|guys)\b|\b(?:is|are)\s+there\b|\b(?:available|in\s+stock)\b|\bdo\s+you\s+(?:have|sell|offer|serve|carry|got|make)\b/i;
+
+// Context-dependent follow-ups: a property/inquiry that names NO item of its own
+// ("what's the ingredient?", "is it spicy?", "and the price?"). Only resolvable
+// against the previous turn, so the gate routes them to AI when history exists.
+const FOLLOWUP_PROP_RE = /\b(ingredient|ingredients|contain|contains|recipe|made|topping|toppings|price|cost|calorie|calories|size|spicy|vegan|vegetarian|halal|gluten|detail|details)\b/i;
+const ANAPHOR_RE = /\b(this|that|it|its|them|these|those|same)\b/i;
+const ANAPHOR_AR_RE = /(ده|دى|دي|دا|هذا|هذه|نفس|فيها|فيه|مكونات|سعر)/;
 const ORDER_INTENT_RE = {
   en: /(^|[^a-z])(order|place order|make order|i want to order|i wanna order|can i order|delivery order|take my order|checkout|add to cart)([^a-z]|$)/i,
   ar: /(\u0627\u0637\u0644\u0628|\u0623\u0637\u0644\u0628|\u0639\u0627\u064a\u0632 \u0627\u0637\u0644\u0628|\u0639\u0627\u0648\u0632 \u0627\u0637\u0644\u0628|\u062d\u0627\u0628\u0628 \u0627\u0637\u0644\u0628|\u0628\u062f\u064a \u0627\u0637\u0644\u0628|\u0623\u0648\u0631\u062f\u0631|\u0627\u0648\u0631\u062f\u0631)/,
@@ -213,7 +232,7 @@ const ORDER_INTENT_RE = {
 //      "do YOU have <item>" (existence). The (?!you|we|they|i) guard splits them.
 //   3. "<word> in/on <item>"  ("meat in pizza"), skipping time/place fillers.
 const CONTAINMENT_CUES_RE = /\b(inside|within|into|contains?|contained|containing|includes?|included|including|ingredients?|made\s+(?:of|with|from)|topped\s+with|stuffed\s+with|filled\s+with|served\s+with|loaded\s+with|comes?\s+with)\b/i;
-const ITEM_HAS_RE = /\b(?:do|does|did|is|are|was|were|can|could|will|would|has|have)\s+(?:the\s+|this\s+|that\s+|these\s+|those\s+|a\s+|an\s+|your\s+|their\s+|its\s+)?(?!you\b|u\b|we\b|they\b|i\b|ya\b|guys\b)([a-z\u0600-\u06ff]{2,})\s+(?:have|has|had|got|hold|holds|contain|contains|containing|include|includes|come|comes)\b/i;
+const ITEM_HAS_RE = /\b(?:do|does|did|is|are|was|were|can|could|will|would|has|have)\s+(?:the\s+|this\s+|that\s+|these\s+|those\s+|a\s+|an\s+|your\s+|their\s+|its\s+)?(?!you\b|u\b|we\b|they\b|i\b|ya\b|guys\b)([a-z\u0600-\u06ff]{2,})\s+(?:(?:mainly|really|actually|usually|normally|typically|generally|even|only|just|also|always|still|truly|honestly)\s+)?(?:have|has|had|got|hold|holds|contain|contains|containing|include|includes|come|comes)\b/i;
 const PREP_BETWEEN_RE = /\b[a-z\u0600-\u06ff]{2,}\s+(?:in|on)\s+(?:the\s+|a\s+|an\s+|my\s+|your\s+)?(?!morning|afternoon|evening|night|advance|stock|future|area|branch|store|shop|town|city|street|menu)[a-z\u0600-\u06ff]{2,}\b/i;
 
 function looksLikeCompositionQuery(text) {
@@ -368,7 +387,7 @@ function collectKnownTokens({ serviceType, businessId, lang }) {
   return known;
 }
 
-function assessAiRoutingNeed({ text, lang, business }) {
+function assessAiRoutingNeed({ text, lang, business, hasContext = false }) {
   const serviceType = String(business.service_type || 'cafe');
   const compactText = scoringNormalize(text, lang).trim();
   const messageTokens = tokenize(compactText);
@@ -456,6 +475,36 @@ function assessAiRoutingNeed({ text, lang, business }) {
     reasons.push('open_question');
   }
 
+  // Tricky interrogatives — "does/do/did/is/are/can ... <item> ...?" — almost
+  // always need AI to reason. We DON'T fire for a plain "do you have pizza"
+  // existence check (the keyword pipeline handles that), and only when a real
+  // catalog item/category is named so it can't fire cross-domain. Length is a
+  // secondary tie-breaker: a fuller question is a stronger AI signal than a
+  // three-word "is pizza spicy".
+  const isQuestion = QUESTION_AUX_RE.test(compactText) || QUESTION_AR_RE.test(String(text || ''));
+  const isExistence = EXISTENCE_RE.test(compactText);
+  if (isQuestion && !isExistence && !orderIntent && hasCatalogMention) {
+    score += W.item_question;
+    reasons.push('item_question');
+    if (messageTokens.length >= 4) {
+      score += 1;
+      reasons.push('item_question_detailed');
+    }
+  }
+
+  // Context-dependent follow-up: an inquiry that names NO item of its own but
+  // refers to a prior one ("what's the ingredient?", "is it spicy?"). Routes to
+  // AI only when we have recent history to resolve the reference — otherwise it
+  // scores 0 and the customer gets nothing useful.
+  if (hasContext && !hasCatalogMention && !orderIntent
+      && (isQuestion
+        || FOLLOWUP_PROP_RE.test(compactText)
+        || ANAPHOR_RE.test(compactText)
+        || ANAPHOR_AR_RE.test(String(text || '')))) {
+    score += W.followup_context;
+    reasons.push('followup_context');
+  }
+
   if (serviceType === 'real_estate') {
     if (/\b(installment|down payment|deposit|payment|roi)\b/i.test(compactText)) score += 1;
     if (/\b(near|close to|beside|around)\b/i.test(compactText)) score += 1;
@@ -509,34 +558,7 @@ function isAiEnabledForBusiness(business) {
   return Number(business.ai_enabled) === 1 && Boolean(getAiApiUrl()) && Boolean(getAiSecret());
 }
 
-function flattenValue(value) {
-  if (Array.isArray(value)) return value;
-  if (value && typeof value === 'object') return JSON.stringify(value);
-  return value;
-}
-
-function buildAiSourceData(businessId) {
-  return getBusinessItems(businessId).map((item) => {
-    const source = {
-      id: item.id,
-      name: item.title_en || item.title_ar,
-      name_ar: item.title_ar || '',
-      category: item.category_en || item.category_ar || '',
-      category_ar: item.category_ar || '',
-      description: item.description_en || item.description_ar || '',
-      description_ar: item.description_ar || '',
-      price: item.price,
-      currency: item.currency,
-      available: Number(item.available) !== 0,
-    };
-    Object.entries(item.metadata || {}).forEach(([key, value]) => {
-      source[key] = flattenValue(value);
-    });
-    return source;
-  });
-}
-
-async function callAiClassifier({ text, business, session }) {
+async function callAiClassifier({ text, business, session, history }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
   const startedAt = Date.now();
@@ -550,6 +572,7 @@ async function callAiClassifier({ text, business, session }) {
       },
       body: JSON.stringify({
         prompt: text,
+        history: history || '',
         service_type: business.service_type || 'cafe',
         customer_name: session.guest_name || '',
         customer_phone: session.guest_phone || '',
@@ -590,11 +613,9 @@ async function callAiClassifier({ text, business, session }) {
   }
 }
 
-// Answer mode: send the menu + message and let the AI write the final reply
-// (understands typos/meaning, includes vs excludes correctly). Returns the
-// full multi-line text, not a classifier code.
 // Tiny schema for the classifier: category names + sortable field keys only.
-// No item rows -> the classify request stays at a few hundred tokens.
+// No item rows -> the classify request stays at a few hundred tokens, and the
+// menu itself is NEVER sent to the AI.
 function buildCatalogSchema(businessId) {
   const items = getBusinessItems(businessId);
   const categories = [...new Set(items.map((i) => i.category_en || i.category_ar).filter(Boolean))];
@@ -603,94 +624,14 @@ function buildCatalogSchema(businessId) {
   return { categories, sortable_fields: [...fields] };
 }
 
-// Lean menu for answer mode. Optionally narrowed to a category (from the
-// classifier) so we send ~a handful of items instead of all 179. Drops
-// size_details/thumbnails and trims descriptions to keep the payload small.
-function buildAiAnswerData(businessId, categoryHint) {
-  let items = getBusinessItems(businessId);
-  if (categoryHint) {
-    const needle = String(categoryHint).toLowerCase().trim();
-    const narrowed = items.filter((i) =>
-      String(i.category_en || '').toLowerCase().includes(needle)
-      || String(i.category_ar || '').toLowerCase().includes(needle)
-      || String(i.title_en || '').toLowerCase().includes(needle)
-      || String(i.title_ar || '').toLowerCase().includes(needle));
-    if (narrowed.length) items = narrowed; // only narrow when it actually matched
-  }
-  return items.map((item) => ({
-    name: item.title_en || item.title_ar,
-    name_ar: item.title_ar || '',
-    category: item.category_en || item.category_ar || '',
-    price: item.price,
-    currency: item.currency,
-    description: String(item.description_en || '').slice(0, 90),
-  }));
-}
-
-async function callAiAnswer({ text, business, session, lang, categoryHint }) {
-  const controller = new AbortController();
-  // Answer mode writes a full reply, so it needs more headroom than the
-  // single-line classifier; default 20s, tunable via AI_ANSWER_TIMEOUT_MS.
-  const timeout = setTimeout(() => controller.abort(), Number(process.env.AI_ANSWER_TIMEOUT_MS || 20000));
-  const startedAt = Date.now();
-
-  try {
-    const response = await fetch(getAiApiUrl(), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${getAiSecret()}`,
-      },
-      body: JSON.stringify({
-        prompt: text,
-        mode: 'answer',
-        language: lang === 'ar' ? 'Arabic' : 'English',
-        service_type: business.service_type || 'cafe',
-        customer_name: session.guest_name || '',
-        customer_phone: session.guest_phone || '',
-        stream: false,
-        ...((process.env.AI_ANSWER_MODEL || process.env.AI_MODEL)
-          ? { model: process.env.AI_ANSWER_MODEL || process.env.AI_MODEL }
-          : {}),
-        temperature: Number(process.env.AI_ANSWER_TEMPERATURE || 0.2),
-        max_tokens: Number(process.env.AI_ANSWER_MAX_TOKENS || 600),
-        source_data: buildAiAnswerData(business.id, categoryHint),
-      }),
-      signal: controller.signal,
-    });
-
-    const elapsed_ms = Date.now() - startedAt;
-    if (!response.ok) {
-      return { ok: false, elapsed_ms, error: `status_${response.status}` };
-    }
-    const data = await response.json();
-    return {
-      ok: true,
-      elapsed_ms,
-      text: String(data.response || '').trim(),
-      from_cache: Boolean(data.from_cache),
-      usage: data.usage || null,
-      model: data.model || null,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      elapsed_ms: Date.now() - startedAt,
-      error: error.name === 'AbortError' ? 'timeout' : error.message,
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 function parseAiPipeline(raw) {
   const line = String(raw || '').trim();
-  let match = line.match(/^\[(\d)\]\s*(.*)$/);
+  let match = line.match(/^\[(\d+)\]\s*(.*)$/);
   if (!match) return { valid: false, raw: line };
 
   const code = Number(match[1]);
   const body = match[2] || '';
-  if (code < 1 || code > 10) return { valid: false, raw: line };
+  if (code < 1 || code > 11) return { valid: false, raw: line };
 
   if (code === 4) {
     const fields = {};
@@ -713,6 +654,9 @@ function parseAiPipeline(raw) {
     8: /^wants to inquire (.+) about (.+)$/,
     9: /^not found$/,
     10: /^faq lookup$/,
+    // [11] is the last-resort direct answer: the classifier writes the reply
+    // inline, so capture the whole body as the message to show verbatim.
+    11: /^(.+)$/,
   };
 
   match = body.match(patterns[code]);
@@ -724,15 +668,14 @@ function parseAiPipeline(raw) {
     item: match[1] || '',
     detail: code === 8 ? match[1] || '' : '',
     itemForDetail: code === 8 ? match[2] || '' : '',
+    direct: code === 11 ? (match[1] || '').trim() : '',
     raw: line,
   };
 }
 
 module.exports = {
   assessAiRoutingNeed,
-  buildAiSourceData,
   callAiClassifier,
-  callAiAnswer,
   recordAiCall,
   isAiEnabledForBusiness,
   parseAiPipeline,
