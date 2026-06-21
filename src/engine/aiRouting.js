@@ -102,7 +102,6 @@ const W = {
   order_intent: 2,
   pipeline_first: 1,
   pipeline_extra_cap: 3,
-  catalog_mention: 4,    // names a real menu item/category -> worth an AI answer
   greeting_compound: 1,  // greeting glued to a real request
   category_and_item: 2,  // both a category AND an item named together
   composition: 3,        // "does X contain Y" / "meat in pizza" ingredient query
@@ -407,14 +406,6 @@ function assessAiRoutingNeed({ text, lang, business }) {
     .filter(([, matchers]) => anyMatch(compactText, matchers))
     .map(([name]) => name);
   if (hasCatalogMention) pipelineHits.push('item_inquiry');
-
-  // Naming a real menu item/category is a strong signal on its own — route it
-  // to the AI so paraphrases ("pizza with something from the sea", Arabic
-  // "بيتزا فيها جمبري") get a real answer instead of a keyword guess.
-  if (hasCatalogMention) {
-    score += W.catalog_mention;
-    reasons.push('catalog_mention');
-  }
 
   if (pipelineHits.length > 0) {
     score += W.pipeline_first;
