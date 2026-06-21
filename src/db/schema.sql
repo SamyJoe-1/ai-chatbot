@@ -118,6 +118,25 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Rich per-call AI log for the "AI Usage" dashboard: one row per real AI call
+-- (classify/answer), with latency, token counts and estimated cost.
+CREATE TABLE IF NOT EXISTS ai_calls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  business_id INTEGER NOT NULL,
+  session_id INTEGER,
+  message TEXT,
+  mode TEXT,                 -- classify | answer
+  model TEXT,
+  duration_ms INTEGER,
+  prompt_tokens INTEGER DEFAULT 0,
+  completion_tokens INTEGER DEFAULT 0,
+  total_tokens INTEGER DEFAULT 0,
+  cost_usd REAL DEFAULT 0,
+  from_cache INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ai_calls_business_time ON ai_calls (business_id, created_at);
+
 CREATE INDEX IF NOT EXISTS idx_orders_business_phone_status ON orders (business_id, guest_phone, status, updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_order_items_unique_service_item ON order_items (order_id, service_item_id);
 CREATE INDEX IF NOT EXISTS idx_ai_usage_lookup ON ai_usage (business_id, scope, identifier, created_at);

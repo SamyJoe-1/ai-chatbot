@@ -2,6 +2,55 @@
 
 const { getBusinessItems } = require('../brains/shared/catalogStore');
 const { normalize, tokenize } = require('./detector');
+const db = require('../db/db');
+
+// USD per 1M tokens [input, output]. Update if OpenAI pricing changes.
+const PRICES = {
+  'gpt-4o-mini': [0.15, 0.60],
+  'gpt-4.1-mini': [0.40, 1.60],
+  'gpt-4.1-nano': [0.10, 0.40],
+  'gpt-5-nano': [0.05, 0.40],
+};
+function priceFor(model) {
+  if (!model) return [0, 0];
+  const key = Object.keys(PRICES).find((k) => String(model).startsWith(k));
+  return key ? PRICES[key] : [0, 0];
+}
+function estimateCost(model, promptTokens, completionTokens) {
+  const [pin, pout] = priceFor(model);
+  return ((promptTokens || 0) * pin + (completionTokens || 0) * pout) / 1000000;
+}
+
+const insertAiCall = db.prepare(`
+  INSERT INTO ai_calls
+    (business_id, session_id, message, mode, model, duration_ms,
+     prompt_tokens, completion_tokens, total_tokens, cost_usd, from_cache)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+// Log one AI call (classify/answer) for the AI Usage dashboard. Non-fatal.
+function recordAiCall({ businessId, sessionId, message, mode, result }) {
+  try {
+    const u = (result && result.usage) || {};
+    const prompt = Number(u.prompt_tokens || 0);
+    const completion = Number(u.completion_tokens || 0);
+    const total = Number(u.total_tokens || prompt + completion);
+    const model = (result && result.model) || null;
+    insertAiCall.run(
+      businessId,
+      sessionId || null,
+      String(message || '').slice(0, 500),
+      mode,
+      model,
+      Number((result && result.elapsed_ms) || 0),
+      prompt,
+      completion,
+      total,
+      estimateCost(model, prompt, completion),
+      result && result.from_cache ? 1 : 0,
+    );
+  } catch { /* non-fatal */ }
+}
 
 const AI_TIMEOUT_MS = Number(process.env.AI_API_TIMEOUT_MS || 10000);
 const STATIC_TEXT = new Set([
@@ -53,6 +102,7 @@ const W = {
   order_intent: 2,
   pipeline_first: 1,
   pipeline_extra_cap: 3,
+  catalog_mention: 4,    // names a real menu item/category -> worth an AI answer
   greeting_compound: 1,  // greeting glued to a real request
   category_and_item: 2,  // both a category AND an item named together
   composition: 3,        // "does X contain Y" / "meat in pizza" ingredient query
@@ -358,6 +408,14 @@ function assessAiRoutingNeed({ text, lang, business }) {
     .map(([name]) => name);
   if (hasCatalogMention) pipelineHits.push('item_inquiry');
 
+  // Naming a real menu item/category is a strong signal on its own — route it
+  // to the AI so paraphrases ("pizza with something from the sea", Arabic
+  // "بيتزا فيها جمبري") get a real answer instead of a keyword guess.
+  if (hasCatalogMention) {
+    score += W.catalog_mention;
+    reasons.push('catalog_mention');
+  }
+
   if (pipelineHits.length > 0) {
     score += W.pipeline_first;
     const extra = Math.min(pipelineHits.length - 1, W.pipeline_extra_cap);
@@ -505,10 +563,14 @@ async function callAiClassifier({ text, business, session }) {
         customer_name: session.guest_name || '',
         customer_phone: session.guest_phone || '',
         stream: false,
-        model: process.env.AI_MODEL || 'llama3',
+        // Only override the model when explicitly set; otherwise let the AI
+        // service pick the default for its active provider (openai/ollama).
+        ...(process.env.AI_MODEL ? { model: process.env.AI_MODEL } : {}),
         temperature: Number(process.env.AI_TEMPERATURE || 0.7),
         max_tokens: Number(process.env.AI_MAX_TOKENS || 200),
-        source_data: buildAiSourceData(business.id),
+        // Classifier only needs the queryable shape, not the rows — keeps the
+        // request tiny (~hundreds of tokens instead of the whole catalog).
+        source_data: buildCatalogSchema(business.id),
       }),
       signal: controller.signal,
     });
@@ -523,6 +585,101 @@ async function callAiClassifier({ text, business, session }) {
       elapsed_ms,
       raw: String(data.response || '').split('\n')[0].trim(),
       from_cache: Boolean(data.from_cache),
+      usage: data.usage || null,
+      model: data.model || null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      elapsed_ms: Date.now() - startedAt,
+      error: error.name === 'AbortError' ? 'timeout' : error.message,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Answer mode: send the menu + message and let the AI write the final reply
+// (understands typos/meaning, includes vs excludes correctly). Returns the
+// full multi-line text, not a classifier code.
+// Tiny schema for the classifier: category names + sortable field keys only.
+// No item rows -> the classify request stays at a few hundred tokens.
+function buildCatalogSchema(businessId) {
+  const items = getBusinessItems(businessId);
+  const categories = [...new Set(items.map((i) => i.category_en || i.category_ar).filter(Boolean))];
+  const fields = new Set(['price']);
+  items.forEach((i) => Object.keys(i.metadata || {}).forEach((k) => fields.add(k)));
+  return { categories, sortable_fields: [...fields] };
+}
+
+// Lean menu for answer mode. Optionally narrowed to a category (from the
+// classifier) so we send ~a handful of items instead of all 179. Drops
+// size_details/thumbnails and trims descriptions to keep the payload small.
+function buildAiAnswerData(businessId, categoryHint) {
+  let items = getBusinessItems(businessId);
+  if (categoryHint) {
+    const needle = String(categoryHint).toLowerCase().trim();
+    const narrowed = items.filter((i) =>
+      String(i.category_en || '').toLowerCase().includes(needle)
+      || String(i.category_ar || '').toLowerCase().includes(needle)
+      || String(i.title_en || '').toLowerCase().includes(needle)
+      || String(i.title_ar || '').toLowerCase().includes(needle));
+    if (narrowed.length) items = narrowed; // only narrow when it actually matched
+  }
+  return items.map((item) => ({
+    name: item.title_en || item.title_ar,
+    name_ar: item.title_ar || '',
+    category: item.category_en || item.category_ar || '',
+    price: item.price,
+    currency: item.currency,
+    description: String(item.description_en || '').slice(0, 90),
+  }));
+}
+
+async function callAiAnswer({ text, business, session, lang, categoryHint }) {
+  const controller = new AbortController();
+  // Answer mode writes a full reply, so it needs more headroom than the
+  // single-line classifier; default 20s, tunable via AI_ANSWER_TIMEOUT_MS.
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.AI_ANSWER_TIMEOUT_MS || 20000));
+  const startedAt = Date.now();
+
+  try {
+    const response = await fetch(getAiApiUrl(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getAiSecret()}`,
+      },
+      body: JSON.stringify({
+        prompt: text,
+        mode: 'answer',
+        language: lang === 'ar' ? 'Arabic' : 'English',
+        service_type: business.service_type || 'cafe',
+        customer_name: session.guest_name || '',
+        customer_phone: session.guest_phone || '',
+        stream: false,
+        ...((process.env.AI_ANSWER_MODEL || process.env.AI_MODEL)
+          ? { model: process.env.AI_ANSWER_MODEL || process.env.AI_MODEL }
+          : {}),
+        temperature: Number(process.env.AI_ANSWER_TEMPERATURE || 0.2),
+        max_tokens: Number(process.env.AI_ANSWER_MAX_TOKENS || 600),
+        source_data: buildAiAnswerData(business.id, categoryHint),
+      }),
+      signal: controller.signal,
+    });
+
+    const elapsed_ms = Date.now() - startedAt;
+    if (!response.ok) {
+      return { ok: false, elapsed_ms, error: `status_${response.status}` };
+    }
+    const data = await response.json();
+    return {
+      ok: true,
+      elapsed_ms,
+      text: String(data.response || '').trim(),
+      from_cache: Boolean(data.from_cache),
+      usage: data.usage || null,
+      model: data.model || null,
     };
   } catch (error) {
     return {
@@ -584,6 +741,8 @@ module.exports = {
   assessAiRoutingNeed,
   buildAiSourceData,
   callAiClassifier,
+  callAiAnswer,
+  recordAiCall,
   isAiEnabledForBusiness,
   parseAiPipeline,
 };

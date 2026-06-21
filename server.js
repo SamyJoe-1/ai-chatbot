@@ -65,6 +65,7 @@ app.use('/dashboard/cafes', require('./src/routes/dashboard/businesses'));
 app.use('/dashboard/catalog', require('./src/routes/dashboard/catalog'));
 app.use('/dashboard/menu', require('./src/routes/dashboard/catalog'));
 app.use('/dashboard/db', require('./src/routes/dashboard/database'));
+app.use('/dashboard/ai-usage', require('./src/routes/dashboard/aiUsage'));
 app.use('/dashboard', express.static(path.join(__dirname, 'dashboard')));
 
 app.get('/portal', (_req, res) => {

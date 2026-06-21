@@ -810,3 +810,69 @@ function renderPagination(container, current, total, onChange) {
   next.addEventListener('click', () => onChange(current + 1));
   container.appendChild(next);
 }
+
+/* ═══════ AI USAGE ═══════ */
+let aiUsageBusinessesLoaded = false;
+
+function fmtDuration(ms) {
+  const n = Number(ms) || 0;
+  return n > 1000 ? (n / 1000).toFixed(2) + 's' : n + 'ms';
+}
+
+async function loadAiUsage() {
+  const dateInput = document.getElementById('ai-usage-date');
+  const bizSelect = document.getElementById('ai-usage-business');
+  if (!dateInput) return;
+  if (!dateInput.value) dateInput.value = new Date().toISOString().slice(0, 10);
+
+  const params = new URLSearchParams();
+  if (dateInput.value) params.set('date', dateInput.value);
+  if (bizSelect && bizSelect.value) params.set('business_id', bizSelect.value);
+
+  let data;
+  try {
+    data = await api('/dashboard/ai-usage?' + params.toString());
+  } catch (e) {
+    toastErr('Failed to load AI usage');
+    return;
+  }
+
+  // Populate the business filter once (preserve current selection).
+  if (bizSelect && !aiUsageBusinessesLoaded && Array.isArray(data.businesses)) {
+    const current = bizSelect.value;
+    bizSelect.innerHTML = '<option value="">All Businesses</option>'
+      + data.businesses.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+    bizSelect.value = current;
+    aiUsageBusinessesLoaded = true;
+  }
+
+  const t = data.totals || {};
+  document.getElementById('ai-stat-tokens').textContent = Number(t.total_tokens || 0).toLocaleString();
+  document.getElementById('ai-stat-cost').textContent = '$' + Number(t.total_cost || 0).toFixed(4);
+  document.getElementById('ai-stat-calls').textContent = Number(t.calls || 0).toLocaleString();
+
+  const tbody = document.getElementById('ai-usage-rows');
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;opacity:.6">No AI calls for this day</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const time = String(r.created_at || '').slice(11, 19) || '—';
+    const cache = r.from_cache ? ' <span style="opacity:.6">(cache)</span>' : '';
+    return `<tr>
+      <td>${time}</td>
+      <td>${esc(r.business_name || ('#' + r.business_id))}</td>
+      <td title="${esc(r.message || '')}">${esc(String(r.message || '').slice(0, 60))}</td>
+      <td>${esc(r.mode || '')}</td>
+      <td>${esc(r.model || '—')}</td>
+      <td>${fmtDuration(r.duration_ms)}</td>
+      <td>${Number(r.total_tokens || 0).toLocaleString()}${cache}</td>
+      <td>$${Number(r.cost_usd || 0).toFixed(5)}</td>
+    </tr>`;
+  }).join('');
+}
+
+document.getElementById('refresh-ai-usage-btn')?.addEventListener('click', loadAiUsage);
+document.getElementById('ai-usage-date')?.addEventListener('change', loadAiUsage);
+document.getElementById('ai-usage-business')?.addEventListener('change', loadAiUsage);

@@ -70,6 +70,9 @@
         <button class="nav-btn" data-page="add-cafe" type="button">
           <i class="fas fa-circle-plus"></i><span>Add Business</span>
         </button>
+        <button class="nav-btn" data-page="ai-usage" type="button">
+          <i class="fas fa-bolt"></i><span>AI Usage</span>
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -127,6 +130,67 @@
             <button class="btn btn-primary" onclick="navigateTo('all-cafes')"><i class="fas fa-store"></i> View Businesses</button>
             <button class="btn btn-outline" onclick="navigateTo('add-cafe')"><i class="fas fa-plus"></i> Add New Business</button>
           </div>
+        </div>
+      </section>
+
+      <!-- ── PAGE: AI USAGE ── -->
+      <section id="page-ai-usage" class="page">
+        <div class="page-header">
+          <h2><i class="fas fa-bolt"></i> AI Usage</h2>
+          <button class="btn btn-outline btn-sm" id="refresh-ai-usage-btn" type="button">
+            <i class="fas fa-arrows-rotate"></i> Refresh
+          </button>
+        </div>
+        <div class="filter-bar">
+          <div class="input-group">
+            <i class="fas fa-calendar-day"></i>
+            <input type="date" id="ai-usage-date">
+          </div>
+          <select id="ai-usage-business" class="filter-select">
+            <option value="">All Businesses</option>
+          </select>
+        </div>
+        <div class="home-stats" id="ai-usage-stats">
+          <div class="stat-card">
+            <div class="stat-icon"><i class="fas fa-coins"></i></div>
+            <div class="stat-info">
+              <div class="stat-number" id="ai-stat-tokens">0</div>
+              <div class="stat-label">Total Tokens</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="fas fa-dollar-sign"></i></div>
+            <div class="stat-info">
+              <div class="stat-number" id="ai-stat-cost">$0.00</div>
+              <div class="stat-label">Estimated Cost</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="fas fa-comment-dots"></i></div>
+            <div class="stat-info">
+              <div class="stat-number" id="ai-stat-calls">0</div>
+              <div class="stat-label">AI Calls</div>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="ai-usage-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Business</th>
+                <th>Message</th>
+                <th>Mode</th>
+                <th>Model</th>
+                <th>Duration</th>
+                <th>Tokens</th>
+                <th>Cost</th>
+              </tr>
+            </thead>
+            <tbody id="ai-usage-rows">
+              <tr><td colspan="8" style="text-align:center;opacity:.6">No data</td></tr>
+            </tbody>
+          </table>
         </div>
       </section>
 

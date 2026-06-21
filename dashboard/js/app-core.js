@@ -94,7 +94,7 @@ function parseHashRoute() {
     };
   }
 
-  if (['home', 'all-cafes', 'add-cafe'].includes(page)) {
+  if (['home', 'all-cafes', 'add-cafe', 'ai-usage'].includes(page)) {
     return { page, cafeId: null };
   }
 
@@ -144,6 +144,7 @@ function navigateTo(page, { updateHash = true, replaceHash = false } = {}) {
   const nb = document.querySelector(`.nav-btn[data-page="${page}"]`);
   if (nb) nb.classList.add('active');
   document.querySelector('.sidebar')?.classList.remove('open');
+  if (page === 'ai-usage' && typeof loadAiUsage === 'function') loadAiUsage();
   if (updateHash) {
     syncHashRoute(page, {
       cafeId: page === 'edit-cafe' ? state.selectedCafe?.id : null,

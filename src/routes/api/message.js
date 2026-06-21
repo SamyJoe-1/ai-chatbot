@@ -24,6 +24,8 @@ const { recoverFranco } = require('../../engine/franco');
 const {
   assessAiRoutingNeed,
   callAiClassifier,
+  callAiAnswer,
+  recordAiCall,
   isAiEnabledForBusiness,
   parseAiPipeline,
 } = require('../../engine/aiRouting');
@@ -220,6 +222,7 @@ router.post('/', tokenValidator, async (req, res) => {
         console.warn('[ai-routing] classifier failed', { reason, error: aiResult.error, elapsed_ms: aiResult.elapsed_ms });
         return { handled: false };
       }
+      recordAiCall({ businessId: business.id, sessionId: session.id, message: text, mode: 'classify', result: aiResult });
 
       const pipeline = parseAiPipeline(aiResult.raw);
       if (!pipeline.valid) {
@@ -245,6 +248,35 @@ router.post('/', tokenValidator, async (req, res) => {
           },
           raw: aiResult.raw,
         };
+      }
+
+      // Greetings stay templated; everything content-related (search, category,
+      // filter, exclude, details, not-found) goes to answer mode so the AI reads
+      // the menu and replies with what the customer actually asked for — handling
+      // typos, meaning, and include-vs-exclude that the keyword pipeline gets wrong.
+      if (pipeline.code !== 1) {
+        // Narrow the menu we send to answer mode whenever the classifier gave us
+        // an item/category term — huge token saving. Skip exclude([5])/not-found([9])
+        // where the term isn't a thing to keep. Falls back to lean catalog if the
+        // hint matches nothing.
+        const f = pipeline.fields || {};
+        let categoryHint = '';
+        if (pipeline.code === 4) categoryHint = f.category || f.item || '';
+        else if (pipeline.code === 2 || pipeline.code === 3 || pipeline.code === 7) categoryHint = pipeline.item || '';
+        else if (pipeline.code === 8) categoryHint = pipeline.itemForDetail || '';
+        const answer = await callAiAnswer({ text, business, session, lang, categoryHint });
+        if (answer.ok) {
+          recordAiCall({ businessId: business.id, sessionId: session.id, message: text, mode: 'answer', result: answer });
+        }
+        if (answer.ok && answer.text) {
+          return {
+            handled: true,
+            intent: 'ai_answer',
+            payload: { text: answer.text, type: 'text', buttons: [], suggestions: [], context_update: {} },
+            raw: aiResult.raw,
+          };
+        }
+        console.warn('[ai-routing] answer mode failed, falling back to keyword pipeline', { error: answer.error });
       }
 
       const resolved = resolveAiPipeline({ pipeline, brain, business, lang, context });
