@@ -48,7 +48,7 @@ const listOrderItems = db.prepare(`
   SELECT id, order_id, service_item_id, title_en, title_ar, quantity, unit_price, currency
   FROM order_items
   WHERE order_id = ?
-  ORDER BY id ASC
+  ORDER BY id DESC
 `);
 const getOrderItemByServiceItem = db.prepare(`
   SELECT *
@@ -600,15 +600,26 @@ function startOrderFlow({ business, session, context, lang, seedItems = [] }) {
   const nextContext = normalizeOrderContext(context);
   const existingOrder = getLatestActiveOrderByPhone.get(business.id, session.guest_phone);
 
+  // If the customer named an item in the same breath as the order intent
+  // ("عايز اطلب ماية"), auto-add the top match so the order opens with the item
+  // already inside and we jump straight to review.
+  const bestSeed = seedItems.find((item) => Number.isFinite(item?.id)) || null;
+
   if (existingOrder) {
     attachOrderToSession.run(session.id, session.guest_name || existingOrder.guest_name, session.guest_phone, existingOrder.id);
+    if (bestSeed) {
+      addItemsToOrder(existingOrder.id, [bestSeed]);
+    }
     const items = getOrderItems(existingOrder.id);
     const stage = items.length ? 'review' : 'add_item';
-    const updatedContext = setOrderContext(nextContext, {
-      order_id: existingOrder.id,
-      stage,
-      pending_address: '',
-    });
+    const updatedContext = setOrderContext(
+      bestSeed ? mergeRecentItemsIntoContext(nextContext, [bestSeed]) : nextContext,
+      {
+        order_id: existingOrder.id,
+        stage,
+        pending_address: '',
+      }
+    );
 
     const responseText = items.length
       ? buildReviewMessage({ lang, order: existingOrder, items, existingOrder: true })
@@ -629,9 +640,32 @@ function startOrderFlow({ business, session, context, lang, seedItems = [] }) {
 
   const orderId = createOrderId();
   createOrder.run(orderId, business.id, session.id, session.guest_name || '', session.guest_phone);
-
-  // Never auto-add items into a fresh order — seedItems are suggestions only
   const order = getOrderById.get(orderId);
+
+  // Fresh order with a named item ("عايز اطلب ماية"): add the top match and jump
+  // straight to review so the customer can adjust quantity, add more, or confirm.
+  if (bestSeed) {
+    addItemsToOrder(orderId, [bestSeed]);
+    const items = getOrderItems(orderId);
+    const stage = 'review';
+    const updatedContext = setOrderContext(
+      mergeRecentItemsIntoContext(nextContext, [bestSeed]),
+      { order_id: orderId, stage, pending_address: '' }
+    );
+    return {
+      phase: 'order_review',
+      context: updatedContext,
+      response: {
+        text: buildReviewMessage({ lang, order, items, existingOrder: false }),
+        type: 'text',
+        buttons: [],
+        ...serializeOrderState({ lang, stage, order, items, context: updatedContext, business }),
+      },
+      intent: 'order_started',
+    };
+  }
+
+  // No item named — open an empty order and ask what they want.
   const items = getOrderItems(orderId); // always empty for a new order
   const stage = 'add_item';
   const updatedContext = setOrderContext(nextContext, {

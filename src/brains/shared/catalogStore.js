@@ -30,12 +30,48 @@ function getBusinessItems(businessId) {
   return items;
 }
 
+// --- AI classification cache -------------------------------------------------
+// The external AI classifier is deterministic for a given question + catalog:
+// the same message always maps to the same pipeline string ("[2] searching for
+// wifi ...") until the catalog changes. We cache that raw string per business so
+// an identical question never re-bills the AI. Context-dependent follow-ups are
+// NOT cached (the caller passes cacheable=false), and the whole cache for a
+// business is cleared on sync alongside the item cache.
+const classifyCache = new Map(); // businessId -> Map<key, { raw, ts }>
+const CLASSIFY_TTL = 30 * 60 * 1000;
+
+function getCachedClassification(businessId, key) {
+  const perBusiness = classifyCache.get(Number(businessId));
+  if (!perBusiness) return null;
+  const hit = perBusiness.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts >= CLASSIFY_TTL) {
+    perBusiness.delete(key);
+    return null;
+  }
+  return hit.raw;
+}
+
+function setCachedClassification(businessId, key, raw) {
+  if (!key || !raw) return;
+  const id = Number(businessId);
+  let perBusiness = classifyCache.get(id);
+  if (!perBusiness) {
+    perBusiness = new Map();
+    classifyCache.set(id, perBusiness);
+  }
+  perBusiness.set(key, { raw, ts: Date.now() });
+}
+
 function invalidateBusinessItemsCache(businessId) {
   itemCache.delete(Number(businessId));
+  classifyCache.delete(Number(businessId));
 }
 
 module.exports = {
   getBusinessItems,
   invalidateBusinessItemsCache,
+  getCachedClassification,
+  setCachedClassification,
   parseMetadata,
 };

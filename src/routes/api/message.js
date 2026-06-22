@@ -35,6 +35,7 @@ const {
 } = require('../../engine/aiPipelines');
 const { canUseAi, recordAiUse } = require('../../engine/aiRateLimiter');
 const { matchFaq } = require('../../engine/faqMatcher');
+const { getCachedClassification, setCachedClassification } = require('../../brains/shared/catalogStore');
 
 const router = express.Router();
 
@@ -220,22 +221,46 @@ router.post('/', tokenValidator, async (req, res) => {
       });
     }
 
+    // A message "depends on context" only when it points BACK at a prior turn
+    // with a pronoun/anaphor ("is it spicy?", "نفس الشيء"). A self-contained
+    // question ("do you have wifi") does NOT depend on context even when chat
+    // history exists — so it stays cacheable. (This previously keyed off the
+    // gate's followup_context flag, which fires for ANY question once history
+    // exists and wrongly blocked caching of plain repeated questions.)
+    const ANAPHOR_RE = /\b(it|its|this|that|these|those|them|they|same)\b/i;
+    const ANAPHOR_AR_RE = /(ده|دى|دي|دا|هذا|هذه|نفس|فيها|فيه)/;
+    function isContextReferencing(message) {
+      const m = String(message || '');
+      return ANAPHOR_RE.test(m) || ANAPHOR_AR_RE.test(m);
+    }
+    // Cache the classifier verdict for identical, context-free questions only.
+    const classifyCacheable = !isContextReferencing(text);
+    const classifyKey = `${lang}|${String(text || '').trim().toLowerCase().replace(/\s+/g, ' ')}`;
     let aiUnavailable = false;
     async function tryAiPipeline(reason) {
       if (aiUnavailable || !isAiEnabledForBusiness(business)) return { handled: false };
 
-      const gate = canUseAi({ businessId: business.id, ip: clientIp, deviceId });
-      if (!gate.allowed) {
-        console.warn('[ai-routing] rate limited, answering from rules', { reason, limit: gate.reason });
-        return { handled: false, rateLimited: true };
-      }
-      recordAiUse({ businessId: business.id, ip: clientIp, deviceId });
+      // Identical question already classified? Reuse it — no rate-limit hit, no
+      // network call, no tokens billed.
+      let aiResult;
+      const cachedRaw = classifyCacheable ? getCachedClassification(business.id, classifyKey) : null;
+      if (cachedRaw) {
+        aiResult = { ok: true, raw: cachedRaw, from_cache: true, usage: null, model: null, elapsed_ms: 0 };
+      } else {
+        const gate = canUseAi({ businessId: business.id, ip: clientIp, deviceId });
+        if (!gate.allowed) {
+          console.warn('[ai-routing] rate limited, answering from rules', { reason, limit: gate.reason });
+          return { handled: false, rateLimited: true };
+        }
+        recordAiUse({ businessId: business.id, ip: clientIp, deviceId });
 
-      const aiResult = await callAiClassifier({ text, business, session, history: aiHistory });
-      if (!aiResult.ok) {
-        aiUnavailable = true;
-        console.warn('[ai-routing] classifier failed', { reason, error: aiResult.error, elapsed_ms: aiResult.elapsed_ms });
-        return { handled: false };
+        aiResult = await callAiClassifier({ text, business, session, history: aiHistory });
+        if (!aiResult.ok) {
+          aiUnavailable = true;
+          console.warn('[ai-routing] classifier failed', { reason, error: aiResult.error, elapsed_ms: aiResult.elapsed_ms });
+          return { handled: false };
+        }
+        if (classifyCacheable) setCachedClassification(business.id, classifyKey, aiResult.raw);
       }
       recordAiCall({ businessId: business.id, sessionId: session.id, message: text, mode: 'classify', result: aiResult });
 
@@ -248,7 +273,7 @@ router.post('/', tokenValidator, async (req, res) => {
       }
 
       if (pipeline.code === 10) {
-        const faqHit = matchFaq({ text, lang, business });
+        const faqHit = resolveFaqWithContext();
         if (!faqHit) return { handled: false, raw: aiResult.raw };
         const faqSuggestions = parseSuggestions(business, lang);
         return {
@@ -259,7 +284,7 @@ router.post('/', tokenValidator, async (req, res) => {
             type: 'text',
             buttons: [],
             suggestions: faqSuggestions,
-            context_update: {},
+            context_update: { last_faq: faqHit.question },
           },
           raw: aiResult.raw,
         };
@@ -302,7 +327,63 @@ router.post('/', tokenValidator, async (req, res) => {
       };
     }
 
+    // Last-resort FAQ check. Only fires when every other pipeline has already
+    // failed and we are about to tell the customer "not found": we consult the
+    // owner-provided FAQ (faq_en / faq_ar) and, if a stored question matches,
+    // answer from it. Otherwise the not-found reply stands. Local keyword match,
+    // no extra AI call.
+    // Resolve an FAQ for the current message. If the message matches nothing on
+    // its own but the previous turn answered an FAQ, retry with that topic glued
+    // on — so a context-free follow-up ("how fast its speed" after "do you have
+    // wifi") still lands on the right FAQ. Returns the FAQ hit or null.
+    // A message only inherits the previous FAQ topic when it actually refers
+    // BACK to it with a pronoun/anaphor ("how fast is it?", "نفس الشيء") — the
+    // same isContextReferencing() test used for cache eligibility. Without a
+    // back-reference, an off-topic or gibberish message ("dwqwfww") matched
+    // nothing of its own and must stay not-found — it must NOT borrow the prior
+    // answer just because the last topic's keywords happen to match.
+    function resolveFaqWithContext() {
+      const direct = matchFaq({ text, lang, business });
+      if (direct) return direct;
+      const lastFaq = context && context.last_faq;
+      if (lastFaq && isContextReferencing(text)) {
+        const followup = matchFaq({ text: `${lastFaq} ${text}`, lang, business });
+        if (followup) return followup;
+      }
+      return null;
+    }
+
+    const NOT_FOUND_INTENTS = new Set(['unknown', 'item_not_found', 'need_item_context', 'ai_not_found']);
+    function applyFaqFallback({ payload, intent }) {
+      if (!NOT_FOUND_INTENTS.has(intent)) return { payload, intent, changed: false };
+      const faqHit = resolveFaqWithContext();
+      if (!faqHit) return { payload, intent, changed: false };
+      return {
+        changed: true,
+        intent: 'faq',
+        faqQuestion: faqHit.question,
+        payload: {
+          text: faqHit.answer,
+          type: 'text',
+          buttons: [],
+          suggestions: parseSuggestions(business, lang),
+          context_update: { last_faq: faqHit.question },
+        },
+      };
+    }
+
     function sendPayloadResult({ payload, intent, nextContext, phase = session.phase }) {
+      const faq = applyFaqFallback({ payload, intent });
+      payload = faq.payload;
+      intent = faq.intent;
+      if (faq.changed) {
+        nextContext = {
+          ...nextContext,
+          last_faq: faq.faqQuestion,
+          last_suggestions: normalizeSuggestions(payload.suggestions),
+        };
+      }
+
       updateSession.run(
         phase,
         lang,
@@ -643,7 +724,10 @@ router.post('/', tokenValidator, async (req, res) => {
       context,
       collectTrackedItemIds(intentResult)
     );
-    const payload = brain.buildResponse(intentResult, lang, business);
+    const basePayload = brain.buildResponse(intentResult, lang, business);
+    const faqFallback = applyFaqFallback({ payload: basePayload, intent: intentResult.intent });
+    const payload = faqFallback.payload;
+    const finalIntent = faqFallback.intent;
     const nextContext = {
       ...context,
       ...payload.context_update,
@@ -664,10 +748,10 @@ router.post('/', tokenValidator, async (req, res) => {
     );
     if (Array.isArray(payload.messages) && payload.messages.length > 0) {
       payload.messages.forEach((msg) => {
-        insertMessage.run(session.id, 'bot', msg.text, intentResult.intent, msg.thumbnail || null);
+        insertMessage.run(session.id, 'bot', msg.text, finalIntent, msg.thumbnail || null);
       });
     } else {
-      insertMessage.run(session.id, 'bot', payload.text, intentResult.intent, payload.thumbnail || null);
+      insertMessage.run(session.id, 'bot', payload.text, finalIntent, payload.thumbnail || null);
     }
 
     const orderState = resolveOrderUiState({ business, session, context: nextContext, lang });
@@ -700,7 +784,7 @@ router.post('/', tokenValidator, async (req, res) => {
       },
       language: lang,
       phase: session.phase,
-      intent: intentResult.intent,
+      intent: finalIntent,
       order_suggestions: orderSuggestions,
     });
   } catch (error) {

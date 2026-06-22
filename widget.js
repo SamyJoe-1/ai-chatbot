@@ -604,7 +604,7 @@
         margin-bottom: 6px;
       }
       .cb-dash-cart-list {
-        max-height: 240px;
+        max-height: 115px;
         overflow-y: auto;
         margin: 0 -4px;
         padding: 0 4px;
@@ -1324,7 +1324,9 @@
       if (pending) {
         pending.quantity++;
       } else {
-        items.push({ order_item_id: `temp-${Date.now()}`, title, quantity: 1, _optimistic: true });
+        // Insert at the TOP so a newly added item shows first in the cart,
+        // matching the server order (newest-first).
+        items.unshift({ order_item_id: `temp-${Date.now()}`, title, quantity: 1, _optimistic: true });
       }
       updateDashboardUi();
     }
