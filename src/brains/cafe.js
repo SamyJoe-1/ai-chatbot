@@ -2,6 +2,7 @@
 
 const { tokenize, normalize } = require('../engine/detector');
 const { getBusinessItems } = require('./shared/catalogStore');
+const { getBrandProfile, conceptMatchItems } = require('./shared/brandProfile');
 const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle } = require('./shared/matcher');
 const { getItemThumbnail, buildThumbnailMessages } = require('./shared/thumbnailMessages');
 
@@ -252,7 +253,22 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     return { intent: residual.length ? 'item_not_found' : 'need_item_context' };
   }
 
-
+  // Concept fallback (zero AI): nothing matched a literal item/category, but the
+  // brand profile may map a concept the customer used ("something from the sea",
+  // "anything spicy") onto real catalog items. Resolved entirely from the stored
+  // profile — no classifier call — so this deflects a would-be AI query.
+  const conceptItems = conceptMatchItems({
+    text: normalizedText,
+    lang,
+    items,
+    profile: getBrandProfile(business.id),
+  });
+  if (conceptItems.length === 1) {
+    return { intent: 'item_found', item: conceptItems[0] };
+  }
+  if (conceptItems.length > 1) {
+    return { intent: 'concept_items', items: conceptItems };
+  }
 
   const tokens = tokenize(normalizedText);
   if (tokens.length && tokens.length <= 3) {
@@ -463,6 +479,26 @@ function buildResponse(intentResult, lang, business) {
         payload.text = [catHeading, ...catItems.map(catItemLine)].join('\n');
       }
       payload.context_update.last_category = intentResult.category;
+      payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
+      break;
+    }
+    case 'concept_items': {
+      // Items surfaced via the brand-profile concept map ("from the sea" ->
+      // seafood dishes). Same card layout as a category listing, but a heading
+      // that doesn't claim a literal category the customer never named.
+      const conceptItems = intentResult.items.slice(0, 8);
+      const conceptHeading = locale === 'ar' ? 'دي أقرب الأصناف اللي ممكن تناسبك:' : 'Here are the closest items that might fit:';
+      const conceptItemLine = (item) => {
+        const price = item.price !== null && item.price !== undefined ? ` - ${item.price} ${item.currency}` : '';
+        return `- ${getDisplayTitle(item, locale)}${price}`;
+      };
+      const conceptThumbMsgs = buildThumbnailMessages(conceptItems, conceptHeading, conceptItemLine);
+      if (conceptThumbMsgs) {
+        payload.messages = conceptThumbMsgs;
+        payload.text = conceptThumbMsgs.map((m) => m.text).filter(Boolean).join('\n');
+      } else {
+        payload.text = [conceptHeading, ...conceptItems.map(conceptItemLine)].join('\n');
+      }
       payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       break;
     }

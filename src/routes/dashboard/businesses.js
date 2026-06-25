@@ -8,6 +8,8 @@ const db = require('../../db/db');
 const { authMiddleware, adminOnly } = require('../../middleware/auth');
 const { getBrain, listServiceTypes } = require('../../brains');
 const { invalidateBusinessItemsCache } = require('../../brains/shared/catalogStore');
+const { getBrandProfileMeta, saveBrandProfile } = require('../../brains/shared/brandProfile');
+const { generateBrandProfile, isAiConfigured } = require('../../engine/brandProfile');
 const { COMMON_RESPONSES } = require('../../brains/shared/commonResponses');
 const { parseFaqList } = require('../../engine/faqMatcher');
 
@@ -377,6 +379,70 @@ router.post('/:id/sessions/:sessionId/messages', (req, res) => {
   );
   db.prepare("UPDATE sessions SET last_active = datetime('now') WHERE id = ?").run(session.id);
   return res.json({ success: true });
+});
+
+/* ═══════ BRAND PROFILE (AI concept map) ═══════ */
+
+// Current stored profile + metadata. Shape kept simple for the admin panel:
+// { identity, concepts: {key: [titles]}, generated_at, model, ai_configured }.
+router.get('/:id/brand-profile', (req, res) => {
+  const businessId = Number(req.params.id);
+  if (!ensureAccess(req.admin, businessId)) return res.status(403).json({ error: 'forbidden' });
+
+  const meta = getBrandProfileMeta(businessId);
+  return res.json({
+    identity: meta ? meta.profile.identity : '',
+    concepts: meta ? meta.profile.concepts : {},
+    generated_at: meta ? meta.generated_at : null,
+    model: meta ? meta.model : null,
+    ai_configured: isAiConfigured(),
+  });
+});
+
+// Save an admin-edited profile (identity + concepts). Lets owners hand-tune the
+// map — add a synonym, drop a wrong mapping — without an AI call. We clear the
+// source_hash so the next sync still regenerates from the (changed) catalog.
+router.put('/:id/brand-profile', (req, res) => {
+  const businessId = Number(req.params.id);
+  if (!ensureAccess(req.admin, businessId)) return res.status(403).json({ error: 'forbidden' });
+
+  const body = req.body || {};
+  const concepts = body.concepts && typeof body.concepts === 'object' && !Array.isArray(body.concepts) ? body.concepts : {};
+  // Keep only well-formed entries: non-empty key -> array of title strings.
+  const cleanConcepts = {};
+  for (const [key, titles] of Object.entries(concepts)) {
+    if (!String(key).trim() || !Array.isArray(titles)) continue;
+    const list = titles.map((t) => String(t || '').trim()).filter(Boolean);
+    if (list.length) cleanConcepts[String(key).trim()] = list;
+  }
+
+  saveBrandProfile(businessId, {
+    profile: { identity: String(body.identity || '').slice(0, 400), concepts: cleanConcepts, item_keywords: {} },
+    sourceHash: null,
+    model: 'manual-edit',
+  });
+  return res.json({ success: true });
+});
+
+// Force an AI regeneration now (admin "Regenerate" button). Runs the one-time
+// profile call against the current catalog and returns the fresh result.
+router.post('/:id/brand-profile/regenerate', async (req, res) => {
+  const business = getBusiness.get(req.params.id);
+  if (!business) return res.status(404).json({ error: 'not_found' });
+  if (!ensureAccess(req.admin, business.id)) return res.status(403).json({ error: 'forbidden' });
+  if (!isAiConfigured()) return res.status(400).json({ error: 'ai_not_configured' });
+
+  const result = await generateBrandProfile(business, { force: true });
+  if (!result.ok) return res.status(502).json({ error: 'generation_failed', detail: result.error || result.reason });
+
+  const meta = getBrandProfileMeta(business.id);
+  return res.json({
+    success: true,
+    concepts: meta ? meta.profile.concepts : {},
+    identity: meta ? meta.profile.identity : '',
+    generated_at: meta ? meta.generated_at : null,
+    model: meta ? meta.model : null,
+  });
 });
 
 /* ═══════ ORDERS ═══════ */

@@ -1,6 +1,7 @@
 'use strict';
 
 const { getBusinessItems } = require('../brains/shared/catalogStore');
+const { getBrandProfile, conceptMatchItems } = require('../brains/shared/brandProfile');
 const { normalize, tokenize } = require('./detector');
 const { getItemThumbnail, buildThumbnailMessages } = require('../brains/shared/thumbnailMessages');
 
@@ -153,7 +154,13 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context }) {
   }
 
   if (pipeline.code === 2) {
-    const matches = findItemsByText(items, pipeline.item, locale);
+    let matches = findItemsByText(items, pipeline.item, locale);
+    // Literal search missed — the classifier may have echoed a concept word
+    // ("sea", "spicy"). Fall back to the brand-profile concept map so the
+    // search still lands on real items instead of dead-ending on "not found".
+    if (!matches.length) {
+      matches = conceptMatchItems({ text: pipeline.item, lang: locale, items, profile: getBrandProfile(business.id) });
+    }
     if (matches.length === 1) {
       return { intent: 'item_found', payload: brain.buildResponse({ intent: 'item_found', item: matches[0] }, locale, business) };
     }
@@ -218,7 +225,10 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context }) {
   }
 
   if (pipeline.code === 7) {
-    const matches = findItemsByText(items, pipeline.item, locale);
+    let matches = findItemsByText(items, pipeline.item, locale);
+    if (!matches.length) {
+      matches = conceptMatchItems({ text: pipeline.item, lang: locale, items, profile: getBrandProfile(business.id) });
+    }
     if (matches[0]) {
       return { intent: 'item_found', payload: brain.buildResponse({ intent: 'item_found', item: matches[0] }, locale, business) };
     }

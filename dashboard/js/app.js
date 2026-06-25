@@ -363,6 +363,87 @@ document.getElementById('sync-json-menu-btn').addEventListener('click', async ()
   }
 });
 
+/* ═══════ BRAND CONCEPT MAP ═══════
+   The AI-generated map that lets fuzzy questions ("something from the sea")
+   resolve to real items LOCALLY (zero tokens). Admins can hand-edit it or
+   regenerate it from the menu with one AI call. Concepts are edited as plain
+   text — one per line: "synonym1|synonym2 => Item Title, Item Title". */
+function conceptsToText(concepts) {
+  return Object.entries(concepts || {})
+    .map(([key, titles]) => `${key} => ${(titles || []).join(', ')}`)
+    .join('\n');
+}
+
+function textToConcepts(text) {
+  const concepts = {};
+  String(text || '').split('\n').forEach((line) => {
+    const idx = line.indexOf('=>');
+    if (idx === -1) return;
+    const key = line.slice(0, idx).trim();
+    const titles = line.slice(idx + 2).split(',').map((t) => t.trim()).filter(Boolean);
+    if (key && titles.length) concepts[key] = titles;
+  });
+  return concepts;
+}
+
+function brandProfileModalHtml(data) {
+  const meta = data.generated_at
+    ? `<div class="bp-meta">Last generated: ${new Date(data.generated_at + 'Z').toLocaleString()}${data.model ? ' · ' + data.model : ''}</div>`
+    : '<div class="bp-meta">No concept map generated yet.</div>';
+  const aiWarn = data.ai_configured ? '' : '<div class="bp-meta" style="color:#b45309">AI is not configured — you can still edit the map by hand.</div>';
+  return `
+    <div style="text-align:left">
+      ${meta}${aiWarn}
+      <label style="font-weight:600;display:block;margin:8px 0 4px">Brand identity</label>
+      <input id="bp-identity" class="swal2-input" style="margin:0;width:100%" placeholder="Short description of the brand" value="${(data.identity || '').replace(/"/g, '&quot;')}">
+      <label style="font-weight:600;display:block;margin:12px 0 4px">Concepts <span style="font-weight:400;color:#888">(one per line — <code>sea|seafood =&gt; Tuna Salad, Seafood Soup</code>)</span></label>
+      <textarea id="bp-concepts" class="swal2-textarea" style="margin:0;width:100%;height:200px;font-family:monospace;font-size:12px" placeholder="sea|seafood|ocean =&gt; Tuna Salad, Seafood Soup">${conceptsToText(data.concepts)}</textarea>
+    </div>`;
+}
+
+async function openBrandProfileModal() {
+  if (!state.selectedCafe) return;
+  let data;
+  try {
+    data = await api(`/dashboard/businesses/${state.selectedCafe.id}/brand-profile`);
+  } catch (err) { toastErr('Could not load concept map: ' + err.message); return; }
+
+  const result = await Swal.fire({
+    title: 'Brand Concept Map',
+    html: brandProfileModalHtml(data),
+    width: 640,
+    showCancelButton: true,
+    showDenyButton: data.ai_configured,
+    confirmButtonText: 'Save',
+    denyButtonText: '<i class="fas fa-brain"></i> Regenerate with AI',
+    focusConfirm: false,
+    preConfirm: () => ({
+      identity: document.getElementById('bp-identity').value,
+      concepts: textToConcepts(document.getElementById('bp-concepts').value),
+    }),
+  });
+
+  if (result.isConfirmed) {
+    try {
+      await api(`/dashboard/businesses/${state.selectedCafe.id}/brand-profile`, {
+        method: 'PUT',
+        body: JSON.stringify(result.value),
+      });
+      toast('Concept map saved.');
+    } catch (err) { toastErr('Save failed: ' + err.message); }
+  } else if (result.isDenied) {
+    Swal.fire({ title: 'Generating…', text: 'Reading the menu and building the concept map.', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    try {
+      await api(`/dashboard/businesses/${state.selectedCafe.id}/brand-profile/regenerate`, { method: 'POST' });
+      Swal.close();
+      toast('Concept map regenerated.');
+      openBrandProfileModal(); // reopen with the fresh map
+    } catch (err) { Swal.close(); toastErr('Regeneration failed: ' + err.message); }
+  }
+}
+
+document.getElementById('brand-profile-btn').addEventListener('click', openBrandProfileModal);
+
 document.getElementById('add-menu-btn').addEventListener('click', () => {
   openMenuItemModal({
     title_en: '',

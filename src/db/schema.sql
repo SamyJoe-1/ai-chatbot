@@ -138,6 +138,21 @@ CREATE TABLE IF NOT EXISTS ai_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_calls_business_time ON ai_calls (business_id, created_at);
 
+-- One-time AI-generated "brand brain" per business: a compact JSON artifact
+-- holding the brand identity summary + a concept->items keyword map (e.g.
+-- "sea" -> Shrimp, Calamari) + per-item extra keywords. Generated ONCE when the
+-- menu syncs (not per message) and consumed LOCALLY by the matcher, so it adds
+-- zero tokens to live customer queries while letting "something from the sea"
+-- resolve to real seafood items. source_hash lets us skip regeneration when the
+-- inputs (business profile + catalog) have not changed.
+CREATE TABLE IF NOT EXISTS brand_profiles (
+  business_id INTEGER PRIMARY KEY REFERENCES businesses(id) ON DELETE CASCADE,
+  profile_json TEXT NOT NULL DEFAULT '{}',
+  source_hash TEXT,
+  model TEXT,
+  generated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_business_phone_status ON orders (business_id, guest_phone, status, updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_order_items_unique_service_item ON order_items (order_id, service_item_id);
 CREATE INDEX IF NOT EXISTS idx_ai_usage_lookup ON ai_usage (business_id, scope, identifier, created_at);

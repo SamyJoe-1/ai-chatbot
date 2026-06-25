@@ -6,6 +6,7 @@ const db = require('../../db/db');
 const { tokenValidator } = require('../../middleware/tokenValidator');
 const { readRecordsFromSheet } = require('../../services/googleSheets');
 const { invalidateBusinessItemsCache } = require('../../brains/shared/catalogStore');
+const { generateBrandProfile } = require('../../engine/brandProfile');
 const { getBrain } = require('../../brains');
 
 const router = express.Router();
@@ -69,6 +70,12 @@ router.post('/', tokenValidator, async (req, res) => {
     })();
 
     invalidateBusinessItemsCache(business.id);
+
+    // The catalog changed, so the brand concept map may be stale. Regenerate it
+    // in the background (one AI call, hash-guarded to skip when unchanged) — do
+    // NOT block or fail the sync response on it.
+    generateBrandProfile(business).catch((err) => console.warn('[sync] brand profile regen failed:', err.message));
+
     return res.json({ synced: items.length, message: 'Successfully synced.' });
 
   } catch (error) {
