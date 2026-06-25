@@ -57,6 +57,9 @@ function migrateLegacyCafeData() {
   ensureColumn('messages', 'thumbnail', 'thumbnail TEXT');
   ensureColumn('messages', 'ai_score', 'ai_score INTEGER');
   ensureColumn('businesses', 'ai_enabled', 'ai_enabled INTEGER NOT NULL DEFAULT 0');
+  // Franco/Arabizi phonetic recovery is ON by default (preserves existing
+  // behavior); owners can disable it per business when it over-matches.
+  ensureColumn('businesses', 'franco_enabled', 'franco_enabled INTEGER NOT NULL DEFAULT 1');
   ensureColumn('businesses', 'faq_en', "faq_en TEXT DEFAULT '[]'");
   ensureColumn('businesses', 'faq_ar', "faq_ar TEXT DEFAULT '[]'");
 

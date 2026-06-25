@@ -501,15 +501,39 @@ router.post('/', tokenValidator, async (req, res) => {
       });
     }
 
+    // Context recall ("remind me what was that dish") — resolved locally from
+    // the stored last_item BEFORE any AI call. Strictly phrase-gated in the
+    // brain (intent 'item_recall'), so only an explicit recall short-circuits
+    // here; every other message — including gibberish after a matched item —
+    // continues down the normal flow untouched.
+    if (session.phase === 'active') {
+      const recallProbe = brain.detectIntent({ text, lang, business, context });
+      if (recallProbe && recallProbe.intent === 'item_recall' && recallProbe.item) {
+        const recallPayload = brain.buildResponse(recallProbe, lang, business);
+        const nextContext = {
+          ...context,
+          ...recallPayload.context_update,
+          last_suggestions: normalizeSuggestions(recallPayload.suggestions),
+          recent_item_ids: mergeRecentItemIds(context, collectTrackedItemIds(recallProbe)),
+        };
+        return sendPayloadResult({ payload: recallPayload, intent: 'item_recall', nextContext });
+      }
+    }
+
     let forceOrderFromAi = false;
     let aiInvalidClassification = false;
+    // Tracks whether we already spent an AI classification this request, so the
+    // rules-fallback below never fires a SECOND (often uncached) classify call
+    // for the same message.
+    let aiClassifyAttempted = false;
     if (session.phase === 'active' && aiAssessment.route === 'ai') {
       const aiPipeline = await tryAiPipeline('threshold');
+      aiClassifyAttempted = true;
       if (aiPipeline.forceOrder) {
         forceOrderFromAi = true;
       } else if (aiPipeline.invalid) {
         aiInvalidClassification = true;
-      } else if (aiPipeline.handled) {
+      } else if (aiPipeline.handled && aiPipeline.intent !== 'ai_not_found') {
         const nextContext = {
           ...context,
           ...aiPipeline.payload.context_update,
@@ -521,6 +545,12 @@ router.post('/', tokenValidator, async (req, res) => {
           nextContext,
         });
       }
+      // NB: when the AI classifier says "not found" we deliberately DON'T return
+      // here. The local rules get a chance first — they can still answer a
+      // size/price/recall question from last_item. If the rules also come up
+      // empty, the normal not-found reply is produced downstream. (Gibberish is
+      // safe: rules only bind to last_item on an explicit price/size/recall
+      // phrase, so nonsense still ends up not-found.)
     }
 
     if (session.phase === 'collect_phone') {
@@ -636,8 +666,10 @@ router.post('/', tokenValidator, async (req, res) => {
         }
       }
 
-      // 2. Try algorithmic Franco-Arabic phonetic recovery first
-      if (!translationMatched && shouldRetryWithRecovery(intentResult.intent)) {
+      // 2. Try algorithmic Franco-Arabic phonetic recovery first (unless the
+      //    business has disabled Franco recovery).
+      const francoEnabled = business.franco_enabled === undefined || Number(business.franco_enabled) !== 0;
+      if (francoEnabled && !translationMatched && shouldRetryWithRecovery(intentResult.intent)) {
         const translatedText = recoverFranco(text, items);
         if (translatedText && translatedText !== text) {
           const francoIntent = brain.detectIntent({ text: translatedText, lang: 'en', business, context });
@@ -679,7 +711,7 @@ router.post('/', tokenValidator, async (req, res) => {
       });
     }
 
-    if (aiAssessment.score > 0 && shouldRetryWithRecovery(intentResult.intent)) {
+    if (!aiClassifyAttempted && aiAssessment.score > 0 && shouldRetryWithRecovery(intentResult.intent)) {
       const aiPipeline = await tryAiPipeline('rules_fallback');
       if (aiPipeline.forceOrder && isOrderingEnabled(business)) {
         const orderSeedItems = matchItemsForOrder({

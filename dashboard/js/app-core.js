@@ -507,6 +507,8 @@ function fillEditor() {
   document.getElementById('edit-cafe-title').textContent = 'Edit: ' + c.name;
   document.getElementById('business-service-type').value = c.service_type || 'cafe';
   document.getElementById('business-ai-enabled').checked = Number(c.ai_enabled) === 1;
+  // Franco recovery defaults ON: treat a missing/undefined flag as enabled.
+  document.getElementById('business-franco-enabled').checked = c.franco_enabled === undefined || Number(c.franco_enabled) === 1;
   document.getElementById('cafe-name').value = c.name || '';
   document.getElementById('cafe-name-ar').value = c.name_ar || '';
   document.getElementById('cafe-phone').value = c.phone || '';
@@ -539,6 +541,7 @@ function collectCafePayload() {
     name: document.getElementById('cafe-name').value.trim(),
     service_type: document.getElementById('business-service-type').value,
     ai_enabled: document.getElementById('business-ai-enabled').checked ? 1 : 0,
+    franco_enabled: document.getElementById('business-franco-enabled').checked ? 1 : 0,
     name_ar: document.getElementById('cafe-name-ar').value.trim(),
     phone: document.getElementById('cafe-phone').value.trim(),
     email: document.getElementById('cafe-email').value.trim(),

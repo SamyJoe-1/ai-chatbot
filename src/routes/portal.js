@@ -83,7 +83,7 @@ router.put('/business', (req, res) => {
       service_type = ?, name = ?, name_ar = ?, primary_color = ?, secondary_color = ?, logo_url = ?,
       about_en = ?, about_ar = ?, phone = ?, email = ?, address_en = ?, address_ar = ?,
       working_hours_en = ?, working_hours_ar = ?, catalog_link = ?, drive_folder_id = ?, sheet_id = ?, sheet_name = ?,
-      welcome_en = ?, welcome_ar = ?, suggestions_en = ?, suggestions_ar = ?, ai_enabled = ?, active = ?
+      welcome_en = ?, welcome_ar = ?, suggestions_en = ?, suggestions_ar = ?, ai_enabled = ?, franco_enabled = ?, active = ?
     WHERE id = ?
   `).run(
     nextServiceType,
@@ -109,6 +109,7 @@ router.put('/business', (req, res) => {
     JSON.stringify(body.suggestions_en !== undefined ? parseList(body.suggestions_en) : parseList(business.suggestions_en)),
     JSON.stringify(body.suggestions_ar !== undefined ? parseList(body.suggestions_ar) : parseList(business.suggestions_ar)),
     body.ai_enabled !== undefined ? Number(body.ai_enabled) : business.ai_enabled,
+    body.franco_enabled !== undefined ? Number(body.franco_enabled) : business.franco_enabled,
     body.active !== undefined ? Number(body.active) : business.active,
     business.id
   );

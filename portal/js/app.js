@@ -326,6 +326,8 @@ function fillBusiness() {
   document.getElementById('business-name-ar').value = business.name_ar || '';
   document.getElementById('business-service-type').value = business.service_type || 'cafe';
   document.getElementById('business-ai-enabled').checked = Number(business.ai_enabled) === 1;
+  // Franco recovery defaults ON: treat a missing/undefined flag as enabled.
+  document.getElementById('business-franco-enabled').checked = business.franco_enabled === undefined || Number(business.franco_enabled) === 1;
   document.getElementById('business-phone').value = business.phone || '';
   document.getElementById('business-email').value = business.email || '';
   document.getElementById('business-primary-color').value = business.primary_color || '#d66020';
@@ -360,6 +362,7 @@ function collectBusinessPayload() {
     name_ar: document.getElementById('business-name-ar').value.trim(),
     service_type: document.getElementById('business-service-type').value,
     ai_enabled: document.getElementById('business-ai-enabled').checked ? 1 : 0,
+    franco_enabled: document.getElementById('business-franco-enabled').checked ? 1 : 0,
     phone: document.getElementById('business-phone').value.trim(),
     email: document.getElementById('business-email').value.trim(),
     primary_color: document.getElementById('business-primary-color').value,

@@ -213,7 +213,10 @@ function recoverFranco(text, items) {
       const normalizedKey = arabicPhoneticNormalize(arKey);
       const dist = levenshtein(normalizedArText, normalizedKey);
       const minLen = Math.min(normalizedArText.length, normalizedKey.length);
-      const maxAllowed = minLen <= 2 ? 0 : (minLen <= 4 ? 1 : 2);
+      // Require an EXACT match for very short transliterations (<=3 chars).
+      // A 1-edit budget there lets gibberish fragments collide with real words
+      // (e.g. "hav" -> "هاف" matching "هاش"/hash). Longer words keep their budget.
+      const maxAllowed = minLen <= 3 ? 0 : (minLen <= 4 ? 1 : 2);
       if (dist < bestDist && dist <= maxAllowed) {
         bestArKey = arKey;
         bestDist = dist;
@@ -230,7 +233,8 @@ function recoverFranco(text, items) {
       const normalizedEntry = arabicPhoneticNormalize(entry.ar);
       const dist = levenshtein(normalizedArText, normalizedEntry);
       const minLen = Math.min(normalizedArText.length, normalizedEntry.length);
-      const maxAllowed = minLen <= 2 ? 0 : (minLen <= 4 ? 1 : 2);
+      // Same exact-match guard for short transliterations as the dict loop above.
+      const maxAllowed = minLen <= 3 ? 0 : (minLen <= 4 ? 1 : 2);
       if (dist < bestCatalogDist && dist <= maxAllowed) {
         bestCatalogEnWord = entry.en;
         bestCatalogDist = dist;
@@ -254,10 +258,12 @@ function recoverFranco(text, items) {
 
       const dist = levenshtein(wHash, v.hash);
       if (dist === 0) {
-        // Prevent collisions on very short hashes (e.g. length <= 2 like "N")
+        // Prevent collisions on very short hashes (e.g. length <= 2 like "N").
+        // Require near-identical spelling (<=1 edit) — a 2-edit budget on a tiny
+        // hash lets unrelated 3-letter fragments collide with menu words.
         if (wHash.length <= 2) {
           const strDist = levenshtein(lowerW, v.word);
-          if (strDist <= 2) {
+          if (strDist <= 1) {
             return v.word;
           }
         } else {

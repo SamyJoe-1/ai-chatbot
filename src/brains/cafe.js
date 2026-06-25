@@ -20,7 +20,16 @@ const PATTERNS = {
     greeting_yasta: [/^(yasta)\b/i],
     thanks: [/\b(thanks|thank you|thx|ty|appreciate)\b/i],
     help: [/\bhelp\b/i, /\bwhat can you do\b/i, /\bhow does this work\b/i],
-    catalog_general: [/\bmenu\b/i, /\bwhat do you have\b/i, /\bwhat do you offer\b/i, /\bshow me.*menu\b/i],
+    catalog_general: [
+      /\bmenu\b/i,
+      /\bwhat do (you|u|ya)\b.*(have|got|offer|serve|sell)\b/i,
+      /\bwhat (do|did|does) (you|u|ya) (have|got|offer|serve|sell)\b/i,
+      /\bwhat do you offer\b/i,
+      /\bshow me.*menu\b/i,
+      /\bwhat (type|types|kind|kinds) of (food|dish|dishes|item|items|meal|meals)\b/i,
+      /\bwhat food\b/i,
+      /\bwhat.*you (serve|sell|offer|have|got)\b/i,
+    ],
     item_price: [/\bprice\b/i, /\bcost\b/i, /\bhow much\b/i],
     item_sizes: [
       /\bsize\b/i, /\bsizes\b/i, /\bsmall\b/i, /\bmedium\b/i, /\blarge\b/i,
@@ -32,6 +41,17 @@ const PATTERNS = {
     location: [/\blocation\b/i, /\baddress\b/i, /\bwhere are you\b/i, /\bdirections\b/i],
     brand_info: [/\bwho are you\b/i, /\babout you\b/i, /\babout the cafe\b/i, /\bwhat do you provide\b/i],
     reservation: [/\breservation\b/i, /\bbook\b/i, /\bbooking\b/i, /\btable\b/i],
+    // Explicit references back to a previously discussed item. Used ONLY as a
+    // recall signal (paired with a stored last_item) — never matches generic
+    // chatter or gibberish, so it can't hijack the normal not-found flow.
+    recall: [
+      /\bremind me\b/i, /\bwhat (was|were|is) (that|it|the|this)\b/i,
+      /\bwhat did we\b/i, /\b(talking|talkin|chatting|discussing) about\b/i,
+      /\bwe (were|are) (talking|discussing|checking)\b/i,
+      /\bthat (dish|plate|plat|item|one|meal|food|thing)\b/i,
+      /\bthe (last|previous) (one|item|dish|meal|thing)\b/i,
+      /\bwhat (was|is) it (again|called)\b/i,
+    ],
   },
   ar: {
     greeting_hello: [/^(مرحبا|مرحبتين|اهلا|أهلا|اهلين|أهلين|هلا|هالو|هلو|هاي|ألو|الو|حياك|حياكم|يا هلا|هلا والله|السلام عليكم|وعليكم السلام)/, /^(صباح الخير|مساء الخير|صباح النور|مساء النور)/],
@@ -47,6 +67,13 @@ const PATTERNS = {
     location: [/(العنوان|الموقع|وين|فين|أين|اتجاهات|خريطة|مكان|فروعكم|فرعكم)/],
     brand_info: [/(من انتم|مين انتم|نبذه عنكم|نبذة عنكم|من انتو|ماذا تقدمون|عن المطعم|عن الكافيه|مين انت)/],
     reservation: [/(حجز|احجز|أحجز|طاوله|طاولة|ريزرفيشن|حجوزات)/],
+    recall: [
+      /(فكرني|ذكرني|افكرني|افتكر)/,
+      /(كنا بنتكلم|كنا نتكلم|كنا نحكي|كنا بنحكي|اللي كنا)/,
+      /(الصنف اللي|الطبق اللي|الاكله اللي|الأكله اللي|الحاجه اللي)/,
+      /(اخر صنف|آخر صنف|الصنف السابق|الصنف اللي فات|الطلب اللي فات)/,
+      /(ايه اللي كنا|إيه اللي كنا|كان اسمه ايه|اسمه ايه تاني|اسمها ايه تاني)/,
+    ],
   },
 };
 
@@ -207,6 +234,14 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     };
   }
 
+  // Context recall: an explicit "remind me / what was that dish" with a prior
+  // item in context and nothing new named. Reached only after item/category
+  // matching failed, and gated on the recall phrasing — so plain gibberish
+  // after a matched item still falls through to the normal not-found reply.
+  if (lastItem && matchesAny(normalizedText, patterns.recall)) {
+    return { intent: 'item_recall', item: lastItem };
+  }
+
   if (asksPrice && lastItem) return { intent: 'item_price', item: lastItem };
   if (asksSizes && lastItem) return { intent: 'item_sizes', item: lastItem };
   if (asksPrice || asksSizes) {
@@ -288,11 +323,17 @@ function buildResponse(intentResult, lang, business) {
         });
       }
       break;
+    case 'item_recall':
     case 'item_found': {
       const item = intentResult.item;
       const sizes = getSizes(item);
       const title = getDisplayTitle(item, locale);
-      const lines = [title];
+      const lines = [];
+      // Recall replies lead with a short reminder, then show the same item card.
+      if (intentResult.intent === 'item_recall') {
+        lines.push(locale === 'ar' ? `كنا نتحدث عن ${title}:` : `We were talking about ${title}:`);
+      }
+      lines.push(title);
       const description = locale === 'ar' ? item.description_ar || item.description_en : item.description_en || item.description_ar;
       if (description) {
         const titleClean = tokenize(normalize(title, locale)).join(' ');
@@ -349,8 +390,25 @@ function buildResponse(intentResult, lang, business) {
           : (locale === 'ar'
             ? `${itemTitle} متوفر بحجم واحد فقط.`
             : `${itemTitle} is available in one standard size.`);
-        if (sizes.length) {
-          payload.suggestions = sizes.map(s => locale === 'ar' ? `تفاصيل الحجم ${s}` : `Details of ${s}`);
+        // Only offer a per-size "details" chip when we actually have detail data
+        // to show for that size AND it routes back here: the size word must be
+        // recognizable (detectTargetSize) and present in size_details. Otherwise
+        // the chip dead-ends on a not-found reply. The "size"/"حجم" keyword in the
+        // chip text is what re-triggers the item_sizes intent against last_item.
+        const detailable = details
+          ? sizes.filter((s) => {
+            const key = detectTargetSize(String(s), locale);
+            return key && details[key];
+          })
+          : [];
+        if (detailable.length) {
+          payload.suggestions = detailable.map(s => locale === 'ar' ? `تفاصيل حجم ${s}` : `Details of ${s} size`);
+        } else {
+          // No further data to detail — offer real next actions instead of a
+          // chip that would dead-end.
+          payload.suggestions = locale === 'ar'
+            ? [`اطلب ${itemTitle}`, 'السعر', 'فتح القائمة']
+            : [`Order ${itemTitle}`, 'Price', 'Open menu'];
         }
       }
       const thumbSizes = getItemThumbnail(item);

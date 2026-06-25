@@ -250,7 +250,11 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context }) {
         },
       };
     }
-    return { intent: 'ai_not_found', payload: buildNotFoundPayload(locale, business) };
+    // We resolved the item but not the specific detail the customer asked about
+    // (e.g. an opinion/quality question like "is the egg breakfast good?" — there
+    // is no metadata field for that). Don't dead-end on "not found": show the
+    // item itself so they still get something useful and can continue.
+    return { intent: 'item_found', payload: brain.buildResponse({ intent: 'item_found', item }, locale, business) };
   }
 
   if (pipeline.code === 9) {

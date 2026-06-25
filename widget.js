@@ -347,7 +347,7 @@
         display: inline-block !important;
         margin: 3px;
         border-radius: 999px;
-        padding: 6px 12px;
+        padding: 6px 10px;
         border: 1px solid var(--cb-border);
         background: rgba(255,255,255,0.92);
         color: var(--cb-text);
@@ -362,7 +362,7 @@
         flex-shrink: 0;
         display: flex;
         flex-direction: column;
-        padding: 1px 14px 14px 14px;
+        padding: 1px 8px 14px 8px;
         background: rgba(255,255,255,0.9);
         border-top: 1px solid var(--cb-border);
         max-height: 55% !important;

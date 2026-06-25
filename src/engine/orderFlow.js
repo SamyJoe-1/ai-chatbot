@@ -10,6 +10,14 @@ const { findScoredItems, uniqueById } = require('../brains/shared/matcher');
 const ORDER_COMMAND_PREFIX = '__order__:';
 const ACTIVE_ORDER_STATUSES = ['draft', 'awaiting_address', 'address_confirmation', 'pending'];
 
+const getFrancoFlag = db.prepare('SELECT franco_enabled FROM businesses WHERE id = ?');
+// Franco/Arabizi recovery is on unless the business row explicitly disables it
+// (column defaults to 1, so a missing row/flag is treated as enabled).
+function isFrancoEnabled(businessId) {
+  const row = getFrancoFlag.get(businessId);
+  return !row || Number(row.franco_enabled) !== 0;
+}
+
 const getOrderById = db.prepare('SELECT * FROM orders WHERE id = ?');
 const getLatestActiveOrderByPhone = db.prepare(`
   SELECT *
@@ -428,8 +436,9 @@ function matchItemsForOrder({ text, lang, businessId, context = {} }) {
   }
 
   // 2. Try algorithmic Franco-Arabic phonetic recovery
-  // Only run if the text actually contains Franco (Latin) letters/digits
-  if (/[a-zA-Z0-9]/.test(text)) {
+  // Only run if the text actually contains Franco (Latin) letters/digits AND
+  // the business hasn't disabled Franco recovery.
+  if (/[a-zA-Z0-9]/.test(text) && isFrancoEnabled(businessId)) {
     const { recoverFranco } = require('./franco');
     const francoText = recoverFranco(text, items);
     if (francoText && francoText !== text) {
