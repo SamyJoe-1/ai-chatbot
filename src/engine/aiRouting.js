@@ -24,30 +24,40 @@ function estimateCost(model, promptTokens, completionTokens) {
 const insertAiCall = db.prepare(`
   INSERT INTO ai_calls
     (business_id, session_id, message, mode, model, duration_ms,
-     prompt_tokens, completion_tokens, total_tokens, cost_usd, from_cache)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     prompt_tokens, completion_tokens, total_tokens, cached_tokens, cost_usd, from_cache,
+     full_input, full_output)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 // Log one AI call (classify/answer) for the AI Usage dashboard. Non-fatal.
+// We keep the full message, the exact rendered prompt (full_input) and the
+// model's full output (full_output) so a call can be opened and diagnosed.
 function recordAiCall({ businessId, sessionId, message, mode, result }) {
   try {
     const u = (result && result.usage) || {};
     const prompt = Number(u.prompt_tokens || 0);
     const completion = Number(u.completion_tokens || 0);
     const total = Number(u.total_tokens || prompt + completion);
+    const cached = Number(
+      (u.prompt_tokens_details && u.prompt_tokens_details.cached_tokens) ||
+      (result && result.cached_tokens) || 0,
+    );
     const model = (result && result.model) || null;
     insertAiCall.run(
       businessId,
       sessionId || null,
-      String(message || '').slice(0, 500),
+      message != null ? String(message) : null,
       mode,
       model,
       Number((result && result.elapsed_ms) || 0),
       prompt,
       completion,
       total,
+      cached,
       estimateCost(model, prompt, completion),
       result && result.from_cache ? 1 : 0,
+      (result && result.final_prompt) || null,
+      (result && result.raw_response) || null,
     );
   } catch { /* non-fatal */ }
 }
@@ -112,6 +122,10 @@ const W = {
   medium_message: 1,     // > MEDIUM_WORDS words
   unknown_high: 2,
   unknown_mid: 1,
+  help_intent: 4,        // "can i ask" / "i need help" — explicit, forces AI
+  bare_question: 3,      // a real question no pipeline/catalog could classify
+  consequence: 4,        // "what happens if i eat X" / "is it safe" — forces AI
+  multi_item: 2,         // two+ distinct items named together — rules do only one
 };
 const MEDIUM_WORDS = 25;
 const LONG_WORDS = 50;
@@ -199,6 +213,56 @@ const FILTRATION_TERMS = [
 ];
 const MODIFIER_TERMS = ['but', 'and also', 'with extra', 'instead of', 'as well', 'plus', 'add', 'extra', 'w kaman', 'w bdoun', 'zeyada'];
 const OPEN_QUESTION_TERMS = ['why', 'how come', 'what would you', 'what should i', 'is it worth', 'suitable for', 'good for', 'tell me about', 'which one'];
+
+// Explicit meta / help intent: the user is asking to ask, or asking for help.
+// There is no keyword pipeline for "can i ask a question" / "i need help" — it's
+// a conversational turn only the AI can carry — so any hit forces AI on its own.
+const HELP_INTENT_TERMS = [
+  // --- english ---
+  'can i ask', 'could i ask', 'may i ask', 'can i ask you', 'let me ask',
+  'i want to ask', 'i wanna ask', 'i would like to ask', 'i have a question',
+  'i have question', 'i got a question', 'got a question', 'quick question',
+  'a question', 'ask you something', 'ask a question', 'ask question',
+  'i need help', 'need help', 'help me', 'can you help', 'could you help',
+  'i need assistance', 'assist me', 'i was wondering', 'wondering if',
+  'do you know', 'question for you',
+  // --- arabic ---
+  'ممكن اسأل', 'ممكن أسأل', 'ممكن اسال', 'عايز اسأل', 'عاوز اسأل',
+  'عندي سؤال', 'عندى سؤال', 'عايز اسال', 'محتاج مساعده', 'محتاج مساعدة',
+  'ممكن مساعده', 'ممكن مساعدة', 'ساعدني', 'ساعدنى', 'اسألك', 'عايز اسألك',
+  // --- franco / arabizi ---
+  'momken as2al', 'momken as2alak', 'momken asal', '3ayez as2al', '3awez as2al',
+  '3andi so2al', '3andy so2al', 'sa3edni', 'momken mosa3da', 'me7tag mosa3da',
+];
+
+// Broad interrogative shape used by the bare-question signal: a wh-opener
+// anywhere, or (with QUESTION_AUX_RE / "?") a yes/no question.
+const WH_QUESTION_RE = /\b(what|whats|where|when|who|whom|whose|why|how)\b/i;
+
+// Tolerant help/meta intent — survives filler the literal HELP_INTENT_TERMS
+// miss ("i need SOME help HERE", "can you please help me out"). Catches
+// need/want/require ... help, help ... (here|me|out), and can/could you help.
+const HELP_INTENT_RE = /\b(?:need|want|require|looking\s+for)\b[\w\s]{0,15}\bhelp\b|\bhelp\b[\w\s]{0,10}\b(?:here|me|out|please|pls|asap)\b|\b(?:can|could|would|will)\s+(?:you|u|ya|someone|anyone)\s+(?:please\s+)?help\b/i;
+
+// Consequence / hypothetical / dietary-advice questions ("what happens if i eat
+// X", "is it safe", "will it make me sick", "should i drink this"). Rules can
+// NEVER answer these and a fuzzy item lookup is actively harmful (an "egg"
+// health question must not return a smoothie). Forces AI regardless of catalog.
+// Runs on the normalized text, so gonna->going to / wanna->want to already done.
+const CONSEQUENCE_RE = new RegExp([
+  'what\\s+(?:is\\s+going\\s+to\\s+|will\\s+|would\\s+|is\\s+|does\\s+|do\\s+)?happens?',
+  'happens?\\s+(?:if|when|after)',
+  '\\bif\\s+i\\s+(?:eat|ate|drink|drank|have|had|take|took|try|tried|mix|order|get|use)\\b',
+  'is\\s+it\\s+(?:safe|healthy|ok|okay|fine|bad|good\\s+for|harmful|dangerous)',
+  'will\\s+it\\s+(?:make|cause|hurt|affect|harm|help|give)',
+  'side\\s+effects?',
+  'should\\s+i\\s+(?:eat|drink|have|take|try|avoid|get|mix|order)',
+  'can\\s+i\\s+(?:eat|drink|have|take|mix)\\b',
+  'make\\s+me\\s+(?:sick|fat|ill|sleepy|full)',
+  'good\\s+for\\s+(?:me|my|you|health|diet)',
+  'bad\\s+for\\s+(?:me|my|you|health|teeth|stomach)',
+].join('|'), 'i');
+const CONSEQUENCE_AR_RE = /(هيحصل|هايحصل|يحصل ايه|حيصير|لو اكلت|لو شربت|لو اكل|لو شرب|ينفع اكل|ينفع اشرب|مضر|اضرار|اعراض جانبيه|امن|آمن|صحي|كويس لصحتي|وحش لصحتي)/;
 
 // Interrogative openers (yes/no questions). When asked ABOUT a catalog item
 // ("does the pizza have cheese", "is the latte sweet") these usually need AI to
@@ -298,6 +362,7 @@ const RECOMMENDATION_M = compile(RECOMMENDATION_TERMS);
 const FILTRATION_M = compile(FILTRATION_TERMS);
 const MODIFIER_M = compile(MODIFIER_TERMS);
 const OPEN_QUESTION_M = compile(OPEN_QUESTION_TERMS);
+const HELP_INTENT_M = compile(HELP_INTENT_TERMS);
 
 // Strip apostrophes so "don't" === "dont", expand negative contractions
 // ("doesnt" -> "does not") and chat-speak, then normalize.
@@ -442,6 +507,23 @@ function assessAiRoutingNeed({ text, lang, business, hasContext = false }) {
     reasons.push('category_and_item');
   }
 
+  // TWO+ distinct items named, split by a list separator (, | / &) or "and"
+  // ("Creamy Pesto Chicken | Tomato Soup", "the latte and the tomato soup"). The
+  // keyword rules can only detail ONE item, so a multi-item ask must reach AI.
+  const itemSegments = compactText
+    .split(/\s*(?:[,|/&]|\band\b)\s*/i)
+    .map((seg) => seg.trim())
+    .filter(Boolean)
+    .filter((seg) => {
+      const segTokens = new Set(tokenize(seg));
+      return [...sig.itemPhrases].some((p) => p.length > 2 && seg.includes(p))
+        || [...segTokens].some((t) => sig.itemTokens.has(t) && !sig.categoryTokens.has(t));
+    }).length;
+  if (itemSegments >= 2) {
+    score += W.multi_item;
+    reasons.push('multi_item');
+  }
+
   // Ingredient / composition question about a catalog item ("meat in pizza",
   // "does the pizza have cheese inside") — rules can't reason over contents.
   if (hasCatalogMention && looksLikeCompositionQuery(compactText)) {
@@ -489,6 +571,41 @@ function assessAiRoutingNeed({ text, lang, business, hasContext = false }) {
     if (messageTokens.length >= 4) {
       score += 1;
       reasons.push('item_question_detailed');
+    }
+  }
+
+  // Explicit help / meta intent ("can i ask a question", "i need some help
+  // here"). No keyword pipeline covers it; the tolerant regex backs up the
+  // literal list so filler words ("some", "please") don't defeat the match.
+  if (anyMatch(compactText, HELP_INTENT_M) || HELP_INTENT_RE.test(compactText)) {
+    score += W.help_intent;
+    reasons.push('help_intent');
+  }
+
+  // Consequence / hypothetical / dietary-advice question. Rules can't answer it
+  // and a fuzzy item lookup would be misleading, so force AI even when a catalog
+  // word happens to appear ("if i eat egg what happens" must NOT return an item).
+  if (CONSEQUENCE_RE.test(compactText) || CONSEQUENCE_AR_RE.test(String(text || ''))) {
+    score += W.consequence;
+    reasons.push('consequence_query');
+  }
+
+  // Bare question the rules couldn't classify: a genuine interrogative (wh-word,
+  // yes/no aux, or trailing "?") that hit NO pipeline and names NO catalog item.
+  // By definition the keyword engine has no answer for it, so escalate to AI.
+  // A plain existence check ("do you have X") and order intent are excluded —
+  // rules handle those. Tiny questions ("why?") stay under threshold; a fuller
+  // question (>=4 words) crosses it, matching the false-negatives we saw.
+  const looksLikeQuestion = isQuestion
+    || WH_QUESTION_RE.test(compactText)
+    || /[?؟]/.test(String(text || ''));
+  if (looksLikeQuestion && !isExistence && !orderIntent
+      && pipelineHits.length === 0 && !hasCatalogMention) {
+    score += W.bare_question;
+    reasons.push('bare_question');
+    if (messageTokens.length >= 4) {
+      score += 1;
+      reasons.push('bare_question_detailed');
     }
   }
 
@@ -574,6 +691,8 @@ async function callAiClassifier({ text, business, session, history }) {
         prompt: text,
         history: history || '',
         service_type: business.service_type || 'cafe',
+        // Lets the master prompt greet/answer as "{{BRAND_NAME}}'s assistant".
+        brand_name: business.name || business.name_ar || '',
         customer_name: session.guest_name || '',
         customer_phone: session.guest_phone || '',
         stream: false,
@@ -585,6 +704,9 @@ async function callAiClassifier({ text, business, session, history }) {
         // Classifier only needs the queryable shape, not the rows — keeps the
         // request tiny (~hundreds of tokens instead of the whole catalog).
         source_data: buildCatalogSchema(business.id),
+        // Ask the AI service to echo the rendered prompt + full output so the
+        // AI Usage view can show exactly what filled the token budget.
+        debug: true,
       }),
       signal: controller.signal,
     });
@@ -601,6 +723,70 @@ async function callAiClassifier({ text, business, session, history }) {
       from_cache: Boolean(data.from_cache),
       usage: data.usage || null,
       model: data.model || null,
+      // Diagnosis fields (present only when the AI service echoes them).
+      final_prompt: data.final_prompt || null,
+      raw_response: data.raw_response != null ? data.raw_response : (data.response || null),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      elapsed_ms: Date.now() - startedAt,
+      error: error.name === 'AbortError' ? 'timeout' : error.message,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Second AI step for subjective recommendations ([12]). Unlike the classifier,
+// this DOES receive item rows — but only the small candidate set the caller
+// already narrowed down (e.g. one category), kept compact to stay cheap. The
+// model returns a short reply (the best pick + reason) shown verbatim.
+async function callAiAnswer({ prompt, business, lang, history, candidates, mode = 'recommend' }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+  const startedAt = Date.now();
+
+  try {
+    const response = await fetch(getAiApiUrl(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getAiSecret()}`,
+      },
+      body: JSON.stringify({
+        prompt,
+        mode,
+        history: history || '',
+        service_type: business.service_type || 'cafe',
+        brand_name: business.name || business.name_ar || '',
+        language: lang === 'ar' ? 'Arabic' : 'English',
+        stream: false,
+        ...(process.env.AI_MODEL ? { model: process.env.AI_MODEL } : {}),
+        temperature: Number(process.env.AI_ANSWER_TEMPERATURE || 0.4),
+        max_tokens: Number(process.env.AI_ANSWER_MAX_TOKENS || 220),
+        source_data: candidates,
+        debug: true,
+      }),
+      signal: controller.signal,
+    });
+
+    const elapsed_ms = Date.now() - startedAt;
+    if (!response.ok) {
+      return { ok: false, elapsed_ms, error: `status_${response.status}` };
+    }
+    const data = await response.json();
+    const reply = String(data.response || '').trim();
+    return {
+      ok: true,
+      elapsed_ms,
+      raw: reply,
+      reply,
+      from_cache: Boolean(data.from_cache),
+      usage: data.usage || null,
+      model: data.model || null,
+      final_prompt: data.final_prompt || null,
+      raw_response: data.raw_response != null ? data.raw_response : (data.response || null),
     };
   } catch (error) {
     return {
@@ -631,7 +817,7 @@ function parseAiPipeline(raw) {
 
   const code = Number(match[1]);
   const body = match[2] || '';
-  if (code < 1 || code > 11) return { valid: false, raw: line };
+  if (code < 1 || code > 12) return { valid: false, raw: line };
 
   if (code === 4) {
     const fields = {};
@@ -649,7 +835,9 @@ function parseAiPipeline(raw) {
     2: /^searching for (.+) from list of items$/,
     3: /^looking for all items from category (.+)$/,
     5: /^looking for items doesn't include (.+)$/,
-    6: /^wants to make an order$/,
+    // Order intent may now carry the named item ("...: latte") for later
+    // resolution; the item is optional so a bare order line still matches.
+    6: /^wants to make an order(?::\s*(.+))?$/,
     7: /^wants to know full details about (.+)$/,
     8: /^wants to inquire (.+) about (.+)$/,
     9: /^not found$/,
@@ -657,6 +845,9 @@ function parseAiPipeline(raw) {
     // [11] is the last-resort direct answer: the classifier writes the reply
     // inline, so capture the whole body as the message to show verbatim.
     11: /^(.+)$/,
+    // [12] recommend {criteria}: a subjective single-pick recommendation. The
+    // criteria is resolved with a focused AI answer over the candidate items.
+    12: /^recommend (.+)$/,
   };
 
   match = body.match(patterns[code]);
@@ -676,6 +867,7 @@ function parseAiPipeline(raw) {
 module.exports = {
   assessAiRoutingNeed,
   callAiClassifier,
+  callAiAnswer,
   recordAiCall,
   isAiEnabledForBusiness,
   parseAiPipeline,

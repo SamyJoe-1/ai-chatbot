@@ -60,4 +60,36 @@ router.get('/', (req, res) => {
   }
 });
 
+// GET /dashboard/ai-usage/:id
+// Full detail for one AI call — including the large full_input / full_output
+// text columns, which the list query intentionally omits.
+router.get('/:id', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'bad_id' });
+
+    const row = db.prepare(`
+      SELECT c.id, c.business_id, b.name AS business_name, c.session_id, c.message, c.mode,
+             c.model, c.duration_ms, c.prompt_tokens, c.completion_tokens, c.total_tokens,
+             c.cached_tokens, c.cost_usd, c.from_cache, c.full_input, c.full_output, c.created_at
+      FROM ai_calls c
+      LEFT JOIN businesses b ON b.id = c.business_id
+      WHERE c.id = ?
+    `).get(id);
+
+    if (!row) return res.status(404).json({ error: 'not_found' });
+
+    // Business-scoped admins can only open their own business's calls.
+    if (req.admin && req.admin.role !== 'admin' && req.admin.business_id &&
+        Number(row.business_id) !== Number(req.admin.business_id)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    res.json({ row });
+  } catch (error) {
+    console.error('[ai-usage:detail]', error);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 module.exports = router;

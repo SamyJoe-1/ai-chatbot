@@ -132,8 +132,11 @@ CREATE TABLE IF NOT EXISTS ai_calls (
   prompt_tokens INTEGER DEFAULT 0,
   completion_tokens INTEGER DEFAULT 0,
   total_tokens INTEGER DEFAULT 0,
+  cached_tokens INTEGER DEFAULT 0,   -- prompt tokens served from the provider cache
   cost_usd REAL DEFAULT 0,
   from_cache INTEGER DEFAULT 0,
+  full_input TEXT,                   -- the exact rendered prompt sent to the LLM
+  full_output TEXT,                  -- the full untrimmed model response
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_ai_calls_business_time ON ai_calls (business_id, created_at);

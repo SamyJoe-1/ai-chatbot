@@ -941,10 +941,10 @@ async function loadAiUsage() {
   tbody.innerHTML = rows.map(r => {
     const time = String(r.created_at || '').slice(11, 19) || '—';
     const cache = r.from_cache ? ' <span style="opacity:.6">(cache)</span>' : '';
-    return `<tr>
+    return `<tr class="ai-usage-row" style="cursor:pointer" onclick="openAiCallDetail(${Number(r.id)})" title="Click to see the full prompt &amp; response">
       <td>${time}</td>
       <td>${esc(r.business_name || ('#' + r.business_id))}</td>
-      <td title="${esc(r.message || '')}">${esc(String(r.message || '').slice(0, 60))}</td>
+      <td>${esc(String(r.message || '').slice(0, 60))}</td>
       <td>${esc(r.mode || '')}</td>
       <td>${esc(r.model || '—')}</td>
       <td>${fmtDuration(r.duration_ms)}</td>
@@ -952,6 +952,58 @@ async function loadAiUsage() {
       <td>$${Number(r.cost_usd || 0).toFixed(5)}</td>
     </tr>`;
   }).join('');
+}
+
+// Click a row -> fetch the full record and show the exact prompt sent to the
+// LLM, its full output, and a token breakdown so a "why is this 1800 tokens?"
+// call can be diagnosed at a glance.
+async function openAiCallDetail(id) {
+  let data;
+  try {
+    data = await api('/dashboard/ai-usage/' + Number(id));
+  } catch (e) {
+    toastErr('Failed to load AI call detail');
+    return;
+  }
+  const r = (data && data.row) || {};
+  const num = (v) => Number(v || 0).toLocaleString();
+  const box = (label, value, empty) => `
+    <div style="margin-top:12px">
+      <div style="font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#888;margin-bottom:4px">${label}</div>
+      <pre style="margin:0;max-height:260px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:10px;border-radius:8px;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.45">${value ? esc(value) : '<span style=\"opacity:.5\">' + (empty || 'not captured') + '</span>'}</pre>
+    </div>`;
+
+  const chip = (label, value) => `<span style="display:inline-block;background:#eef2ff;color:#3730a3;border-radius:999px;padding:2px 10px;margin:2px 4px 2px 0;font-size:12px">${label}: <b>${value}</b></span>`;
+  const cachedNote = Number(r.cached_tokens) > 0
+    ? ` <span style="opacity:.7">(${num(r.cached_tokens)} of the prompt served from cache)</span>`
+    : '';
+
+  const meta = `
+    <div style="text-align:left">
+      <div style="font-size:12px;color:#888;margin-bottom:8px">
+        ${esc(r.business_name || ('#' + r.business_id))} · ${esc(r.mode || '')} · ${esc(r.model || '—')}
+        · ${fmtDuration(r.duration_ms)} · ${esc(String(r.created_at || ''))}${r.from_cache ? ' · <b>cache hit</b>' : ''}
+      </div>
+      <div>
+        ${chip('prompt', num(r.prompt_tokens))}
+        ${chip('completion', num(r.completion_tokens))}
+        ${chip('cached', num(r.cached_tokens))}
+        ${chip('total', num(r.total_tokens))}
+        ${chip('cost', '$' + Number(r.cost_usd || 0).toFixed(6))}
+      </div>
+      <div style="font-size:12px;color:#888;margin-top:6px">Billed prompt tokens ≈ ${num((Number(r.prompt_tokens) || 0) - (Number(r.cached_tokens) || 0))}${cachedNote}</div>
+      ${box('User message', r.message)}
+      ${box('Full input prompt (sent to the LLM)', r.full_input, r.from_cache ? 'cache hit — no prompt was sent to the LLM' : 'not captured (AI service did not echo it)')}
+      ${box('Full output (model response)', r.full_output)}
+    </div>`;
+
+  Swal.fire({
+    title: 'AI Call #' + Number(r.id),
+    html: meta,
+    width: 760,
+    showConfirmButton: true,
+    confirmButtonText: 'Close',
+  });
 }
 
 document.getElementById('refresh-ai-usage-btn')?.addEventListener('click', loadAiUsage);

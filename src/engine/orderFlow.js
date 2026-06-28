@@ -605,24 +605,29 @@ function getExistingPhoneStatus(businessId, phone, sessionId) {
   return Boolean(hasPreviousPhoneActivity.get(businessId, phone, sessionId));
 }
 
-function startOrderFlow({ business, session, context, lang, seedItems = [] }) {
+function startOrderFlow({ business, session, context, lang, seedItems = [], seedAll = false }) {
   const nextContext = normalizeOrderContext(context);
   const existingOrder = getLatestActiveOrderByPhone.get(business.id, session.guest_phone);
 
   // If the customer named an item in the same breath as the order intent
-  // ("عايز اطلب ماية"), auto-add the top match so the order opens with the item
-  // already inside and we jump straight to review.
-  const bestSeed = seedItems.find((item) => Number.isFinite(item?.id)) || null;
+  // ("عايز اطلب ماية"), auto-add it so the order opens with the item already
+  // inside and we jump straight to review. A plain text match is ambiguous, so
+  // we add only the TOP candidate — but a precise set resolved from a back-
+  // reference ("an order with them" -> the 2 items we recommended) is seedAll,
+  // and every one of those is intended, so add them all.
+  const validSeeds = seedItems.filter((item) => Number.isFinite(item?.id));
+  const seedsToAdd = seedAll ? validSeeds : (validSeeds.length ? [validSeeds[0]] : []);
+  const hasSeed = seedsToAdd.length > 0;
 
   if (existingOrder) {
     attachOrderToSession.run(session.id, session.guest_name || existingOrder.guest_name, session.guest_phone, existingOrder.id);
-    if (bestSeed) {
-      addItemsToOrder(existingOrder.id, [bestSeed]);
+    if (hasSeed) {
+      addItemsToOrder(existingOrder.id, seedsToAdd);
     }
     const items = getOrderItems(existingOrder.id);
     const stage = items.length ? 'review' : 'add_item';
     const updatedContext = setOrderContext(
-      bestSeed ? mergeRecentItemsIntoContext(nextContext, [bestSeed]) : nextContext,
+      hasSeed ? mergeRecentItemsIntoContext(nextContext, seedsToAdd) : nextContext,
       {
         order_id: existingOrder.id,
         stage,
@@ -651,14 +656,15 @@ function startOrderFlow({ business, session, context, lang, seedItems = [] }) {
   createOrder.run(orderId, business.id, session.id, session.guest_name || '', session.guest_phone);
   const order = getOrderById.get(orderId);
 
-  // Fresh order with a named item ("عايز اطلب ماية"): add the top match and jump
-  // straight to review so the customer can adjust quantity, add more, or confirm.
-  if (bestSeed) {
-    addItemsToOrder(orderId, [bestSeed]);
+  // Fresh order with a named item ("عايز اطلب ماية") or a resolved back-reference
+  // ("an order with them"): add the seed item(s) and jump straight to review so
+  // the customer can adjust quantity, add more, or confirm.
+  if (hasSeed) {
+    addItemsToOrder(orderId, seedsToAdd);
     const items = getOrderItems(orderId);
     const stage = 'review';
     const updatedContext = setOrderContext(
-      mergeRecentItemsIntoContext(nextContext, [bestSeed]),
+      mergeRecentItemsIntoContext(nextContext, seedsToAdd),
       { order_id: orderId, stage, pending_address: '' }
     );
     return {

@@ -120,6 +120,74 @@ function buildNotFoundPayload(lang, business) {
   };
 }
 
+// A [7] detail slot may name more than one item ("Creamy Pesto Chicken, Tomato
+// Soup" or "latte | espresso"). Split on explicit separators only — NOT the word
+// "and", which appears inside real item names ("Fish and Chips") — so each part
+// can be resolved to its own item.
+function splitItemSlot(slot) {
+  return String(slot || '')
+    .split(/\s*[,|/&+]\s*|\s*،\s*/) // comma, pipe, slash, &, +, Arabic comma
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+// Pick the SINGLE best item for a named phrase. findItemsByText filters by loose
+// token overlap and returns catalog order, so "Creamy Pesto Chicken" would grab
+// the first item containing "chicken". Here we rank: a title that contains the
+// whole phrase wins, then token coverage, with a small penalty for titles much
+// longer than the phrase — so an exact-ish name resolves to the right item.
+function bestItemForName(items, name, lang) {
+  const needle = normalize(name, lang);
+  if (!needle) return null;
+  const needleTokens = tokenize(needle).filter((token) => token.length > 1);
+  let best = null;
+  let bestScore = 0;
+  for (const item of items) {
+    const title = normalize(`${item.title_en || ''} ${item.title_ar || ''}`, lang);
+    if (!title) continue;
+    let score = 0;
+    if (title.includes(needle)) score += 100;
+    if (title.length > 2 && needle.includes(title)) score += 80;
+    const tokenHits = needleTokens.filter((token) => title.includes(token)).length;
+    score += tokenHits * 5;
+    if (needleTokens.length) score += (tokenHits / needleTokens.length) * 10;
+    if (score > 0) score -= Math.abs(title.length - needle.length) * 0.05;
+    if (score > bestScore) {
+      bestScore = score;
+      best = item;
+    }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+// Build ONE response that shows a full detail card for EACH item, using the
+// brain's normal item_found renderer per item and stitching them into a
+// `messages` array (so each keeps its own thumbnail). Tracks all ids as the
+// last-recommended set so a follow-up "order them" can seed every one.
+function buildMultiDetailPayload({ items, brain, business, lang }) {
+  const messages = items.map((item) => {
+    const part = brain.buildResponse({ intent: 'item_found', item }, lang, business);
+    return { text: part.text, thumbnail: part.thumbnail || null };
+  });
+  const text = messages.map((m) => m.text).filter(Boolean).join('\n\n');
+  const last = items[items.length - 1];
+  return {
+    intent: 'ai_multi_details',
+    payload: {
+      text,
+      type: 'text',
+      buttons: [],
+      suggestions: items.slice(0, 4).map((item) => displayTitle(item, lang)),
+      messages,
+      context_update: {
+        last_item: last.id,
+        last_category: displayCategory(last, lang) || null,
+        last_recommended_ids: items.map((item) => item.id).filter((id) => Number.isFinite(id)),
+      },
+    },
+  };
+}
+
 function resolveDetail(item, detail, lang) {
   const key = normalize(detail, 'en').replace(/\s+/g, '_');
   const candidates = [
@@ -225,14 +293,29 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context }) {
   }
 
   if (pipeline.code === 7) {
-    let matches = findItemsByText(items, pipeline.item, locale);
-    if (!matches.length) {
-      matches = conceptMatchItems({ text: pipeline.item, lang: locale, items, profile: getBrandProfile(business.id) });
+    // The slot may name several items — resolve each separately so we show a
+    // full card per item instead of collapsing to the first match.
+    const parts = splitItemSlot(pipeline.item);
+    const resolved = [];
+    const seen = new Set();
+    for (const part of (parts.length ? parts : [pipeline.item])) {
+      let best = bestItemForName(items, part, locale);
+      if (!best) {
+        const m = conceptMatchItems({ text: part, lang: locale, items, profile: getBrandProfile(business.id) });
+        best = m[0] || null;
+      }
+      if (best && !seen.has(best.id)) {
+        seen.add(best.id);
+        resolved.push(best);
+      }
     }
-    if (matches[0]) {
-      return { intent: 'item_found', payload: brain.buildResponse({ intent: 'item_found', item: matches[0] }, locale, business) };
+    if (!resolved.length) {
+      return { intent: 'ai_not_found', payload: buildNotFoundPayload(locale, business) };
     }
-    return { intent: 'ai_not_found', payload: buildNotFoundPayload(locale, business) };
+    if (resolved.length === 1) {
+      return { intent: 'item_found', payload: brain.buildResponse({ intent: 'item_found', item: resolved[0] }, locale, business) };
+    }
+    return buildMultiDetailPayload({ items: resolved, brain, business, lang: locale });
   }
 
   if (pipeline.code === 8) {
@@ -274,6 +357,52 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context }) {
   return null;
 }
 
+// Narrow the menu down to the small set of items a [12] recommendation should
+// be judged over, so the answer call stays cheap. Priority: an explicit
+// category in the criteria -> the category just shown (follow-up "which is
+// best?") -> a keyword/concept search on the criteria -> the whole menu.
+function recommendationPool({ criteria, business, lang, context }) {
+  const locale = lang === 'ar' ? 'ar' : 'en';
+  const items = getBusinessItems(business.id);
+  const crit = normalize(criteria || '', locale);
+
+  let pool = items.filter((item) => {
+    const cat = normalize(`${item.category_en || ''} ${item.category_ar || ''}`, locale);
+    return cat && crit.includes(cat);
+  });
+
+  if (!pool.length && context && context.last_category) {
+    const lastCat = normalize(context.last_category, locale);
+    pool = items.filter((item) => normalize(`${item.category_en || ''} ${item.category_ar || ''}`, locale).includes(lastCat));
+  }
+  if (!pool.length) pool = findItemsByText(items, criteria, locale);
+  if (!pool.length) pool = conceptMatchItems({ text: criteria, lang: locale, items, profile: getBrandProfile(business.id) });
+  if (!pool.length) pool = items.slice();
+
+  return pool.slice(0, 12);
+}
+
+// Compact, token-light shape for the recommend answer call: short keys, a
+// truncated description, and any numeric metadata (calories etc.) that helps
+// the model reason about diet/protein. Never sends the full row.
+function compactCandidates(items, lang) {
+  const locale = lang === 'ar' ? 'ar' : 'en';
+  return items.map((item) => {
+    const out = { n: displayTitle(item, locale), p: item.price, c: item.currency };
+    const desc = locale === 'ar' ? (item.description_ar || item.description_en) : (item.description_en || item.description_ar);
+    if (desc) out.d = String(desc).slice(0, 90);
+    const meta = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+    for (const [key, value] of Object.entries(meta)) {
+      if (typeof value === 'number' || /^\d+(\.\d+)?$/.test(String(value))) out[key] = value;
+    }
+    return out;
+  });
+}
+
+function buildRecommendationCandidates({ criteria, business, lang, context }) {
+  return compactCandidates(recommendationPool({ criteria, business, lang, context }), lang);
+}
+
 function prefixAiFallbackPayload(payload, lang) {
   const prefix = lang === 'ar'
     ? 'لم أتمكن من فهم تصنيف الذكاء الاصطناعي بدقة، لكن يمكنني مساعدتك بهذا:'
@@ -288,4 +417,5 @@ module.exports = {
   buildNotFoundPayload,
   prefixAiFallbackPayload,
   resolveAiPipeline,
+  buildRecommendationCandidates,
 };

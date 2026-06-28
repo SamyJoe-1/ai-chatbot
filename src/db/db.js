@@ -63,6 +63,12 @@ function migrateLegacyCafeData() {
   ensureColumn('businesses', 'faq_en', "faq_en TEXT DEFAULT '[]'");
   ensureColumn('businesses', 'faq_ar', "faq_ar TEXT DEFAULT '[]'");
 
+  // AI Usage diagnosis: keep the full rendered prompt + full model output and
+  // the cached-token count so any call can be inspected after the fact.
+  ensureColumn('ai_calls', 'cached_tokens', 'cached_tokens INTEGER DEFAULT 0');
+  ensureColumn('ai_calls', 'full_input', 'full_input TEXT');
+  ensureColumn('ai_calls', 'full_output', 'full_output TEXT');
+
   if (tableExists('admins') && hasColumn('admins', 'cafe_id')) {
     rawDb.prepare('UPDATE admins SET business_id = COALESCE(business_id, cafe_id) WHERE business_id IS NULL').run();
     try { rawDb.exec('ALTER TABLE admins DROP COLUMN cafe_id'); } catch (e) { console.warn('Could not drop cafe_id from admins:', e.message); }

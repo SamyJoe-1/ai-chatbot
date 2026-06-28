@@ -24,6 +24,7 @@ const { recoverFranco } = require('../../engine/franco');
 const {
   assessAiRoutingNeed,
   callAiClassifier,
+  callAiAnswer,
   recordAiCall,
   isAiEnabledForBusiness,
   parseAiPipeline,
@@ -32,6 +33,7 @@ const {
   buildNotFoundPayload,
   prefixAiFallbackPayload,
   resolveAiPipeline,
+  buildRecommendationCandidates,
 } = require('../../engine/aiPipelines');
 const { canUseAi, recordAiUse } = require('../../engine/aiRateLimiter');
 const { matchFaq } = require('../../engine/faqMatcher');
@@ -58,7 +60,7 @@ const insertMessage = {
 // ingredients" -> the item from the previous result). Call BEFORE inserting the
 // current message so it isn't included. 4 rows = ~2 exchanges; content trimmed
 // to keep the added tokens small.
-const getRecentMessagesStmt = db.prepare('SELECT role, content FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 4');
+const getRecentMessagesStmt = db.prepare('SELECT role, content FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 6');
 function buildAiHistory(sessionId) {
   const rows = getRecentMessagesStmt.all(sessionId).reverse();
   return rows
@@ -116,6 +118,36 @@ function collectTrackedItemIds(intentResult) {
     return intentResult.items.map((item) => item?.id).filter(Number.isFinite).slice(0, 10);
   }
   return [];
+}
+
+// Anaphora that points BACK at items named in a previous turn ("order them",
+// "add those two", "make an order with both"). When an order message carries no
+// item of its own, we seed the cart from what we just recommended/showed instead
+// of opening it empty.
+const ORDER_ANAPHOR_RE = /\b(them|those|these|both|the ones|the two|the items|the dishes|the meals|all of them|that one|the same)\b/i;
+const ORDER_ANAPHOR_AR_RE = /(دول|دي|دى|هم|الاتنين|الإتنين|الاثنين|كلهم|اللي قلت|اللي اقترحت|نفسهم|الحاجتين|الصنفين)/;
+
+function resolveItemsByIds(businessId, ids) {
+  if (!Array.isArray(ids) || !ids.length) return [];
+  const { getBusinessItems } = require('../../brains/shared/catalogStore');
+  const map = new Map(getBusinessItems(businessId).map((it) => [it.id, it]));
+  return ids.map((id) => map.get(id)).filter(Boolean);
+}
+
+// Seed items for a NEW order: items explicitly named in THIS message win (a
+// fuzzy text match is ambiguous, so the order flow adds only the top one). If
+// none are named but the message refers back to a prior turn ("an order with
+// them"), fall back to the items we last recommended ([12]) or last showed —
+// that is a PRECISE set, so seedAll tells the order flow to add every one.
+function resolveOrderSeedItems({ text, lang, businessId, context }) {
+  const explicit = matchItemsForOrder({ text, lang, businessId, context });
+  if (explicit.length) return { items: explicit, seedAll: false };
+  const raw = String(text || '');
+  if (!ORDER_ANAPHOR_RE.test(raw) && !ORDER_ANAPHOR_AR_RE.test(raw)) return { items: [], seedAll: false };
+  const ids = Array.isArray(context.last_recommended_ids) && context.last_recommended_ids.length
+    ? context.last_recommended_ids
+    : (Array.isArray(context.recent_item_ids) ? context.recent_item_ids.slice(-3) : []);
+  return { items: resolveItemsByIds(businessId, ids), seedAll: true };
 }
 
 function shouldRetryWithRecovery(intent) {
@@ -254,7 +286,13 @@ router.post('/', tokenValidator, async (req, res) => {
         }
         recordAiUse({ businessId: business.id, ip: clientIp, deviceId });
 
-        aiResult = await callAiClassifier({ text, business, session, history: aiHistory });
+        // Only spend tokens on prior turns when the message actually points back
+        // at them ("is it spicy?", "based on what I told you"). Self-contained
+        // questions send no history — cheaper and still cacheable. When context
+        // IS needed we send up to ~3 turns (see getRecentMessagesStmt) so chains
+        // like "I'm allergic to X" ... "is this dish ok?" resolve correctly.
+        const historyForAi = isContextReferencing(text) ? aiHistory : '';
+        aiResult = await callAiClassifier({ text, business, session, history: historyForAi });
         if (!aiResult.ok) {
           aiUnavailable = true;
           console.warn('[ai-routing] classifier failed', { reason, error: aiResult.error, elapsed_ms: aiResult.elapsed_ms });
@@ -270,6 +308,47 @@ router.post('/', tokenValidator, async (req, res) => {
       }
       if (pipeline.code === 6) {
         return { handled: false, forceOrder: true, raw: aiResult.raw };
+      }
+
+      // [12] subjective recommendation ("which is best for diet?"). Local rules
+      // can't reason about "best", so narrow the menu to a small candidate set
+      // and let a focused AI answer pick one. Only this intent pays the second
+      // call, and it sees just the candidates — not the whole menu.
+      if (pipeline.code === 12) {
+        const candidates = buildRecommendationCandidates({ criteria: pipeline.item, business, lang, context });
+        if (!candidates.length) return { handled: false, raw: aiResult.raw };
+        const answer = await callAiAnswer({
+          prompt: text,
+          business,
+          lang,
+          history: isContextReferencing(text) ? aiHistory : '',
+          candidates,
+        });
+        recordAiCall({ businessId: business.id, sessionId: session.id, message: text, mode: 'recommend', result: answer });
+        if (!answer.ok || !answer.reply) return { handled: false, raw: aiResult.raw };
+        // Track which catalog items the recommendation actually named so a
+        // follow-up ("make an order with them") can seed the cart from this
+        // turn. The reply is free text but contains the item titles, which
+        // matchItemsForOrder resolves back to real rows.
+        const recommendedItems = matchItemsForOrder({ text: answer.reply, lang, businessId: business.id, context });
+        const recommendedIds = recommendedItems.map((it) => it.id).filter(Number.isFinite);
+        return {
+          handled: true,
+          intent: 'ai_recommend',
+          payload: {
+            text: answer.reply,
+            type: 'text',
+            buttons: [],
+            suggestions: parseSuggestions(business, lang),
+            context_update: recommendedIds.length
+              ? {
+                recent_item_ids: mergeRecentItemIds(context, recommendedIds),
+                last_recommended_ids: recommendedIds,
+              }
+              : {},
+          },
+          raw: aiResult.raw,
+        };
       }
 
       if (pipeline.code === 10) {
@@ -432,13 +511,14 @@ router.post('/', tokenValidator, async (req, res) => {
       });
     }
 
-    function startOrderResponse(seedItems) {
+    function startOrderResponse(seedItems, seedAll = false) {
       const orderStartResult = startOrderFlow({
         business,
         session,
         context,
         lang,
         seedItems,
+        seedAll,
       });
 
       updateSession.run(
@@ -526,7 +606,18 @@ router.post('/', tokenValidator, async (req, res) => {
     // rules-fallback below never fires a SECOND (often uncached) classify call
     // for the same message.
     let aiClassifyAttempted = false;
-    if (session.phase === 'active' && aiAssessment.route === 'ai') {
+    // While inside an open order, a genuine info question must STILL reach the
+    // AI — otherwise the customer is trapped: the order handler only adds items
+    // and would swallow "tell me about X and Y". The routing score is the
+    // discriminator: a real question/multi-item ask routes to AI, while a bare
+    // item name to add scores low and falls through to the order flow below. We
+    // keep the current order phase on the reply, so the open order is preserved.
+    // Address entry is excluded so a typed address is never hijacked.
+    const phaseStr = String(session.phase || '');
+    const orderInfoEscape = phaseStr.startsWith('order_')
+      && phaseStr !== 'order_address'
+      && !isInternalOrderCommand(text);
+    if ((session.phase === 'active' || orderInfoEscape) && aiAssessment.route === 'ai') {
       const aiPipeline = await tryAiPipeline('threshold');
       aiClassifyAttempted = true;
       if (aiPipeline.forceOrder) {
@@ -635,13 +726,13 @@ router.post('/', tokenValidator, async (req, res) => {
 
     const isOrderIntent = forceOrderFromAi || looksLikeOrderIntent(text, lang) || (lang === 'ar' && looksLikeOrderIntent(require('../../engine/translation').translateArabicToEnglish(text), 'en'));
     if (isOrderingEnabled(business) && (session.phase === 'active' || String(session.phase || '').startsWith('order_')) && (isOrderIntent || isInternalOrderCommand(text))) {
-      const orderSeedItems = matchItemsForOrder({
+      const orderSeed = resolveOrderSeedItems({
         text,
         lang,
         businessId: business.id,
         context,
       });
-      return startOrderResponse(orderSeedItems);
+      return startOrderResponse(orderSeed.items, orderSeed.seedAll);
     }
 
     let resolvedText = text;
@@ -714,13 +805,13 @@ router.post('/', tokenValidator, async (req, res) => {
     if (!aiClassifyAttempted && aiAssessment.score > 0 && shouldRetryWithRecovery(intentResult.intent)) {
       const aiPipeline = await tryAiPipeline('rules_fallback');
       if (aiPipeline.forceOrder && isOrderingEnabled(business)) {
-        const orderSeedItems = matchItemsForOrder({
+        const orderSeed = resolveOrderSeedItems({
           text,
           lang,
           businessId: business.id,
           context,
         });
-        return startOrderResponse(orderSeedItems);
+        return startOrderResponse(orderSeed.items, orderSeed.seedAll);
       }
       if (aiPipeline.handled) {
         const nextContext = {
