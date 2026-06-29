@@ -30,6 +30,25 @@ function getBusinessItems(businessId) {
   return items;
 }
 
+// Like getBusinessItems but WITHOUT the available=1 filter, so callers can reach
+// out-of-stock rows too. Used by the e-commerce brain to answer "do you have X?"
+// for a product that exists but is currently unavailable ("we'll source it")
+// instead of dead-ending on not-found. Every row carries a boolean `in_stock`.
+const allItemCache = new Map();
+function getAllBusinessItems(businessId) {
+  const cacheKey = Number(businessId);
+  const cached = allItemCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CACHE_TTL) {
+    return cached.items;
+  }
+
+  const items = db.prepare('SELECT * FROM service_items WHERE business_id = ? ORDER BY id ASC').all(cacheKey)
+    .map((item) => ({ ...item, metadata: parseMetadata(item.metadata), in_stock: Number(item.available) === 1 }));
+
+  allItemCache.set(cacheKey, { items, ts: Date.now() });
+  return items;
+}
+
 // --- AI classification cache -------------------------------------------------
 // The external AI classifier is deterministic for a given question + catalog:
 // the same message always maps to the same pipeline string ("[2] searching for
@@ -65,11 +84,13 @@ function setCachedClassification(businessId, key, raw) {
 
 function invalidateBusinessItemsCache(businessId) {
   itemCache.delete(Number(businessId));
+  allItemCache.delete(Number(businessId));
   classifyCache.delete(Number(businessId));
 }
 
 module.exports = {
   getBusinessItems,
+  getAllBusinessItems,
   invalidateBusinessItemsCache,
   getCachedClassification,
   setCachedClassification,

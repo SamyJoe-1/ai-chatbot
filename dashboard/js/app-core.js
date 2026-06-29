@@ -509,6 +509,7 @@ function fillEditor() {
   document.getElementById('business-ai-enabled').checked = Number(c.ai_enabled) === 1;
   // Franco recovery defaults ON: treat a missing/undefined flag as enabled.
   document.getElementById('business-franco-enabled').checked = c.franco_enabled === undefined || Number(c.franco_enabled) === 1;
+  document.getElementById('business-sourcing-mode').checked = Number(c.sourcing_mode) === 1;
   document.getElementById('cafe-name').value = c.name || '';
   document.getElementById('cafe-name-ar').value = c.name_ar || '';
   document.getElementById('cafe-phone').value = c.phone || '';
@@ -518,6 +519,7 @@ function fillEditor() {
   if (hex) hex.textContent = c.primary_color || '#d66020';
   document.getElementById('cafe-logo').value = c.logo_url || '';
   document.getElementById('cafe-menu-link').value = c.catalog_link || '';
+  document.getElementById('cafe-contact-link').value = c.contact_link || '';
   document.getElementById('cafe-sheet-id').value = c.sheet_id || '';
   document.getElementById('business-sheet-name').value = c.sheet_name || '';
   document.getElementById('cafe-drive-folder').value = c.drive_folder_id || '';
@@ -542,6 +544,7 @@ function collectCafePayload() {
     service_type: document.getElementById('business-service-type').value,
     ai_enabled: document.getElementById('business-ai-enabled').checked ? 1 : 0,
     franco_enabled: document.getElementById('business-franco-enabled').checked ? 1 : 0,
+    sourcing_mode: document.getElementById('business-sourcing-mode').checked ? 1 : 0,
     name_ar: document.getElementById('cafe-name-ar').value.trim(),
     phone: document.getElementById('cafe-phone').value.trim(),
     email: document.getElementById('cafe-email').value.trim(),
@@ -549,6 +552,7 @@ function collectCafePayload() {
     secondary_color: state.selectedCafe?.secondary_color || '#f6efe4',
     logo_url: document.getElementById('cafe-logo').value.trim(),
     catalog_link: document.getElementById('cafe-menu-link').value.trim(),
+    contact_link: document.getElementById('cafe-contact-link').value.trim(),
     sheet_id: document.getElementById('cafe-sheet-id').value.trim(),
     sheet_name: document.getElementById('business-sheet-name').value.trim(),
     drive_folder_id: document.getElementById('cafe-drive-folder').value.trim(),

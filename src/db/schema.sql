@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS businesses (
   working_hours_en TEXT,
   working_hours_ar TEXT,
   catalog_link TEXT,
+  contact_link TEXT,
   drive_folder_id TEXT,
   sheet_id TEXT,
   sheet_name TEXT DEFAULT 'Catalog',
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS businesses (
   faq_ar TEXT DEFAULT '[]',
   ai_enabled INTEGER NOT NULL DEFAULT 0,
   franco_enabled INTEGER NOT NULL DEFAULT 1,
+  sourcing_mode INTEGER NOT NULL DEFAULT 0,
   active INTEGER DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now'))
 );

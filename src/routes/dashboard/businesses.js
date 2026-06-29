@@ -22,16 +22,16 @@ const createBusiness = db.prepare(`
   INSERT INTO businesses (
     token, service_type, name, name_ar, primary_color, secondary_color, logo_url,
     about_en, about_ar, phone, email, address_en, address_ar,
-    working_hours_en, working_hours_ar, catalog_link, drive_folder_id, sheet_id, sheet_name,
-    welcome_en, welcome_ar, suggestions_en, suggestions_ar, faq_en, faq_ar, ai_enabled, franco_enabled, active
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    working_hours_en, working_hours_ar, catalog_link, contact_link, drive_folder_id, sheet_id, sheet_name,
+    welcome_en, welcome_ar, suggestions_en, suggestions_ar, faq_en, faq_ar, ai_enabled, franco_enabled, sourcing_mode, active
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 const updateBusiness = db.prepare(`
   UPDATE businesses SET
     service_type = ?, name = ?, name_ar = ?, primary_color = ?, secondary_color = ?, logo_url = ?,
     about_en = ?, about_ar = ?, phone = ?, email = ?, address_en = ?, address_ar = ?,
-    working_hours_en = ?, working_hours_ar = ?, catalog_link = ?, drive_folder_id = ?, sheet_id = ?, sheet_name = ?,
-    welcome_en = ?, welcome_ar = ?, suggestions_en = ?, suggestions_ar = ?, faq_en = ?, faq_ar = ?, ai_enabled = ?, franco_enabled = ?, active = ?
+    working_hours_en = ?, working_hours_ar = ?, catalog_link = ?, contact_link = ?, drive_folder_id = ?, sheet_id = ?, sheet_name = ?,
+    welcome_en = ?, welcome_ar = ?, suggestions_en = ?, suggestions_ar = ?, faq_en = ?, faq_ar = ?, ai_enabled = ?, franco_enabled = ?, sourcing_mode = ?, active = ?
   WHERE id = ?
 `);
 const deleteBusiness = db.prepare('DELETE FROM businesses WHERE id = ?');
@@ -241,6 +241,7 @@ router.post('/', adminOnly, (req, res) => {
     body.working_hours_en || '',
     body.working_hours_ar || '',
     body.catalog_link || '',
+    body.contact_link || '',
     body.drive_folder_id || '',
     body.sheet_id || '',
     body.sheet_name || getBrain(serviceType).defaultSheetName,
@@ -252,6 +253,7 @@ router.post('/', adminOnly, (req, res) => {
     JSON.stringify(normalizeFaq(body.faq_ar)),
     body.ai_enabled === 1 || body.ai_enabled === true ? 1 : 0,
     body.franco_enabled === 0 || body.franco_enabled === false ? 0 : 1,
+    body.sourcing_mode === 1 || body.sourcing_mode === true ? 1 : 0,
     body.active === 0 ? 0 : 1
   );
 
@@ -286,6 +288,7 @@ router.put('/:id', (req, res) => {
     body.working_hours_en ?? business.working_hours_en,
     body.working_hours_ar ?? business.working_hours_ar,
     body.catalog_link ?? business.catalog_link,
+    body.contact_link ?? business.contact_link,
     body.drive_folder_id ?? business.drive_folder_id,
     body.sheet_id ?? business.sheet_id,
     body.sheet_name ?? business.sheet_name,
@@ -297,6 +300,7 @@ router.put('/:id', (req, res) => {
     JSON.stringify(body.faq_ar !== undefined ? normalizeFaq(body.faq_ar) : normalizeFaq(business.faq_ar)),
     body.ai_enabled !== undefined ? Number(body.ai_enabled) : business.ai_enabled,
     body.franco_enabled !== undefined ? Number(body.franco_enabled) : business.franco_enabled,
+    body.sourcing_mode !== undefined ? Number(body.sourcing_mode) : business.sourcing_mode,
     body.active !== undefined ? Number(body.active) : business.active,
     business.id
   );

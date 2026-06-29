@@ -328,12 +328,14 @@ function fillBusiness() {
   document.getElementById('business-ai-enabled').checked = Number(business.ai_enabled) === 1;
   // Franco recovery defaults ON: treat a missing/undefined flag as enabled.
   document.getElementById('business-franco-enabled').checked = business.franco_enabled === undefined || Number(business.franco_enabled) === 1;
+  document.getElementById('business-sourcing-mode').checked = Number(business.sourcing_mode) === 1;
   document.getElementById('business-phone').value = business.phone || '';
   document.getElementById('business-email').value = business.email || '';
   document.getElementById('business-primary-color').value = business.primary_color || '#d66020';
   document.getElementById('business-primary-color-hex').textContent = business.primary_color || '#d66020';
   document.getElementById('business-logo-url').value = business.logo_url || '';
   document.getElementById('business-catalog-link').value = business.catalog_link || '';
+  document.getElementById('business-contact-link').value = business.contact_link || '';
   document.getElementById('business-sheet-id').value = business.sheet_id || '';
   document.getElementById('business-sheet-name').value = business.sheet_name || '';
   document.getElementById('business-suggestions-en').value = (Array.isArray(business.suggestions_en) ? business.suggestions_en : []).join('\n');
@@ -363,12 +365,14 @@ function collectBusinessPayload() {
     service_type: document.getElementById('business-service-type').value,
     ai_enabled: document.getElementById('business-ai-enabled').checked ? 1 : 0,
     franco_enabled: document.getElementById('business-franco-enabled').checked ? 1 : 0,
+    sourcing_mode: document.getElementById('business-sourcing-mode').checked ? 1 : 0,
     phone: document.getElementById('business-phone').value.trim(),
     email: document.getElementById('business-email').value.trim(),
     primary_color: document.getElementById('business-primary-color').value,
     secondary_color: state.business?.secondary_color || '#f6efe4',
     logo_url: document.getElementById('business-logo-url').value.trim(),
     catalog_link: document.getElementById('business-catalog-link').value.trim(),
+    contact_link: document.getElementById('business-contact-link').value.trim(),
     sheet_id: document.getElementById('business-sheet-id').value.trim(),
     sheet_name: document.getElementById('business-sheet-name').value.trim(),
     drive_folder_id: state.business?.drive_folder_id || '',

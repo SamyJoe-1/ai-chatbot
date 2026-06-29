@@ -600,6 +600,38 @@ router.post('/', tokenValidator, async (req, res) => {
       }
     }
 
+    // Order handoff (e-commerce). A "how do I order?" question asks WHICH products
+    // instead of opening an empty cart; once the customer names products — now or
+    // right after we ask — we open the order seeded with exactly those. Runs
+    // before the AI/order-intent blocks so the bare how-to question isn't caught
+    // by looksLikeOrderIntent ("can i order") and turned into an empty order.
+    if (session.phase === 'active' && isOrderingEnabled(business)) {
+      if (context.awaiting_order_products) {
+        const named = matchItemsForOrder({ text, lang, businessId: business.id, context });
+        if (named.length) {
+          return startOrderResponse(named, true);
+        }
+        const seed = resolveOrderSeedItems({ text, lang, businessId: business.id, context });
+        if (seed.items.length) {
+          return startOrderResponse(seed.items, seed.seedAll);
+        }
+        // They didn't name a product — drop the flag and answer normally.
+        delete context.awaiting_order_products;
+      } else {
+        const howtoProbe = brain.detectIntent({ text, lang, business, context });
+        if (howtoProbe && howtoProbe.intent === 'order_howto') {
+          const howtoPayload = brain.buildResponse(howtoProbe, lang, business);
+          const nextContext = {
+            ...context,
+            ...howtoPayload.context_update,
+            awaiting_order_products: true,
+            last_suggestions: normalizeSuggestions(howtoPayload.suggestions),
+          };
+          return sendPayloadResult({ payload: howtoPayload, intent: 'order_howto', nextContext });
+        }
+      }
+    }
+
     let forceOrderFromAi = false;
     let aiInvalidClassification = false;
     // Tracks whether we already spent an AI classification this request, so the

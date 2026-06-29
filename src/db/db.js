@@ -62,6 +62,13 @@ function migrateLegacyCafeData() {
   ensureColumn('businesses', 'franco_enabled', 'franco_enabled INTEGER NOT NULL DEFAULT 1');
   ensureColumn('businesses', 'faq_en', "faq_en TEXT DEFAULT '[]'");
   ensureColumn('businesses', 'faq_ar', "faq_ar TEXT DEFAULT '[]'");
+  // Editable "Contact us" button target (whatsapp / mailto / any URL). Falls
+  // back to phone/email in the brain when empty.
+  ensureColumn('businesses', 'contact_link', 'contact_link TEXT');
+  // Sourcing mode (e-commerce): prices are private (push to a quote) and an
+  // unavailable product is answered as "we'll source it" instead of "out of
+  // stock". Off by default so a normal store keeps showing prices/stock.
+  ensureColumn('businesses', 'sourcing_mode', 'sourcing_mode INTEGER NOT NULL DEFAULT 0');
 
   // AI Usage diagnosis: keep the full rendered prompt + full model output and
   // the cached-token count so any call can be inspected after the fact.

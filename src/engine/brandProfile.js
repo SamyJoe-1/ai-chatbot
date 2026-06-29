@@ -15,7 +15,10 @@ const { getBusinessItems } = require('../brains/shared/catalogStore');
 const { saveBrandProfile, getBrandProfileMeta } = require('../brains/shared/brandProfile');
 const { normalize } = require('./detector');
 
-const PROFILE_TIMEOUT_MS = Number(process.env.AI_PROFILE_TIMEOUT_MS || 30000);
+// Concept-map generation runs over the WHOLE catalog in one call, so large
+// catalogs (hundreds of items) need a generous ceiling — 30s was timing out on
+// a 600+ product store. One-time/rare call, so a long timeout is fine.
+const PROFILE_TIMEOUT_MS = Number(process.env.AI_PROFILE_TIMEOUT_MS || 120000);
 
 function getAiApiUrl() {
   const base = process.env.AI_API_URL || process.env.AI_CALLBACK_API_URL || '';
@@ -34,15 +37,17 @@ function isAiConfigured() {
 // The exact brand + catalog snapshot we hand the AI. Kept lean: only the fields
 // that inform identity/concepts, so the one-time prompt stays as small as it can.
 function gatherProfileSource(business) {
+  // Send only TITLES + CATEGORIES, not descriptions/price. The concept map maps
+  // concepts -> exact item titles, so the title (and category) is all it needs;
+  // descriptions are the bulk of the catalog tokens (a 600-item store was ~60k
+  // tokens of descriptions alone, which blew past the generation timeout). Keep
+  // the source lean so even large catalogs generate in one call.
   const items = getBusinessItems(business.id).map((item) => ({
     id: item.id,
     title_en: item.title_en || '',
     title_ar: item.title_ar || '',
     category_en: item.category_en || '',
     category_ar: item.category_ar || '',
-    description_en: item.description_en || '',
-    description_ar: item.description_ar || '',
-    price: item.price,
   }));
 
   return {
@@ -132,7 +137,7 @@ async function callProfileGeneration(business, source) {
         stream: false,
         ...(process.env.AI_PROFILE_MODEL ? { model: process.env.AI_PROFILE_MODEL } : (process.env.AI_MODEL ? { model: process.env.AI_MODEL } : {})),
         temperature: Number(process.env.AI_PROFILE_TEMPERATURE || 0.2),
-        max_tokens: Number(process.env.AI_PROFILE_MAX_TOKENS || 1800),
+        max_tokens: Number(process.env.AI_PROFILE_MAX_TOKENS || 3000),
         source_data: source,
       }),
       signal: controller.signal,
