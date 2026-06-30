@@ -1276,7 +1276,14 @@
   function applyUiState(uiState) {
     const previousDraft = state.uiState.order_draft;
     const normalized = normalizeUiState(uiState || emptyUiState());
-    if (state.cartSyncPending && state.uiState.order_draft) {
+    // Keep the local draft when a sync is in flight OR a qty field is being
+    // edited. During typing `cartSyncPending` is still false (change hasn't
+    // fired yet), so without the focus check a poll would swap out order_draft
+    // and the change handler would commit against a stale draft reference.
+    const fEl = document.activeElement;
+    const editingQtyNow = !!(fEl && fEl.classList &&
+      fEl.classList.contains('cb-dash-item-qty-input'));
+    if ((state.cartSyncPending || editingQtyNow) && state.uiState.order_draft) {
       normalized.order_draft = state.uiState.order_draft;
     }
     state.uiState = normalized;
@@ -1726,7 +1733,16 @@
     if (status === 'draft' || status === 'pending') {
       // 1. Update Cart Items List
       const cartListEl = refs.dashboard.querySelector('.cb-dash-cart-list');
-      if (cartListEl) {
+      // While the user is typing into a qty field, don't rebuild the cart list:
+      // replacing innerHTML drops focus and reverts the in-progress value. Both
+      // the 3s poll and the background cart sync funnel through here, so without
+      // this guard an edit gets clobbered mid-typing. The list re-renders on the
+      // next pass once the field is blurred — which is also when `change` commits.
+      const focusedEl = document.activeElement;
+      const editingQty = !!(focusedEl && focusedEl.classList &&
+        focusedEl.classList.contains('cb-dash-item-qty-input') &&
+        cartListEl && cartListEl.contains(focusedEl));
+      if (cartListEl && !editingQty) {
         let cartHtml = '';
         if (Array.isArray(draft.items) && draft.items.length > 0) {
           draft.items.forEach((item) => {
