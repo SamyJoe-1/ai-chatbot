@@ -255,6 +255,7 @@ module.exports = {
   findMatchingCategories,
   findScoredItems,
   searchCatalogItems,
+  fuzzyTokenScore,
   uniqueById,
   uniqueByTitle,
   uniqueScoredByTitle,

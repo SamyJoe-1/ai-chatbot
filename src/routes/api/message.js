@@ -215,7 +215,12 @@ router.post('/', tokenValidator, async (req, res) => {
     const text = String(message).trim();
     const dashboardActive = req.body.order_dashboard_active !== false;
     let lang = detectLanguage(text);
-    if (session.phase === 'collect_phone' && session.language) {
+    // Internal order commands (button clicks, confirm, country select, cart
+    // sync) carry JSON/English payloads, so detectLanguage wrongly reads them as
+    // English — which then cascades the whole order flow into English and even
+    // overwrites the session language. For these, and for the phone step, trust
+    // the language the customer already established in the session instead.
+    if ((session.phase === 'collect_phone' || isInternalOrderCommand(text)) && session.language) {
       lang = session.language === 'ar' ? 'ar' : 'en';
     }
 
@@ -316,7 +321,12 @@ router.post('/', tokenValidator, async (req, res) => {
           console.warn('[ai-routing] classifier failed', { reason, error: aiResult.error, elapsed_ms: aiResult.elapsed_ms });
           return { handled: false };
         }
-        if (classifyCacheable) setCachedClassification(business.id, classifyKey, aiResult.raw);
+        // Only cache a classification that actually parses to a valid pipeline
+        // code. A one-off malformed AI output (e.g. prose instead of "[N] ...")
+        // must NOT poison the cache and force not-found for 30 minutes.
+        if (classifyCacheable && parseAiPipeline(aiResult.raw).valid) {
+          setCachedClassification(business.id, classifyKey, aiResult.raw);
+        }
       }
       recordAiCall({ businessId: business.id, sessionId: session.id, message: text, mode: 'classify', result: aiResult });
 
@@ -367,6 +377,9 @@ router.post('/', tokenValidator, async (req, res) => {
               ? {
                 recent_item_ids: mergeRecentItemIds(context, recommendedIds),
                 last_recommended_ids: recommendedIds,
+                // Set last_item when one product was recommended so follow-up
+                // questions ("tell me more about this product") resolve it.
+                ...(recommendedIds.length === 1 ? { last_item: recommendedIds[0] } : {}),
               }
               : {},
           },
@@ -620,6 +633,22 @@ router.post('/', tokenValidator, async (req, res) => {
           recent_item_ids: mergeRecentItemIds(context, collectTrackedItemIds(recallProbe)),
         };
         return sendPayloadResult({ payload: recallPayload, intent: 'item_recall', nextContext });
+      }
+      // Context follow-up ("tell me more about it", "قلي تفاصيل اكتر عنه"): the
+      // brain resolved the message against the product already in context. Answer
+      // it LOCALLY (in the user's language) BEFORE the AI router can grab it and
+      // reply generically/in the wrong language. Gated on fromContext so only a
+      // genuine anaphoric follow-up about last_item short-circuits here — a
+      // message that names a NEW product flows down normally.
+      if (recallProbe && recallProbe.fromContext && recallProbe.item) {
+        const followupPayload = brain.buildResponse(recallProbe, lang, business);
+        const nextContext = {
+          ...context,
+          ...followupPayload.context_update,
+          last_suggestions: normalizeSuggestions(followupPayload.suggestions),
+          recent_item_ids: mergeRecentItemIds(context, collectTrackedItemIds(recallProbe)),
+        };
+        return sendPayloadResult({ payload: followupPayload, intent: recallProbe.intent, nextContext });
       }
     }
 

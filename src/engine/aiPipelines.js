@@ -3,6 +3,7 @@
 const { getBusinessItems } = require('../brains/shared/catalogStore');
 const { getBrandProfile, conceptMatchItems } = require('../brains/shared/brandProfile');
 const { normalize, tokenize } = require('./detector');
+const { fuzzyTokenScore } = require('../brains/shared/matcher');
 const { getItemThumbnail, buildThumbnailMessages } = require('../brains/shared/thumbnailMessages');
 
 function displayTitle(item, lang) {
@@ -32,26 +33,61 @@ function itemSearchText(item, lang) {
   ].join(' '), lang);
 }
 
+// Strip the Arabic definite article "ال" from the front of a token so
+// "الامبراطوره" matches a title's "امبراطوره". Substring matching already
+// handles the reverse direction (a bare token is a substring of a title that
+// carries the article). Only strip when enough stem remains to stay meaningful.
+function stripArabicArticle(token) {
+  return (token.length > 4 && token.startsWith('ال')) ? token.slice(2) : token;
+}
+
 function findItemsByText(items, value, lang) {
   const needle = normalize(value, lang);
   if (!needle) return [];
-  const needleTokens = tokenize(needle).filter((token) => token.length > 1);
+  const needleTokens = tokenize(needle)
+    .filter((token) => token.length > 1)
+    .map(stripArabicArticle);
 
   // Primary: match against the title / category only. These are the strongest
   // signals — if anything matches here we never look at descriptions.
+  // For a MULTI-WORD query, a single shared token must NOT qualify: "عطر
+  // البراطور" would otherwise return every perfume on the generic word "عطر"
+  // while the distinguishing word "البراطور" matches nothing. Require the full
+  // phrase OR at least two token hits so the query's specificity is respected.
+  // A single-token query keeps the loose any-token behavior (e.g. a bare
+  // category word like "العطور" should still list the whole category).
+  // A needle token "hits" a haystack when it is a substring OR is a small typo
+  // away from one of the haystack's own tokens (fuzzyTokenScore: same first
+  // letter + bounded edit distance). The fuzzy arm is what lets "امبروطوره"
+  // (typo) find a title's "امبراطوره". Gated by the ≥2-hit rule below so a typo
+  // on a generic word alone can never widen into a category dump.
+  const tokenHits = (hay, hayTokens, token) => {
+    if (hay.includes(token)) return true;
+    return hayTokens.some((vt) => fuzzyTokenScore(token, vt) > 0);
+  };
+
+  const minTokenHits = needleTokens.length >= 2 ? 2 : 1;
   const titleCategoryMatches = items.filter((item) => {
     const title = normalize(`${item.title_en || ''} ${item.title_ar || ''}`, lang);
     const category = normalize(`${item.category_en || ''} ${item.category_ar || ''}`, lang);
     if (title.includes(needle) || category.includes(needle)) return true;
-    return needleTokens.some((token) => title.includes(token) || category.includes(token));
+    const titleTokens = tokenize(title).filter(Boolean);
+    const categoryTokens = tokenize(category).filter(Boolean);
+    const hits = needleTokens.filter((token) =>
+      tokenHits(title, titleTokens, token) || tokenHits(category, categoryTokens, token)).length;
+    return hits >= minTokenHits;
   });
   if (titleCategoryMatches.length) return titleCategoryMatches;
 
   // Fallback: only when nothing matched by title/category, engage the
-  // description + metadata so we still surface relevant items by context.
+  // description + metadata so we still surface relevant items by context. Apply
+  // the same multi-word precision rule — a single generic token shared by a
+  // whole category's descriptions must not return all of them.
   return items.filter((item) => {
     const haystack = itemSearchText(item, lang);
-    return haystack.includes(needle) || needleTokens.some((token) => haystack.includes(token));
+    if (haystack.includes(needle)) return true;
+    const hits = needleTokens.filter((token) => haystack.includes(token)).length;
+    return hits >= minTokenHits;
   });
 }
 

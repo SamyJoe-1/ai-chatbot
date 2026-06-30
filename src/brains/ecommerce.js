@@ -62,10 +62,27 @@ const PATTERNS = {
     ecommerce_search_hot: [/\bhot\b/i, /\bbest selling\b/i, /\bbest-selling\b/i, /\bbestseller\b/i, /\bpopular\b/i, /\btop selling\b/i],
     ecommerce_category_info: [/\bcategory\b/i, /\bmore about\b/i, /\bdetails on\b/i],
     ecommerce_product_advantages: [/\badvantages\b/i, /\bbenefits\b/i, /\bwhy choose\b/i, /\bfeatures\b/i],
+    // Context follow-up: "tell me more about it", "more details", "more info".
+    // Resolves against the product already in context (last_item).
+    more_details: [
+      /\b(tell|show|give) me more\b/i,
+      /\bmore (details?|info|information)\b/i,
+      /\b(details?|info|information) (about|on) (it|this|that)\b/i,
+      /\btell me (about|more about) (it|this|that)\b/i,
+      /\bwhat (else|more) (can you tell|about it)\b/i,
+    ],
     ecommerce_check_availability: [/\bavailability\b/i, /\bavailable\b/i, /\bin stock\b/i],
     ecommerce_country_info: [/\bmarketplace in\b/i, /\babout country\b/i, /\bcountry\b/i],
     ecommerce_country_products: [/\bproducts in\b/i, /\bfrom country\b/i, /\bmarketplace in\b/i, /\bin the country\b/i],
     item_price: [/\bprice\b/i, /\bcost\b/i, /\bhow much\b/i, /\bquote\b/i, /\bwholesale\b/i],
+    logistics_inquiry: [
+      /\bhow (many days?|long|much time|soon)\b/i,
+      /\bwhen (will|would|can|could)\b/i,
+      /\b(delivery|shipping|sourcing|lead|transit)\s*(time|period|window|date|timeline|days?)\b/i,
+      /\b(warehouse|lead time)\b/i,
+      /\bdays?\b.*\b(source|deliver|ship|arrive|receive|get)\b/i,
+      /\b(arrive|arrival|transit|get here)\b/i,
+    ],
   },
   ar: {
     greeting_hello: [/^(مرحبا|مرحبتين|اهلا|أهلا|اهلين|أهلين|هلا|هالو|هلو|هاي|ألو|الو|حياك|حياكم|يا هلا|هلا والله|يا هلا والله|السلام عليكم|وعليكم السلام)/, /^(صباح الخير|مساء الخير|صباح النور|مساء النور)/],
@@ -78,14 +95,26 @@ const PATTERNS = {
     location: [/(العنوان|الموقع|وين|فين|أين|اتجاهات|خريطة|مكان|فروعكم|فرعكم)/],
     brand_info: [/(من انتم|مين انتم|نبذه عنكم|نبذة عنكم|من انتو|ماذا تقدمون|عن المتجر|عن المعرض|مين انت)/],
     catalog_general: [/(كتالوج|المنتجات|ايش عندكم|شو عندكم|عندكم ايه|عندك ايه|الكتالوج|وش عندكم|السوق|الماركت|المتجر)/],
-    order_howto: [/كيف[؀-ۿ\s]{0,15}(اطلب|أطلب|الطلب|اعمل طلب|اعمل اوردر|اوردر)/, /ازاي[؀-ۿ\s]{0,15}(اطلب|أطلب|الطلب)/, /طريقة الطلب/, /ابغى اطلب ازاي/],
+    order_howto: [
+      /كيف[؀-ۿ\s]{0,15}(اطلب|أطلب|الطلب|اعمل طلب|اعمل اوردر|اوردر)/,
+      /ازاي[؀-ۿ\s]{0,15}(اطلب|أطلب|الطلب|اعمل اوردر|اعمل طلب)/,
+      /طريقة الطلب/,
+      /ابغى اطلب ازاي/,
+      // Colloquial Egyptian: "اعملي بيه اوردر" / "اعمل اوردر" / "اعملي اوردر"
+      /(اعملي?|عملي?)\s*(بيه|به|ليه|معه|منه|فيه|عليه|منك|دلوقتي|دلوقت)?\s*اوردر/,
+      // "عايز اطلب" / "عايز اعمل اوردر" / "ابغى اطلب" etc.
+      /(عايز|عاوز|عايزه|عاوزه|أريد|اريد|بدي|ابي|أبي|ابغى|أبغى|ودي|محتاج)\s*(اطلب|أطلب|اعمل اوردر|اعمل طلب|اشتري)/,
+    ],
     ecommerce_search_hot: [/(الاكثر مبيعا|الأكثر مبيعا|ساخن|مشهور|مطلوب|اكتر مبيعا|البيست سيلر|الاكثر طلبا|الاكثر مبيعاً|الأكثر طلباً)/],
     ecommerce_category_info: [/(عن القسم|القسم|قسم|صنف|تصنيف|تفاصيل القسم)/],
     ecommerce_product_advantages: [/(مميزات|مزايا|فوائد|ليه اشتري|مواصفات)/],
+    // Context follow-up in Arabic: "قلي تفاصيل اكتر عنه"، "اعرف اكتر"، "تفاصيل عنه".
+    more_details: [/(تفاصيل اكتر|تفاصيل أكتر|تفاصيل اكثر|تفاصيل أكثر|اكتر عنه|أكتر عنه|اكثر عنه|اعرف اكتر|أعرف اكتر|معلومات اكتر|معلومات أكثر|قلي اكتر|قولي اكتر|قلي تفاصيل|قولي تفاصيل|تفاصيل عنه|تفاصيل عنها|زودني|فاصيل اكتر|ايه تفاصيله|ايه تفاصيلها|قلي عنه|قولي عنه|احكيلي عنه)/],
     ecommerce_check_availability: [/(متاح|متوفر|متوفره|متوفرة|موجود|موجوده|في المخزون)/],
     ecommerce_country_info: [/(سوق|اسواق|في بلد|في دوله|في دولة|السوق)/],
     ecommerce_country_products: [/(منتجات من|من بلد|من دولة|منتجات في|في السعودية|في مصر|في الإمارات|السعودية|مصر|الإمارات)/],
     item_price: [/(سعر|اسعار|أسعار|بكام|بقديش|كم السعر|الثمن|حسابه|حسابها|كم حقها|حقها كم|عرض سعر|الجمله|الجملة)/],
+    logistics_inquiry: [/(كم يوم|كم يومًا|كم يوماً|امتى|متى يوصل|كم مدة|وقت التوصيل|وقت الشحن|وقت التوريد|المخزن|المستودع|مدة التوريد|مدة الشحن|التسليم|فترة التوريد|هيوصل امتى|يوصل امتى|تاريخ التسليم)/],
   }
 };
 
@@ -422,8 +451,16 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   if (matchesAny(normalizedText, patterns.location)) return { intent: 'location' };
   if (matchesAny(normalizedText, patterns.brand_info)) return { intent: 'brand_info' };
 
-  // Contextual or explicit dynamic feature inquiry check
-  const itemInContext = foundItem || (context.last_item ? items.find(i => i.id === context.last_item) : null);
+  // Contextual or explicit dynamic feature inquiry check. Resolve the item we're
+  // discussing from last_item; if that wasn't set (e.g. an AI recommendation that
+  // named several items), fall back to the most recently tracked item so a "عنه"
+  // / "it" follow-up still has a subject.
+  const contextItemId = Number.isFinite(context.last_item)
+    ? context.last_item
+    : (Array.isArray(context.recent_item_ids) && context.recent_item_ids.length
+      ? context.recent_item_ids[context.recent_item_ids.length - 1]
+      : null);
+  const itemInContext = foundItem || (contextItemId ? items.find(i => i.id === contextItemId) : null);
   if (itemInContext) {
     const featureInquiry = detectFeatureInquiry(normalizedText, lang, itemInContext);
     if (featureInquiry) return featureInquiry;
@@ -432,6 +469,11 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     // dead-ending on not-found.
     if (matchesAny(normalizedText, patterns.ecommerce_product_advantages)) {
       return { intent: 'ecommerce_product_advantages', item: itemInContext };
+    }
+    // "tell me more about it" / "قلي تفاصيل اكتر عنه" -> show the full product
+    // card for the item we're already discussing (resolved locally, in-language).
+    if (matchesAny(normalizedText, patterns.more_details)) {
+      return { intent: 'item_found', item: itemInContext, fromContext: true };
     }
   }
 
@@ -482,7 +524,15 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     }
   }
 
-  if (foundItem) {
+  // Logistics / timeline questions: "how many days to source", "delivery time",
+  // "when will it arrive". These contain words like "source", "product",
+  // "warehouse" that accidentally score weakly against item descriptions.
+  // Catch them before the item-found block so no random product card shows.
+  if (matchesAny(normalizedText, patterns.logistics_inquiry)) {
+    return { intent: 'logistics_inquiry' };
+  }
+
+  if (foundItem && topScore >= 10) {
     // (Advantages is handled above via itemInContext, which already covers foundItem.)
     if (matchedItems.length === 1 || (matchedItems.length > 1 && topScore >= secondScore + 3)) {
       if (asksPriceBase) return { intent: 'item_price', item: foundItem };
@@ -514,7 +564,13 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     };
   }
 
-  if (matchedItems.length > 1) {
+  // Only ask "which one did you mean?" when the matches are STRONG (a real
+  // name-level hit, same bar as item_found). A query like "عطر البراطور" matches
+  // every perfume on the generic word "عطر" while the distinguishing word
+  // "البراطور" matches nothing — those weak category-word matches must NOT be
+  // offered as a disambiguation; they fall through to unavailable/not-found so
+  // the customer gets a proper "we can source it" answer instead.
+  if (matchedItems.length > 1 && topScore >= 10) {
     return { intent: 'item_disambiguation', items: matchedItems };
   }
 
@@ -633,6 +689,13 @@ function buildResponse(intentResult, lang, business) {
     case 'catalog_general':
       payload.text = locale === 'ar' ? 'تفضّل، يمكنك تصفّح السوق كاملاً من الزر بالأسفل.' : 'Sure — you can browse our full Marketplace from the button below.';
       addMarketplaceButton();
+      break;
+
+    case 'logistics_inquiry':
+      payload.text = locale === 'ar'
+        ? 'للاستفسار عن مدة التوريد والشحن، تواصل معنا مباشرة — نقدر نعطيك توقيت دقيق حسب المنتج والكمية.'
+        : 'For sourcing timelines and delivery questions, please contact us directly — we can give you accurate timing based on the specific product and quantity.';
+      addContactButton();
       break;
 
     case 'ecommerce_price_quote':
