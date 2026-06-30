@@ -12,6 +12,7 @@ const rateLimit = require('express-rate-limit');
 require('./src/db/db');
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = Number(process.env.PORT || 3500);
 
 app.use(helmet({
