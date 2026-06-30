@@ -668,6 +668,28 @@
         min-width: 16px;
         text-align: center;
       }
+      .cb-dash-item-qty-input {
+        width: 38px;
+        height: 26px;
+        text-align: center;
+        font-size: 14px;
+        font-weight: 700;
+        color: #1f2937;
+        border: 1px solid var(--cb-border);
+        border-radius: 8px;
+        background: #fff;
+        padding: 0 2px;
+        -moz-appearance: textfield;
+      }
+      .cb-dash-item-qty-input:focus {
+        outline: none;
+        border-color: var(--cb-primary);
+      }
+      .cb-dash-item-qty-input::-webkit-outer-spin-button,
+      .cb-dash-item-qty-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
       .cb-dash-item-delete {
         border: 0;
         background: transparent;
@@ -684,6 +706,15 @@
         opacity: 1;
       }
       
+      .cb-wizard { display: flex; flex-direction: column; }
+      .cb-wiz-progress { display: flex; gap: 6px; justify-content: center; margin-bottom: 14px; }
+      .cb-wiz-dot { width: 30px; height: 4px; border-radius: 2px; background: rgba(0,0,0,0.12); transition: background 150ms ease; }
+      .cb-wiz-dot.active { background: var(--cb-primary); }
+      .cb-wiz-label { display: block; font-size: 12px; font-weight: 600; color: #57534e; margin: 10px 0 4px; }
+      .cb-wiz-input { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 14px; border: 1px solid var(--cb-border); border-radius: 10px; background: #fff; color: #1f2937; }
+      .cb-wiz-input:focus { outline: none; border-color: var(--cb-primary); }
+      textarea.cb-wiz-input { resize: vertical; min-height: 64px; }
+      .cb-wiz-error { color: #ef4444; font-size: 12.5px; margin-top: 6px; }
       .cb-dash-empty-state {
         text-align: center;
         padding: 24px 12px;
@@ -1016,6 +1047,25 @@
     document.head.appendChild(style);
   }
 
+  // Escape HTML so message text can never inject markup, THEN turn **bold** into
+  // <strong>. Without this the raw ** markdown the bot emits shows literally.
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+  function formatRichText(s) {
+    return escapeHtml(s).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  }
+  // Plain version (markers removed) used during the typing animation so a half
+  // "*" never flashes mid-reveal; the final text is swapped to formatted HTML.
+  function stripMarkdown(s) {
+    return String(s == null ? '' : s).replace(/\*\*([^*]+)\*\*/g, '$1');
+  }
+
   function appendMessage(text, role, lang, allowAutoOpen, thumbnail) {
     const message = document.createElement('div');
     message.className = `cb-msg ${role}`;
@@ -1034,7 +1084,7 @@
     }
 
     const textSpan = document.createElement('span');
-    textSpan.textContent = text;
+    textSpan.innerHTML = formatRichText(text);
     message.appendChild(textSpan);
 
     refs.messages.appendChild(message);
@@ -1078,17 +1128,20 @@
     // messages keep the one-char-at-a-time feel; long ones reveal several chars
     // per tick so they still finish on time — the full text is never cut.
     const TICK_MS = 12;
-    const len = text.length;
+    // Animate over the plain (marker-free) text so no stray "*" flashes; the
+    // final swap below renders the real **bold** as HTML.
+    const plain = stripMarkdown(text);
+    const len = plain.length;
     const maxTicks = Math.max(1, Math.floor(budgetMs / TICK_MS));
     const step = len <= maxTicks ? 1 : Math.ceil(len / maxTicks);
 
     for (let i = 0; i < len; i += step) {
       if (currentId !== state.typingId) return;
-      textSpan.textContent = text.slice(0, i + step);
+      textSpan.textContent = plain.slice(0, i + step);
       refs.messages.scrollTop = refs.messages.scrollHeight;
       await new Promise((resolve) => setTimeout(resolve, TICK_MS));
     }
-    if (currentId === state.typingId) textSpan.textContent = text;
+    if (currentId === state.typingId) textSpan.innerHTML = formatRichText(text);
     if (!state.open) {
       refs.bubble.classList.add('has-unread');
       playNotifySound();
@@ -1496,6 +1549,35 @@
             <div class="cb-search-results-list" style="display: none;"></div>
           </div>
         `;
+      } else if (status === 'awaiting_details') {
+        const ar = state.language === 'ar';
+        shellHtml += `
+          <div class="cb-wizard">
+            <div class="cb-wiz-progress">
+              <span class="cb-wiz-dot" data-dot="0"></span>
+              <span class="cb-wiz-dot" data-dot="1"></span>
+              <span class="cb-wiz-dot" data-dot="2"></span>
+            </div>
+            <div class="cb-card cb-wiz-step" data-step="0">
+              <div class="cb-card-title">${ar ? 'بياناتك' : 'Your details'}</div>
+              <label class="cb-wiz-label">${ar ? 'الاسم' : 'Name'}</label>
+              <input class="cb-wiz-input cb-wiz-name" type="text" value="${escapeHtml(draft.guest_name)}" placeholder="${ar ? 'اسمك' : 'Your name'}">
+              <label class="cb-wiz-label">${ar ? 'رقم الهاتف' : 'Phone'}</label>
+              <input class="cb-wiz-input cb-wiz-phone" type="tel" value="${escapeHtml(draft.guest_phone)}" placeholder="${ar ? 'رقم هاتفك' : 'Your phone'}">
+              <label class="cb-wiz-label">${ar ? 'الإيميل (اختياري)' : 'Email (optional)'}</label>
+              <input class="cb-wiz-input cb-wiz-email" type="email" value="${escapeHtml(draft.email)}" placeholder="${ar ? 'بريدك الإلكتروني' : 'you@example.com'}">
+            </div>
+            <div class="cb-card cb-wiz-step" data-step="1" style="display:none">
+              <div class="cb-card-title">${ar ? 'الدولة *' : 'Country *'}</div>
+              <input class="cb-wiz-input cb-wiz-country" type="text" value="${escapeHtml(draft.country)}" placeholder="${ar ? 'مثال: السعودية' : 'e.g., Saudi Arabia'}">
+              <div class="cb-wiz-error" style="display:none">${ar ? 'من فضلك أدخل الدولة لإتمام الطلب' : 'Please enter your country to continue'}</div>
+            </div>
+            <div class="cb-card cb-wiz-step" data-step="2" style="display:none">
+              <div class="cb-card-title">${ar ? 'ملاحظة (اختياري)' : 'Note (optional)'}</div>
+              <textarea class="cb-wiz-input cb-wiz-note" rows="3" placeholder="${ar ? 'أي تفاصيل إضافية تريد إضافتها...' : 'Any extra details you want to add...'}">${escapeHtml(draft.note)}</textarea>
+            </div>
+          </div>
+        `;
       } else if (status === 'awaiting_address') {
         shellHtml += `
           <div class="cb-card">
@@ -1624,6 +1706,9 @@
             }, 1000);
           });
         }
+      } else if (status === 'awaiting_details') {
+        // Entering the e-commerce checkout wizard — always start at step 1.
+        state.detailsStep = 0;
       } else if (status === 'awaiting_address') {
         const textarea = refs.dashboard.querySelector('.cb-address-textarea');
         if (textarea) {
@@ -1663,15 +1748,9 @@
                     <div class="cb-dash-item-name">${item.title}</div>
                   </div>
                   <div class="cb-dash-item-controls">
-                    <button type="button" class="cb-dash-qty-btn cb-dash-qty-dec" data-item-id="${item.order_item_id}">-</button>
-                    <span class="cb-dash-item-qty">${item.quantity}</span>
+                    <button type="button" class="cb-dash-qty-btn cb-dash-qty-dec" data-item-id="${item.order_item_id}" title="${state.language === 'ar' ? 'إنقاص (يحذف عند الصفر)' : 'Decrease (removes at zero)'}">&minus;</button>
+                    <input type="number" class="cb-dash-item-qty-input" data-item-id="${item.order_item_id}" min="0" inputmode="numeric" value="${item.quantity}" aria-label="${state.language === 'ar' ? 'الكمية' : 'Quantity'}">
                     <button type="button" class="cb-dash-qty-btn cb-dash-qty-inc" data-item-id="${item.order_item_id}">+</button>
-                    <button type="button" class="cb-dash-item-delete" data-item-id="${item.order_item_id}" title="${state.language === 'ar' ? 'حذف' : 'Delete'}">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                      </svg>
-                    </button>
                   </div>
                 </div>
               `;
@@ -1717,6 +1796,29 @@
                 updateDashboardUi();
                 scheduleCartSync(draft);
               }
+            });
+          });
+
+          // Manual quantity entry — set the number directly. Committing 0 (or
+          // blank) removes the item, same as decrementing past 1. Synced via
+          // sync_cart (qty <= 0 -> delete). Fires on change/blur, not per
+          // keystroke, so the field keeps focus while typing.
+          cartListEl.querySelectorAll('.cb-dash-item-qty-input').forEach((inp) => {
+            inp.addEventListener('focus', () => { try { inp.select(); } catch (e) {} });
+            inp.addEventListener('change', () => {
+              const itemId = Number(inp.getAttribute('data-item-id'));
+              const item = draft.items.find(i => i.order_item_id === itemId);
+              if (!item) return;
+              let q = parseInt(inp.value, 10);
+              if (!Number.isFinite(q) || q < 0) q = 0;
+              state.cartSyncPending = true;
+              state.lastCartEditTime = Date.now();
+              item.quantity = q;
+              if (q === 0) {
+                draft.items = draft.items.filter(i => i.order_item_id !== itemId);
+              }
+              updateDashboardUi();
+              scheduleCartSync(draft);
             });
           });
 
@@ -1881,6 +1983,60 @@
             await sendMessage({ value: state.typedAddress, silent: false });
           });
         }
+      }
+    } else if (status === 'awaiting_details') {
+      const ar = state.language === 'ar';
+      const step = state.detailsStep || 0;
+      const isLast = step === 2;
+
+      // Show only the active step + light up progress dots up to it.
+      refs.dashboard.querySelectorAll('.cb-wiz-step').forEach((el) => {
+        el.style.display = Number(el.getAttribute('data-step')) === step ? 'block' : 'none';
+      });
+      refs.dashboard.querySelectorAll('.cb-wiz-dot').forEach((el) => {
+        el.classList.toggle('active', Number(el.getAttribute('data-dot')) <= step);
+      });
+
+      const actionBarEl = refs.dashboard.querySelector('.cb-dash-action-bar');
+      if (actionBarEl) {
+        actionBarEl.style.display = 'flex';
+        actionBarEl.style.gap = '8px';
+        actionBarEl.innerHTML = `
+          ${step > 0 ? `<button type="button" class="cb-choice secondary cb-wiz-back" style="flex:1;padding:11px;font-weight:600;margin:0;">${ar ? 'السابق' : 'Back'}</button>` : ''}
+          <button type="button" class="cb-dash-btn-primary cb-wiz-next" style="flex:2;">${isLast ? (ar ? 'تأكيد الطلب' : 'Place Order') : (ar ? 'التالي' : 'Next')}</button>
+        `;
+
+        const backBtn = actionBarEl.querySelector('.cb-wiz-back');
+        if (backBtn) backBtn.addEventListener('click', () => { state.detailsStep = Math.max(0, step - 1); updateDashboardUi(); });
+
+        const nextBtn = actionBarEl.querySelector('.cb-wiz-next');
+        nextBtn.addEventListener('click', async () => {
+          // Country (step 1) is the only required field.
+          if (step === 1) {
+            const countryEl = refs.dashboard.querySelector('.cb-wiz-country');
+            const errEl = refs.dashboard.querySelector('.cb-wiz-error');
+            if (countryEl && !countryEl.value.trim()) {
+              if (errEl) errEl.style.display = 'block';
+              countryEl.focus();
+              return;
+            }
+            if (errEl) errEl.style.display = 'none';
+          }
+          if (!isLast) { state.detailsStep = step + 1; updateDashboardUi(); return; }
+
+          const val = (sel) => { const el = refs.dashboard.querySelector(sel); return el ? el.value.trim() : ''; };
+          const payload = {
+            name: val('.cb-wiz-name'),
+            phone: val('.cb-wiz-phone'),
+            email: val('.cb-wiz-email'),
+            country: val('.cb-wiz-country'),
+            note: val('.cb-wiz-note'),
+          };
+          if (!payload.country) { state.detailsStep = 1; updateDashboardUi(); return; }
+          nextBtn.disabled = true;
+          nextBtn.textContent = ar ? 'جاري إرسال الطلب...' : 'Placing order...';
+          await sendMessage({ value: '__order__:submit_details:' + JSON.stringify(payload), silent: false });
+        });
       }
     } else if (status === 'address_confirmation') {
       const actionBarEl = refs.dashboard.querySelector('.cb-dash-action-bar');

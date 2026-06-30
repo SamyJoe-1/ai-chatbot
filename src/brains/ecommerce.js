@@ -114,6 +114,15 @@ function isSourcing(business) {
   return Number(business && business.sourcing_mode) === 1;
 }
 
+// Metadata keys that are internal plumbing imported from the source JSON, NOT
+// customer-facing product specs. Never surface these as "features" or answer an
+// inquiry about them (the source `id`/`slug` etc. leaked as "The id of X is 129"
+// because the generic key match below was a loose substring test on a 2-char key).
+const INTERNAL_META_KEYS = new Set([
+  'id', 'slug', 'thumbnail', 'hot_selling', 'badge', 'availability', 'available',
+  'country', 'country_en', 'country_ar',
+]);
+
 // Editable "Contact us" button target. Prefer the owner-set contact_link
 // (whatsapp / mailto / any URL); else build a wa.me link from the phone; else a
 // mailto from the email. Returns null when no contact channel is configured.
@@ -149,16 +158,48 @@ function sourcingPriceText(locale) {
     : 'Wholesale pricing depends on the quantity you need. Send us the quantity you want and we’ll get you the best available quote.';
 }
 
-function getDynamicFeaturesText(item) {
+// Build a clean, compact feature block for a product, in the customer's language
+// only (never both EN+AR). Returns an array of display lines:
+//   "Advantages:" + one "• ..." bullet per comma-separated point (from details/
+//   features), then "Product Code: ...", then any other custom spec keys with a
+//   friendly label. Replaces the old raw "details_en: ..." dump.
+function buildFeatureLines(item, locale) {
   const meta = item.metadata || {};
-  const ignores = ['thumbnail', 'hot_selling', 'country', 'country_ar', 'country_en', 'badge', 'slug', 'availability'];
-  const features = [];
-  for (const [k, v] of Object.entries(meta)) {
-    if (!ignores.includes(k) && typeof v === 'string') {
-      features.push(`${k}: ${v}`);
+  const out = [];
+
+  // 1) Advantages — from details_<lang>, falling back to features_<lang> array.
+  let details = locale === 'ar' ? (meta.details_ar || meta.details_en) : (meta.details_en || meta.details_ar);
+  if (!details) {
+    const arr = locale === 'ar' ? (meta.features_ar || meta.features_en) : (meta.features_en || meta.features_ar);
+    if (Array.isArray(arr) && arr.length) details = arr.join(', ');
+  }
+  if (details) {
+    const cleaned = String(details).replace(/^\s*(key features|advantages|المميزات الأساسية|المميزات)\s*:?\s*/i, '').trim();
+    const bullets = cleaned.split(/[,،]/).map((s) => s.trim()).filter(Boolean);
+    if (bullets.length) {
+      out.push(locale === 'ar' ? '**المميزات:**' : '**Advantages:**');
+      bullets.forEach((b) => out.push(`• ${b}`));
     }
   }
-  return features;
+
+  // 2) Product code (SKU) — friendly label, one line.
+  if (meta.code) out.push((locale === 'ar' ? '**كود المنتج:** ' : '**Product Code:** ') + meta.code);
+
+  // 3) Any remaining custom string specs (color, material, ...) — current
+  //    language only, friendly label, skipping internal/already-handled keys.
+  const handled = new Set(['details_en', 'details_ar', 'details', 'features_en', 'features_ar', 'features', 'code']);
+  for (const [k, v] of Object.entries(meta)) {
+    const kl = k.toLowerCase();
+    if (INTERNAL_META_KEYS.has(kl) || handled.has(kl)) continue;
+    if ((kl.endsWith('_ar') && locale !== 'ar') || (kl.endsWith('_en') && locale === 'ar')) continue;
+    if (typeof v === 'string' && v.trim()) {
+      const canon = kl.replace(/_(en|ar)$/, '');
+      const label = (FEATURE_LABELS[locale] || {})[canon] || (canon.charAt(0).toUpperCase() + canon.slice(1));
+      out.push(`**${label}:** ${v.trim()}`);
+    }
+  }
+
+  return out;
 }
 
 function getCountryNames(items) {
@@ -253,7 +294,12 @@ function detectFeatureInquiry(text, lang, item) {
   }
 
   for (const [key, value] of Object.entries(meta)) {
-    if (normalizedText.includes(key.toLowerCase())) {
+    const k = key.toLowerCase();
+    // Skip internal keys (id/slug/...) and short keys, and require a WHOLE-WORD
+    // match — not a substring — so "id" never fires inside "provide"/"consider".
+    if (INTERNAL_META_KEYS.has(k) || k.length < 4) continue;
+    const re = new RegExp(`(^|[^a-z0-9])${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`, 'i');
+    if (re.test(normalizedText)) {
       return {
         intent: 'ecommerce_inquire_feature',
         item,
@@ -381,6 +427,12 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   if (itemInContext) {
     const featureInquiry = detectFeatureInquiry(normalizedText, lang, itemInContext);
     if (featureInquiry) return featureInquiry;
+    // Context-dependent chips like the "Advantages" suggestion send only the word
+    // with NO product named. Resolve them against the last item shown instead of
+    // dead-ending on not-found.
+    if (matchesAny(normalizedText, patterns.ecommerce_product_advantages)) {
+      return { intent: 'ecommerce_product_advantages', item: itemInContext };
+    }
   }
 
   const asksPriceBase = matchesAny(normalizedText, patterns.item_price);
@@ -431,9 +483,7 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   }
 
   if (foundItem) {
-    const isAdvantage = matchesAny(normalizedText, patterns.ecommerce_product_advantages);
-    if (isAdvantage) return { intent: 'ecommerce_product_advantages', item: foundItem };
-
+    // (Advantages is handled above via itemInContext, which already covers foundItem.)
     if (matchedItems.length === 1 || (matchedItems.length > 1 && topScore >= secondScore + 3)) {
       if (asksPriceBase) return { intent: 'item_price', item: foundItem };
       return { intent: 'item_found', item: foundItem };
@@ -695,14 +745,11 @@ function buildResponse(intentResult, lang, business) {
     case 'ecommerce_product_advantages': {
       const item = intentResult.item;
       const desc = getDisplayDescription(item, locale);
-      const features = getDynamicFeaturesText(item);
-      let lines = [];
+      const featureLines = buildFeatureLines(item, locale);
+      const lines = [];
       if (desc) lines.push(desc);
-      if (features.length) {
-        lines.push(locale === 'ar' ? 'المواصفات:' : 'Features:');
-        lines.push(...features.map(f => `- ${f}`));
-      }
-      payload.text = lines.length > 0 ? lines.join('\n') : (locale === 'ar' ? 'لا تتوفر تفاصيل إضافية لهذا المنتج.' : 'No additional details available for this product.');
+      if (featureLines.length) lines.push(featureLines.join('\n'));
+      payload.text = lines.length > 0 ? lines.join('\n\n') : (locale === 'ar' ? 'لا تتوفر تفاصيل إضافية لهذا المنتج.' : 'No additional details available for this product.');
       const thumb = getItemThumbnail(item);
       if (thumb) payload.thumbnail = thumb;
       payload.suggestions = [locale === 'ar' ? `اطلب ${getDisplayTitle(item, locale)}` : `Order ${getDisplayTitle(item, locale)}`];
@@ -712,16 +759,16 @@ function buildResponse(intentResult, lang, business) {
     case 'item_found': {
       const item = intentResult.item;
       const title = getDisplayTitle(item, locale);
-      const lines = [title];
+      const lines = [`**${title}**`];
 
       const category = getDisplayCategory(item, locale);
       const country = getDisplayCountry(item, locale);
 
-      if (category) lines.push(locale === 'ar' ? `القسم: ${category}` : `Category: ${category}`);
-      if (country) lines.push(locale === 'ar' ? `البلد: ${country}` : `Country: ${country}`);
+      if (category) lines.push(locale === 'ar' ? `**القسم:** ${category}` : `**Category:** ${category}`);
+      if (country) lines.push(locale === 'ar' ? `**البلد:** ${country}` : `**Country:** ${country}`);
 
       // Items reaching item_found are in stock, so confirm availability.
-      lines.push(locale === 'ar' ? '✅ متوفر للتوريد' : '✅ Available');
+      lines.push(locale === 'ar' ? '✅ **متوفر للتوريد**' : '✅ **Available**');
 
       const description = getDisplayDescription(item, locale);
       if (description) {
@@ -731,12 +778,12 @@ function buildResponse(intentResult, lang, business) {
       if (sourcing) {
         lines.push('\n' + sourcingPriceText(locale));
       } else if (item.price !== null && item.price !== undefined) {
-        lines.push('\n' + (locale === 'ar' ? `السعر: ${item.price} ${item.currency}` : `Price: ${item.price} ${item.currency}`));
+        lines.push('\n' + (locale === 'ar' ? `**السعر:** ${item.price} ${item.currency}` : `**Price:** ${item.price} ${item.currency}`));
       }
 
-      const features = getDynamicFeaturesText(item);
-      if (features.length > 0) {
-        lines.push('\n' + features.join('\n'));
+      const featureLines = buildFeatureLines(item, locale);
+      if (featureLines.length > 0) {
+        lines.push('\n' + featureLines.join('\n'));
       }
 
       payload.text = lines.join('\n');

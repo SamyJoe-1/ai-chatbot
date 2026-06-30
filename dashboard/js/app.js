@@ -806,7 +806,10 @@ function renderOrders() {
         <div class="order-customer">
           <strong>${esc(o.guest_name || 'Guest')}</strong> (${esc(o.guest_phone)})
         </div>
-        <div class="order-address">${esc(o.address || 'No address provided')}</div>
+        ${o.country ? `<div class="order-address"><strong>Country:</strong> ${esc(o.country)}</div>` : ''}
+        ${o.email ? `<div class="order-address"><strong>Email:</strong> ${esc(o.email)}</div>` : ''}
+        ${o.address ? `<div class="order-address">${esc(o.address)}</div>` : (o.country ? '' : `<div class="order-address">No address provided</div>`)}
+        ${o.note ? `<div class="order-address"><strong>Note:</strong> ${esc(o.note)}</div>` : ''}
         <ul class="order-items-list">${itemsHtml}</ul>
       </div>
       <div class="order-actions">

@@ -69,6 +69,11 @@ function migrateLegacyCafeData() {
   // unavailable product is answered as "we'll source it" instead of "out of
   // stock". Off by default so a normal store keeps showing prices/stock.
   ensureColumn('businesses', 'sourcing_mode', 'sourcing_mode INTEGER NOT NULL DEFAULT 0');
+  // E-commerce checkout collects contact + country + note instead of a delivery
+  // address; these hold that captured info on the order for dashboard tracking.
+  ensureColumn('orders', 'email', 'email TEXT');
+  ensureColumn('orders', 'country', 'country TEXT');
+  ensureColumn('orders', 'note', 'note TEXT');
 
   // AI Usage diagnosis: keep the full rendered prompt + full model output and
   // the cached-token count so any call can be inspected after the fact.

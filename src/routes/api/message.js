@@ -34,6 +34,7 @@ const {
   prefixAiFallbackPayload,
   resolveAiPipeline,
   buildRecommendationCandidates,
+  buildRecommendationMessages,
 } = require('../../engine/aiPipelines');
 const { canUseAi, recordAiUse } = require('../../engine/aiRateLimiter');
 const { matchFaq } = require('../../engine/faqMatcher');
@@ -140,14 +141,31 @@ function resolveItemsByIds(businessId, ids) {
 // them"), fall back to the items we last recommended ([12]) or last showed —
 // that is a PRECISE set, so seedAll tells the order flow to add every one.
 function resolveOrderSeedItems({ text, lang, businessId, context }) {
+  // 1. Items explicitly named in THIS message win.
   const explicit = matchItemsForOrder({ text, lang, businessId, context });
   if (explicit.length) return { items: explicit, seedAll: false };
+
   const raw = String(text || '');
-  if (!ORDER_ANAPHOR_RE.test(raw) && !ORDER_ANAPHOR_AR_RE.test(raw)) return { items: [], seedAll: false };
-  const ids = Array.isArray(context.last_recommended_ids) && context.last_recommended_ids.length
-    ? context.last_recommended_ids
-    : (Array.isArray(context.recent_item_ids) ? context.recent_item_ids.slice(-3) : []);
-  return { items: resolveItemsByIds(businessId, ids), seedAll: true };
+  // 2. "order them / those / both" -> the SET we last recommended/showed.
+  if (ORDER_ANAPHOR_RE.test(raw) || ORDER_ANAPHOR_AR_RE.test(raw)) {
+    const ids = Array.isArray(context.last_recommended_ids) && context.last_recommended_ids.length
+      ? context.last_recommended_ids
+      : (Array.isArray(context.recent_item_ids) ? context.recent_item_ids.slice(-3) : []);
+    return { items: resolveItemsByIds(businessId, ids), seedAll: true };
+  }
+
+  // 3. Bare order intent with NO product named ("make an order", "i want to
+  //    order", "i already told you") -> the single product they were just
+  //    looking at, else the most recent one. This is what lets "make order"
+  //    after viewing a product seed THAT product instead of opening empty.
+  if (Number.isFinite(context.last_item)) {
+    return { items: resolveItemsByIds(businessId, [context.last_item]), seedAll: true };
+  }
+  const recent = Array.isArray(context.recent_item_ids) ? context.recent_item_ids : [];
+  if (recent.length) {
+    return { items: resolveItemsByIds(businessId, [recent[recent.length - 1]]), seedAll: true };
+  }
+  return { items: [], seedAll: false };
 }
 
 function shouldRetryWithRecovery(intent) {
@@ -332,6 +350,10 @@ router.post('/', tokenValidator, async (req, res) => {
         // matchItemsForOrder resolves back to real rows.
         const recommendedItems = matchItemsForOrder({ text: answer.reply, lang, businessId: business.id, context });
         const recommendedIds = recommendedItems.map((it) => it.id).filter(Number.isFinite);
+        // Split the reply so each named catalog item becomes its own bubble with
+        // its thumbnail (intro line stays first). Null when nothing resolved -> we
+        // keep the plain single-text reply.
+        const recMessages = buildRecommendationMessages({ replyText: answer.reply, business, lang });
         return {
           handled: true,
           intent: 'ai_recommend',
@@ -340,6 +362,7 @@ router.post('/', tokenValidator, async (req, res) => {
             type: 'text',
             buttons: [],
             suggestions: parseSuggestions(business, lang),
+            ...(recMessages ? { messages: recMessages } : {}),
             context_update: recommendedIds.length
               ? {
                 recent_item_ids: mergeRecentItemIds(context, recommendedIds),
@@ -620,6 +643,13 @@ router.post('/', tokenValidator, async (req, res) => {
       } else {
         const howtoProbe = brain.detectIntent({ text, lang, business, context });
         if (howtoProbe && howtoProbe.intent === 'order_howto') {
+          // If they were already looking at / we already recommended a product,
+          // skip asking and open the order seeded with it (per spec). Only ask
+          // "which products?" when there is genuinely no product in context.
+          const seed = resolveOrderSeedItems({ text, lang, businessId: business.id, context });
+          if (seed.items.length) {
+            return startOrderResponse(seed.items, seed.seedAll);
+          }
           const howtoPayload = brain.buildResponse(howtoProbe, lang, business);
           const nextContext = {
             ...context,

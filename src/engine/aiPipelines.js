@@ -403,6 +403,93 @@ function buildRecommendationCandidates({ criteria, business, lang, context }) {
   return compactCandidates(recommendationPool({ criteria, business, lang, context }), lang);
 }
 
+// Strip a leading list marker ("1. ", "- ", "• ") from a recommendation line.
+function stripListPrefix(line) {
+  return String(line || '').replace(/^\s*(?:\d+[.)]\s*|[-*•]\s*)/, '').trim();
+}
+
+// The product name in a recommendation line is the part before the description
+// separator ("Baby Organizer — keeps things tidy" / "Latte: smooth and warm").
+function itemNameFromLine(line) {
+  const stripped = stripListPrefix(line);
+  const head = stripped.split(/\s+[—–-]\s+|:\s+/)[0];
+  return (head || stripped).trim();
+}
+
+// STRICT line->item match: the line must actually contain the product's exact
+// title (longest wins), or cover >=80% of a multi-word title's tokens. This is
+// deliberately tighter than bestItemForName so an intro line like "great options
+// for you" never resolves to a product on loose token overlap. The [12] prompt
+// tells the model to copy titles exactly, so containment is the right test.
+function strictItemForName(items, name, locale) {
+  const n = normalize(name, locale);
+  if (!n || n.length < 3) return null;
+  const titleOf = (item) => normalize(locale === 'ar' ? (item.title_ar || item.title_en) : (item.title_en || item.title_ar), locale);
+
+  let best = null;
+  let bestLen = 0;
+  for (const item of items) {
+    const t = titleOf(item);
+    if (t && t.length >= 4 && n.includes(t) && t.length > bestLen) {
+      best = item;
+      bestLen = t.length;
+    }
+  }
+  if (best) return best;
+
+  const nTokens = new Set(tokenize(n).filter((x) => x.length > 1));
+  if (!nTokens.size) return null;
+  let covBest = null;
+  let covScore = 0;
+  for (const item of items) {
+    const tTokens = tokenize(titleOf(item)).filter((x) => x.length > 1);
+    if (tTokens.length < 2) continue; // single-word titles can't match on coverage (too loose)
+    const hits = tTokens.filter((x) => nTokens.has(x)).length;
+    const cov = hits / tTokens.length;
+    if (cov >= 0.8 && cov > covScore) {
+      covScore = cov;
+      covBest = item;
+    }
+  }
+  return covBest;
+}
+
+// Turn a free-text [12] recommendation reply into a `messages[]` array: the
+// intro line(s) become the first bubble, then EACH line that names a catalog
+// item becomes its own bubble carrying that item's thumbnail (mirrors the
+// multi-detail layout). Returns null when no line resolves to a real item, so
+// the caller keeps the plain single-text reply. Works for every service type.
+function buildRecommendationMessages({ replyText, business, lang }) {
+  const locale = lang === 'ar' ? 'ar' : 'en';
+  const items = getBusinessItems(business.id);
+  if (!items.length) return null;
+  const lines = String(replyText || '').split('\n').map((l) => l.trim()).filter(Boolean);
+
+  const intro = [];
+  const itemMsgs = [];
+  const trailing = [];
+  const seen = new Set();
+  for (const line of lines) {
+    const name = itemNameFromLine(line);
+    const item = name ? strictItemForName(items, name, locale) : null;
+    if (item && !seen.has(item.id)) {
+      seen.add(item.id);
+      itemMsgs.push({ text: stripListPrefix(line), thumbnail: getItemThumbnail(item) || null });
+    } else if (itemMsgs.length === 0) {
+      intro.push(line);
+    } else {
+      trailing.push(line);
+    }
+  }
+
+  if (!itemMsgs.length) return null;
+  const messages = [];
+  if (intro.length) messages.push({ text: intro.join('\n'), thumbnail: null });
+  messages.push(...itemMsgs);
+  if (trailing.length) messages.push({ text: trailing.join('\n'), thumbnail: null });
+  return messages;
+}
+
 function prefixAiFallbackPayload(payload, lang) {
   const prefix = lang === 'ar'
     ? 'لم أتمكن من فهم تصنيف الذكاء الاصطناعي بدقة، لكن يمكنني مساعدتك بهذا:'
@@ -418,4 +505,5 @@ module.exports = {
   prefixAiFallbackPayload,
   resolveAiPipeline,
   buildRecommendationCandidates,
+  buildRecommendationMessages,
 };

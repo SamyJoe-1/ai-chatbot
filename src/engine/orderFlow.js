@@ -8,7 +8,7 @@ const { getBusinessItems } = require('../brains/shared/catalogStore');
 const { findScoredItems, uniqueById } = require('../brains/shared/matcher');
 
 const ORDER_COMMAND_PREFIX = '__order__:';
-const ACTIVE_ORDER_STATUSES = ['draft', 'awaiting_address', 'address_confirmation', 'pending'];
+const ACTIVE_ORDER_STATUSES = ['draft', 'awaiting_address', 'awaiting_details', 'address_confirmation', 'pending'];
 
 const getFrancoFlag = db.prepare('SELECT franco_enabled FROM businesses WHERE id = ?');
 // Franco/Arabizi recovery is on unless the business row explicitly disables it
@@ -24,7 +24,7 @@ const getLatestActiveOrderByPhone = db.prepare(`
   FROM orders
   WHERE business_id = ?
     AND guest_phone = ?
-    AND status IN ('draft', 'awaiting_address', 'address_confirmation', 'pending')
+    AND status IN ('draft', 'awaiting_address', 'awaiting_details', 'address_confirmation', 'pending')
   ORDER BY updated_at DESC, created_at DESC
   LIMIT 1
 `);
@@ -45,6 +45,13 @@ const updateOrderStatus = db.prepare(`
 const updateOrderAddressAndStatus = db.prepare(`
   UPDATE orders
   SET address = ?, status = ?, confirmed_at = datetime('now'), updated_at = datetime('now')
+  WHERE id = ?
+`);
+// E-commerce checkout: save the captured contact + country + note and confirm.
+const updateOrderDetailsAndConfirm = db.prepare(`
+  UPDATE orders
+  SET guest_name = ?, guest_phone = ?, email = ?, country = ?, note = ?,
+      status = 'pending', confirmed_at = datetime('now'), updated_at = datetime('now')
   WHERE id = ?
 `);
 const cancelOrder = db.prepare(`
@@ -137,7 +144,7 @@ function parseOrderCommand(text) {
   const action = rest.slice(0, colon1);
   const remainder = rest.slice(colon1 + 1);
   
-  if (action === 'sync_cart' || action === 'add_item') {
+  if (action === 'sync_cart' || action === 'add_item' || action === 'submit_details') {
     return { action, itemId: null, payload: remainder };
   }
 
@@ -289,6 +296,13 @@ function buildUiState({ lang, stage, order, items, addressPreview, business }) {
       order_id: order.id,
       status: order.status,
       address: order.address || '',
+      // Prefilled contact/details for the e-commerce checkout wizard. Name/phone
+      // come from the chat start (stored on the order at creation); editable.
+      guest_name: order.guest_name || '',
+      guest_phone: order.guest_phone || '',
+      email: order.email || '',
+      country: order.country || '',
+      note: order.note || '',
       empty_label: lang === 'ar' ? 'الطلب فارغ حالياً' : 'This order is empty right now',
       items: items.map((item) => ({
         order_item_id: item.id,
@@ -550,6 +564,35 @@ function buildAddressConfirmationMessage({ lang, address }) {
   ].join('\n');
 }
 
+// Prompt shown when an e-commerce order moves to the details wizard.
+function buildDetailsPrompt({ lang }) {
+  return lang === 'ar'
+    ? 'تمام! بقي خطوة أخيرة — أكِّد بياناتك (الاسم والهاتف) وحدِّد الدولة لإتمام الطلب.'
+    : 'Great! One last step — confirm your details (name & phone) and select your country to place the order.';
+}
+
+// E-commerce order confirmation: shows country + note instead of a delivery address.
+function buildEcomOrderCompleteMessage({ lang, order, items }) {
+  return [
+    lang === 'ar'
+      ? `شكراً جداً. تم تأكيد طلبك بنجاح برقم ${order.id}.`
+      : `Thank you very much. Your order ${order.id} has been confirmed successfully.`,
+    '',
+    `${lang === 'ar' ? 'الاسم:' : 'Name:'} ${order.guest_name || '-'}`,
+    `${lang === 'ar' ? 'الهاتف:' : 'Phone:'} ${order.guest_phone || '-'}`,
+    order.email ? `${lang === 'ar' ? 'الإيميل:' : 'Email:'} ${order.email}` : null,
+    `${lang === 'ar' ? 'الدولة:' : 'Country:'} ${order.country || '-'}`,
+    order.note ? `${lang === 'ar' ? 'ملاحظة:' : 'Note:'} ${order.note}` : null,
+    '',
+    lang === 'ar' ? 'تفاصيل الطلب:' : 'Order details:',
+    getOrderSummaryText(items, lang),
+    '',
+    lang === 'ar'
+      ? 'سنتواصل معك قريباً لتأكيد التفاصيل والتسعير.'
+      : 'We will contact you shortly to confirm details and pricing.',
+  ].filter((line) => line !== null).join('\n');
+}
+
 function buildOrderCompleteMessage({ lang, order, items, address }) {
   return [
     lang === 'ar'
@@ -762,6 +805,9 @@ function resolveOrderUiState({ business, session, context, lang }) {
   }
   if (session.phase === 'order_address') {
     return serializeOrderState({ lang, stage: 'address', order, items, context, business });
+  }
+  if (session.phase === 'order_details') {
+    return serializeOrderState({ lang, stage: 'details', order, items, context, business });
   }
   if (session.phase === 'order_address_confirm') {
     return serializeOrderState({ lang, stage: 'address_confirmation', order, items, context, business });
@@ -1025,8 +1071,83 @@ function handleOrderMessage({ text, business, session, context, lang }) {
     };
   }
 
+  // E-commerce checkout submit: the wizard sends all collected fields at once.
+  if (orderCommand && orderCommand.action === 'submit_details' && order) {
+    let details = {};
+    try { details = JSON.parse(orderCommand.payload || '{}'); } catch {}
+    const country = String(details.country || '').trim().slice(0, 80);
+    const name = String(details.name || order.guest_name || '').trim().slice(0, 60);
+    const phone = String(details.phone || order.guest_phone || '').trim().slice(0, 30);
+    const email = String(details.email || '').trim().slice(0, 120);
+    const note = String(details.note || '').trim().slice(0, 500);
+    const detailItems = getOrderItems(order.id);
+
+    // Country is the one required field; bounce back to the wizard without it.
+    if (!country) {
+      const updatedContext = setOrderContext(normalizedContext, { stage: 'details' });
+      return {
+        phase: 'order_details',
+        context: updatedContext,
+        response: {
+          text: lang === 'ar' ? 'من فضلك حدّد الدولة لإتمام الطلب.' : 'Please select your country to place the order.',
+          type: 'text',
+          buttons: [],
+          ...serializeOrderState({ lang, stage: 'details', order, items: detailItems, context: updatedContext, business }),
+        },
+        intent: 'order_details_invalid',
+        skipUserMessage: true,
+        skipBotMessage: false,
+      };
+    }
+
+    updateOrderDetailsAndConfirm.run(name, phone, email, country, note, order.id);
+    const refreshedOrder = getOrderById.get(order.id);
+
+    return {
+      phase: 'active',
+      context: clearOrderContext(normalizedContext),
+      response: {
+        text: buildEcomOrderCompleteMessage({ lang, order: refreshedOrder, items: detailItems }),
+        type: 'text',
+        buttons: [],
+        suggestions: [],
+        ui_state: emptyUiState(),
+      },
+      intent: 'order_confirmed',
+      skipUserMessage: false,
+      skipBotMessage: false,
+    };
+  }
+
   if (session.phase === 'order_review') {
     if (isYesText(text, lang) || (orderCommand && orderCommand.action === 'confirm')) {
+      // E-commerce skips the delivery-address flow entirely: it confirms contact
+      // info and collects a required country + optional note via a wizard.
+      if (String(business.service_type || '') === 'ecommerce') {
+        const updatedContext = setOrderContext(normalizedContext, { stage: 'details' });
+        updateOrderStatus.run('awaiting_details', order.id);
+        return {
+          phase: 'order_details',
+          context: updatedContext,
+          response: {
+            text: buildDetailsPrompt({ lang }),
+            type: 'text',
+            buttons: [],
+            ...serializeOrderState({
+              lang,
+              stage: 'details',
+              order: getOrderById.get(order.id),
+              items,
+              context: updatedContext,
+              business,
+            }),
+          },
+          intent: 'order_details_requested',
+          skipUserMessage: false,
+          skipBotMessage: false,
+        };
+      }
+
       const updatedContext = setOrderContext(normalizedContext, {
         stage: 'address',
         pending_address: '',
@@ -1114,6 +1235,25 @@ function handleOrderMessage({ text, business, session, context, lang }) {
       intent: 'order_items_added',
       skipUserMessage: false,
       skipBotMessage: false,
+    };
+  }
+
+  // E-commerce details wizard is in the panel (input is locked); any stray text
+  // just re-shows the wizard. The real submit comes via submit_details above.
+  if (session.phase === 'order_details') {
+    const detailItems = getOrderItems(order.id);
+    return {
+      phase: 'order_details',
+      context: normalizedContext,
+      response: {
+        text: buildDetailsPrompt({ lang }),
+        type: 'text',
+        buttons: [],
+        ...serializeOrderState({ lang, stage: 'details', order, items: detailItems, context: normalizedContext, business }),
+      },
+      intent: 'order_details',
+      skipUserMessage: false,
+      skipBotMessage: true,
     };
   }
 

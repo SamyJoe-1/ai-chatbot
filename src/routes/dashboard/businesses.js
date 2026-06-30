@@ -494,25 +494,29 @@ router.get('/:id/orders/export', (req, res) => {
   if (!ensureAccess(req.admin, businessId)) return res.status(403).json({ error: 'forbidden' });
 
   const orders = db.prepare(`
-    SELECT o.id, o.guest_name, o.guest_phone, o.status, o.address, o.confirmed_at, o.created_at,
+    SELECT o.id, o.guest_name, o.guest_phone, o.email, o.country, o.note, o.status, o.address, o.confirmed_at, o.created_at,
            (SELECT group_concat(oi.title_en || ' x' || oi.quantity, '; ') FROM order_items oi WHERE oi.order_id = o.id) as items_summary
     FROM orders o
     WHERE o.business_id = ?
     ORDER BY o.created_at DESC
   `).all(businessId);
 
-  let csv = 'Order ID,Customer,Phone,Status,Address,Items,Created At\n';
+  const csvCell = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  let csv = 'Order ID,Customer,Phone,Email,Country,Note,Status,Address,Items,Created At\n';
   orders.forEach(o => {
     const row = [
       o.id,
       o.guest_name || 'Guest',
       o.guest_phone,
+      o.email || '',
+      o.country || '',
+      o.note || '',
       o.status,
-      (o.address || '').replace(/,/g, ' '),
+      o.address || '',
       (o.items_summary || '').replace(/,/g, ';'),
       o.created_at
     ];
-    csv += row.join(',') + '\n';
+    csv += row.map(csvCell).join(',') + '\n';
   });
 
   res.setHeader('Content-Type', 'text/csv');

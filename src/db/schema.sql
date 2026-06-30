@@ -93,6 +93,9 @@ CREATE TABLE IF NOT EXISTS orders (
   guest_phone TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'draft',
   address TEXT,
+  email TEXT,
+  country TEXT,
+  note TEXT,
   confirmed_at TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
