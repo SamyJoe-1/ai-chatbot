@@ -172,6 +172,43 @@ function shouldRetryWithRecovery(intent) {
   return intent === 'unknown' || intent === 'item_not_found';
 }
 
+// Deterministic meta/FAQ intents where the local rule IS the right answer —
+// no reasoning or catalog ambiguity to resolve, so there's nothing an AI call
+// could improve on. These get first refusal even on a message that scores
+// high enough for AI (a vague "help me choose" question scores high on
+// unknown-token ratio same as a real product question). Deliberately NOT
+// item_found/category_items/etc — those stay AI-first because the AI is
+// there to break catalog ambiguity and reasoning questions rules can't judge.
+const ALWAYS_LOCAL_INTENTS = new Set([
+  'greeting_hello', 'greeting_how_are_you', 'greeting_yasta', 'thanks',
+  'help', 'guided_discovery', 'list_categories', 'contact', 'working_hours',
+  'location', 'brand_info', 'order_howto',
+]);
+
+// The classifier's [11] direct-answer sometimes bottoms out on a completely
+// open, content-free bounce ("I'm here to help! What do you need?", "Just
+// let me know what you're looking for", "just tell me which product(s)
+// you'd like to choose") instead of grounding a real reply — even when the
+// message already stated what the customer wants (e.g. "I don't know what
+// to choose"). Showing that verbatim produces a dead-end loop where the bot
+// asks the customer to restate what they already said. Catch that specific
+// circular "restate your need" shape — NOT every "I'm here to help" opener,
+// since variants that continue with a concrete, non-circular ask ("...just
+// tell me which product(s) and I'll take the order") are genuinely useful
+// and must still pass through.
+const AI_FILLER_RE = [
+  /\bwhat do you need\b/i,
+  /ما الذي تحتاجه/,
+  /ايه اللي محتاجه/,
+  /\b(tell|let)\s+me\s+know\s+(what|which)\b[^.!?]*\b(need|want|looking for)\b/i,
+  /\bassist you in choosing\b/i,
+  /\bwhich product\(?s?\)?\s*you'?d like to choose\b/i,
+];
+function isFillerAiReply(text) {
+  const t = String(text || '').trim();
+  return !t || AI_FILLER_RE.some((re) => re.test(t));
+}
+
 function hasUsablePayload(payload) {
   return Boolean(payload && payload.text && !['unknown', 'item_not_found', 'need_item_context', 'ai_not_found'].includes(payload.intent));
 }
@@ -410,7 +447,10 @@ router.post('/', tokenValidator, async (req, res) => {
       // "does this item have butter?"). Show it verbatim — no second AI call.
       if (pipeline.code === 11) {
         const direct = (pipeline.direct || '').trim();
-        if (!direct) return { handled: false, raw: aiResult.raw };
+        // Content-free bounce -> let local rules answer instead (e.g. the
+        // brain's 'help' intent, which offers real, actionable next steps)
+        // rather than parroting the same dead-end question back.
+        if (isFillerAiReply(direct)) return { handled: false, raw: aiResult.raw };
         return {
           handled: true,
           intent: 'ai_answer',
@@ -708,7 +748,12 @@ router.post('/', tokenValidator, async (req, res) => {
     const orderInfoEscape = phaseStr.startsWith('order_')
       && phaseStr !== 'order_address'
       && !isInternalOrderCommand(text);
-    if ((session.phase === 'active' || orderInfoEscape) && aiAssessment.route === 'ai') {
+    // Check local rules BEFORE spending an AI call: if a deterministic intent
+    // already has the right answer, showing it beats an AI freeform reply
+    // that might bounce with a generic non-answer (and costs money either way).
+    const localFirstProbe = brain.detectIntent({ text, lang, business, context });
+    const localFirstHasAnswer = Boolean(localFirstProbe && ALWAYS_LOCAL_INTENTS.has(localFirstProbe.intent));
+    if ((session.phase === 'active' || orderInfoEscape) && aiAssessment.route === 'ai' && !localFirstHasAnswer) {
       const aiPipeline = await tryAiPipeline('threshold');
       aiClassifyAttempted = true;
       if (aiPipeline.forceOrder) {

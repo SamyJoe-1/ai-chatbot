@@ -52,12 +52,50 @@ const PATTERNS = {
     greeting_how_are_you: [/^(how are u|how are u doing|are u okay|how are you|how are you doing|are you okay)\b/i],
     greeting_yasta: [/^(yasta)\b/i],
     thanks: [/\b(thanks|thank you|thx|ty|appreciate)\b/i],
+    // A customer who explicitly has no idea what to buy ("help me choose",
+    // "no experience", "where do I even start") needs to be walked through a
+    // choice, not handed the generic capabilities blurb (`help`, below) or an
+    // AI freeform reply asking them to restate what they already said they
+    // don't know. Checked BEFORE `help` since these phrases often contain the
+    // word "help" too.
+    guided_discovery: [
+      /\bhelp me choose\b/i,
+      /\bhelp .*(choos|pick|decide)/i,
+      /\b(don'?t|do not|dont) know (where to start|what to (choose|pick|get|buy))\b/i,
+      /\bwhere (do|should) i (even )?start\b/i,
+      /\b(from |even )?where to start\b/i,
+      /\bknow nothing about\b/i,
+      /\bno (idea|clue|experience)\b/i,
+      /\bzero experience\b/i,
+      /\bguide me\b/i,
+      /\bwalk me through\b/i,
+      /\bwhich (one|product) should i (choose|pick|get|buy)\b/i,
+      /\bhow (do|should|can) i (choose|pick|decide)\b/i,
+      /\bnew to (sourcing|this|buying|shopping)\b/i,
+      /\bbased on what\b.*\bchoose\b/i,
+      /\bnot sure (which|what|how) to (choose|pick)\b/i,
+      /\bcan'?t decide\b/i,
+      /\btips?\s*(and tricks)?\b.*\bbeginn?er/i,
+      /\bbeginn?er\b.*\btips?\b/i,
+      /\bany (tips|advice)\b/i,
+      /\badvice for (beginners|newbies|starting out)\b/i,
+    ],
     help: [/\bhelp\b/i, /\bwhat can you do\b/i, /\bhow does this work\b/i],
     contact: [/\bcontact\b/i, /\bphone\b/i, /\bwhatsapp\b/i, /\bcall\b/i, /\bemail\b/i],
     working_hours: [/\bhours\b/i, /\bopen\b/i, /\bclose\b/i, /\bworking hours\b/i],
     location: [/\blocation\b/i, /\baddress\b/i, /\bwhere are you\b/i, /\bdirections\b/i],
     brand_info: [/\bwho are you\b/i, /\babout you\b/i, /\babout the store\b/i, /\bwhat do you provide\b/i],
     catalog_general: [/\bcatalog\b/i, /\bmarketplace\b/i, /\bproducts\b/i, /\bwhat do you have\b/i, /\bshow me\b/i],
+    // Enumerating ALL categories ("what categories do you have", "list the
+    // categories") is distinct from ecommerce_category_info, which only fires
+    // once a SPECIFIC known category is already matched in the text. This one
+    // is answered straight from the local catalog — no AI call needed.
+    list_categories: [
+      /\b(all |the )?categories\b/i,
+      /\bwhat (categories|sections|departments)\b/i,
+      /\blist (the )?categories\b/i,
+      /\bcategories (do you have|are there|are available)\b/i,
+    ],
     order_howto: [/\bhow (do|can|could|would|to)\b[\w\s]{0,20}\border\b/i, /\bhow does ordering work\b/i, /\bhow to (place|make) an order\b/i],
     ecommerce_search_hot: [/\bhot\b/i, /\bbest selling\b/i, /\bbest-selling\b/i, /\bbestseller\b/i, /\bpopular\b/i, /\btop selling\b/i],
     ecommerce_category_info: [/\bcategory\b/i, /\bmore about\b/i, /\bdetails on\b/i],
@@ -89,12 +127,14 @@ const PATTERNS = {
     greeting_how_are_you: [/^(ايه اخبارك|عامل ايه|عامل اية|انت كويس|كيفك|شلونك|شلونكم|شخباركم|اخبارك|ازيك|إزيك|ايش اخبارك|كيف حالك)/],
     greeting_yasta: [/^(يسطا|يا اسطى|ياسطى|ي زميلي|يا زميلي|يصاحبي|يا صاحبي)/],
     thanks: [/(شكرا|شكراً|تسلم|يسلمو|ممنون|يعطيك العافية)/],
+    guided_discovery: [/(مش عارف اختار|مش عارفة اختار|مش عارف ابدأ|مش عارف ابدا|منين ابدأ|منين ابدا|من وين ابدأ|معنديش خبرة|معنديش خبره|اول مرة اشتري|أول مرة اشتري|اختارلي|اختاري لي|رشحلي|رشح لي|وجهني|علمني اختار|ازاي اختار|إزاي اختار|كيف اختار|عايز حد يساعدني اختار|عاوز حد يساعدني اختار)/],
     help: [/(مساعدة|ساعدني|كيف يشتغل|كيف يعمل|ماذا يمكنك|بتعمل ايه|تساعدني)/],
     contact: [/(تواصل|اتصال|رقم|واتساب|هاتف|موبايل|ايميل|إيميل|تليفون|تلفون|كلمكم|اكلمكم)/],
     working_hours: [/(ساعات|مواعيد|عمل|الدوام|شغالين|تفتح|تقفل|تفتحون|تغلقون|امتى|امتا|الساعة كام|الساعه كام)/],
     location: [/(العنوان|الموقع|وين|فين|أين|اتجاهات|خريطة|مكان|فروعكم|فرعكم)/],
     brand_info: [/(من انتم|مين انتم|نبذه عنكم|نبذة عنكم|من انتو|ماذا تقدمون|عن المتجر|عن المعرض|مين انت)/],
     catalog_general: [/(كتالوج|المنتجات|ايش عندكم|شو عندكم|عندكم ايه|عندك ايه|الكتالوج|وش عندكم|السوق|الماركت|المتجر)/],
+    list_categories: [/(كل الاقسام|كل الأقسام|جميع الاقسام|جميع الأقسام|الاقسام الموجودة|الأقسام الموجودة|ايه الاقسام|إيه الأقسام|ايش الاقسام|شو الاقسام|عندكم اقسام ايه|عندكم أقسام ايه|الفئات المتاحة|كل الفئات|جميع الفئات|انواع المنتجات|أنواع المنتجات|التصنيفات)/],
     order_howto: [
       /كيف[؀-ۿ\s]{0,15}(اطلب|أطلب|الطلب|اعمل طلب|اعمل اوردر|اوردر)/,
       /ازاي[؀-ۿ\s]{0,15}(اطلب|أطلب|الطلب|اعمل اوردر|اعمل طلب)/,
@@ -437,6 +477,16 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   if (matchesAny(normalizedText, patterns.greeting_how_are_you)) return { intent: 'greeting_how_are_you' };
   if (matchesAny(normalizedText, patterns.greeting_yasta)) return { intent: 'greeting_yasta' };
   if (matchesAny(normalizedText, patterns.thanks)) return { intent: 'thanks' };
+
+  // Checked before the generic `help` intent (phrases like "help me choose"
+  // contain "help" too) so a customer with no idea what to buy gets walked
+  // through a real choice instead of a capabilities blurb or an AI freeform
+  // reply that just asks them to restate what they already said they don't know.
+  if (matchesAny(normalizedText, patterns.guided_discovery)) {
+    const categories = [...new Set(items.map((item) => getDisplayCategory(item, lang)).filter(Boolean))];
+    return { intent: 'guided_discovery', categories };
+  }
+
   if (matchesAny(normalizedText, patterns.help)) return { intent: 'help' };
 
   // "How do I order?" with NO specific product named -> ask which products
@@ -450,6 +500,13 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   if (matchesAny(normalizedText, patterns.working_hours)) return { intent: 'working_hours' };
   if (matchesAny(normalizedText, patterns.location)) return { intent: 'location' };
   if (matchesAny(normalizedText, patterns.brand_info)) return { intent: 'brand_info' };
+
+  // "What categories do you have?" — answered straight from the catalog
+  // already loaded above, no AI classification needed for static metadata.
+  if (matchesAny(normalizedText, patterns.list_categories)) {
+    const categories = [...new Set(items.map((item) => getDisplayCategory(item, lang)).filter(Boolean))];
+    return { intent: 'list_categories', categories };
+  }
 
   // Contextual or explicit dynamic feature inquiry check. Resolve the item we're
   // discussing from last_item; if that wasn't set (e.g. an AI recommendation that
@@ -920,6 +977,43 @@ function buildResponse(intentResult, lang, business) {
       }
       payload.context_update.last_category = intentResult.category;
       break;
+    case 'list_categories':
+      if (intentResult.categories && intentResult.categories.length > 0) {
+        const heading = locale === 'ar' ? 'هذه هي الأقسام المتوفرة لدينا:' : 'Here are the categories we carry:';
+        payload.text = [heading, ...intentResult.categories.map((name) => `- ${name}`)].join('\n');
+        payload.suggestions = intentResult.categories.slice(0, 4);
+      } else {
+        payload.text = locale === 'ar' ? 'لا توجد أقسام مضافة حالياً.' : 'No categories are listed yet.';
+      }
+      addMarketplaceButton();
+      break;
+    case 'guided_discovery': {
+      const tipsEn = [
+        "No problem — here's how to pick with confidence, step by step:",
+        '1. Start with a category — what is it broadly for?',
+        "2. Tell me the use case (who it's for, where you'll use it) so I can narrow it down.",
+        '3. Check price and available options (size/color) on the product card before you decide.',
+        "4. Not sure between two? Ask me and I'll compare them for you.",
+      ].join('\n');
+      const tipsAr = [
+        'ولا يهمك، هنختار المنتج المناسب مع بعض خطوة بخطوة:',
+        '1. ابدأ باختيار القسم اللي المنتج منه.',
+        '2. قولي هتستخدمه لإيه أو لمين عشان أقدر أضيّق الاختيار.',
+        '3. راجع السعر والخيارات المتاحة (المقاس/اللون) في صفحة المنتج قبل ما تقرر.',
+        '4. مش قادر تختار بين اتنين؟ اسألني وهقارنلك بينهم.',
+      ].join('\n');
+      if (intentResult.categories && intentResult.categories.length > 0) {
+        const closing = locale === 'ar' ? 'بتدور على منتج في أي قسم من دول؟' : 'Which of these are you shopping for?';
+        payload.text = `${locale === 'ar' ? tipsAr : tipsEn}\n\n${closing}`;
+        payload.suggestions = intentResult.categories.slice(0, 8);
+      } else {
+        payload.text = locale === 'ar'
+          ? 'ولا يهمك، هنساعدك. قولي بتدور على منتج لإيه أو لمين، ونضبطلك الاختيار.'
+          : "No problem — we'll help. Tell me what the product is for or who it's for, and we'll narrow it down together.";
+      }
+      addContactButton();
+      break;
+    }
     case 'item_disambiguation':
       if (intentResult.items && intentResult.items.length > 0) {
         const heading = locale === 'ar' ? 'وجدت أكثر من منتج مطابق. أي واحد تقصد؟' : 'I found more than one matching product. Which one did you mean?';

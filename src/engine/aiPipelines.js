@@ -439,9 +439,13 @@ function buildRecommendationCandidates({ criteria, business, lang, context }) {
   return compactCandidates(recommendationPool({ criteria, business, lang, context }), lang);
 }
 
-// Strip a leading list marker ("1. ", "- ", "• ") from a recommendation line.
+// Strip a leading list marker ("1. ", "- ", "• ", "* ") from a recommendation
+// line. The `*` bullet case uses a negative lookahead so it never eats one
+// asterisk off a leading "**Bold Title**" — that left a stray unmatched `*`
+// in the output ("*Bold Title**") that rendered as literal asterisks instead
+// of bold text.
 function stripListPrefix(line) {
-  return String(line || '').replace(/^\s*(?:\d+[.)]\s*|[-*•]\s*)/, '').trim();
+  return String(line || '').replace(/^\s*(?:\d+[.)]\s*|[-•]\s*|\*(?!\*)\s*)/, '').trim();
 }
 
 // The product name in a recommendation line is the part before the description

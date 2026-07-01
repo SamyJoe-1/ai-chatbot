@@ -26,11 +26,22 @@ function normalizeArabicDigits(text) {
   return String(text || '').replace(/[٠-٩]/g, (digit) => ARABIC_DIGITS[digit] || digit);
 }
 
+// Collapse emphatic letter-elongation ("beginerrr", "clearrrrly", frustrated
+// typing) down to a single letter before any pattern match runs. A run of 3+
+// of the same letter is never a real word in either language (double letters
+// like "book"/"ll" stay untouched — this only fires on 3+), so it's a safe,
+// blanket fix that keeps every \b-anchored keyword regex in the codebase from
+// silently missing an elongated variant.
+function collapseElongation(text) {
+  return text.replace(/([a-zA-Z؀-ۿ])\1{2,}/g, '$1');
+}
+
 function normalize(text, lang) {
   if (!text) return '';
 
   let value = normalizeArabicDigits(String(text)).trim();
   value = value.replace(/\s+/g, ' ');
+  value = collapseElongation(value);
 
   if (lang === 'ar') {
     value = value
