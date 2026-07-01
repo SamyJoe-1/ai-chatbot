@@ -106,11 +106,40 @@ function buildPhoneticVocabularyList(items) {
   return list;
 }
 
+// A token is Arabizi (Franco-Arabic) when it uses a digit AS a letter inside a
+// word — "3ayez", "el7amdo", "m3ak". Require ≥2 surrounding letters so pure
+// quantities ("100x", "3x", "10kg") are never mistaken for franco.
+function hasFrancoDigitLetter(token) {
+  const letters = (token.match(/[a-z]/gi) || []).length;
+  return letters >= 2 && /(?:[a-z][23567 89])|(?:[23567 89][a-z])/i.test(token);
+}
+
+// Decide whether per-word franco transliteration should run at all. It must
+// NOT run on fluent English: the char-by-char mapping happily turns ordinary
+// content words ("source"→"careline", "talking"→"fragrance") into catalog
+// names, producing wildly wrong matches. Franco is only for Arabizi input.
+function shouldAttemptFranco(text) {
+  const tokens = String(text || '').toLowerCase().split(/[^a-z0-9']+/i).filter(Boolean);
+  if (!tokens.length) return false;
+  // Any digit-as-letter token is a strong Arabizi signal → attempt recovery.
+  if (tokens.some(hasFrancoDigitLetter)) return true;
+  // Otherwise, several common English words means it's an English sentence;
+  // leave it for normal matching / typo recovery instead of butchering it.
+  const englishHits = tokens.filter((t) => COMMON_ENGLISH.has(t)).length;
+  if (englishHits >= 3) return false;
+  return true;
+}
+
 function recoverFranco(text, items) {
   if (!text) return text;
 
   // 1. Only process if it has Franco characters (Latin characters or digits)
   if (!/[a-zA-Z0-9]/.test(text)) {
+    return text;
+  }
+
+  // 1b. Skip fluent-English messages entirely — see shouldAttemptFranco.
+  if (!shouldAttemptFranco(text)) {
     return text;
   }
 

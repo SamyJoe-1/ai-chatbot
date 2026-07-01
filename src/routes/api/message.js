@@ -182,7 +182,7 @@ function shouldRetryWithRecovery(intent) {
 const ALWAYS_LOCAL_INTENTS = new Set([
   'greeting_hello', 'greeting_how_are_you', 'greeting_yasta', 'thanks',
   'help', 'guided_discovery', 'list_categories', 'contact', 'working_hours',
-  'location', 'brand_info', 'order_howto',
+  'location', 'brand_info', 'order_howto', 'logistics_inquiry', 'logistics_average',
 ]);
 
 // The classifier's [11] direct-answer sometimes bottoms out on a completely

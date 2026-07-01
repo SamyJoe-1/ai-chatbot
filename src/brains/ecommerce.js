@@ -585,7 +585,24 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   // "when will it arrive". These contain words like "source", "product",
   // "warehouse" that accidentally score weakly against item descriptions.
   // Catch them before the item-found block so no random product card shows.
+  // A general "on average / roughly" question with no specific product named
+  // gets a REAL ballpark answer here — "contact us" doesn't actually answer
+  // "how many days on average", it dodges it, and the AI classifier has shown
+  // it bails on this exact shape of question rather than reasoning about it.
+  const asksGeneralAverage = /\b(avg|average|on average|roughly|approx(imately)?|generally|typically|usually|ballpark|rough(ly)? estimate)\b/i.test(normalizedText)
+    || /(متوسط|بالمتوسط|تقريبا|تقريباً|عادة|غالبا|غالباً)/.test(normalizedText);
   if (matchesAny(normalizedText, patterns.logistics_inquiry)) {
+    // A follow-up refining the SAME ballpark conversation ("what if the
+    // distance is only 1-3km") doesn't repeat "average" wording, but it's
+    // still the same open-ended estimate question, not a specific-order
+    // lookup — keep answering it, don't drop back to a flat "contact us".
+    const isFollowup = Boolean(context.last_logistics_topic) && !foundItem;
+    if ((asksGeneralAverage || isFollowup) && !foundItem) {
+      const mentionsShortDistance = /\b\d+\s*-?\s*\d*\s*(km|kilo(metre|meter)?s?|miles?)\b/i.test(normalizedText)
+        || /\b(nearby|close by|same city|next door|walking distance)\b/i.test(normalizedText)
+        || /(قريب|جنب|نفس المدينة|كيلو)/.test(normalizedText);
+      return { intent: 'logistics_average', mentionsShortDistance };
+    }
     return { intent: 'logistics_inquiry' };
   }
 
@@ -752,6 +769,20 @@ function buildResponse(intentResult, lang, business) {
       payload.text = locale === 'ar'
         ? 'للاستفسار عن مدة التوريد والشحن، تواصل معنا مباشرة — نقدر نعطيك توقيت دقيق حسب المنتج والكمية.'
         : 'For sourcing timelines and delivery questions, please contact us directly — we can give you accurate timing based on the specific product and quantity.';
+      addContactButton();
+      break;
+
+    case 'logistics_average':
+      if (intentResult.mentionsShortDistance) {
+        payload.text = locale === 'ar'
+          ? 'لو المسافة بين المخزنين كام كيلو بس، وقت الشحن نفسه هيبقى يوم أو اتنين — أغلب الوقت بيروح في تجهيز الطلب عند المورد مش في المسافة. يعني هيبقى حوالي 7-14 يوم بدل الـ10-20. لو عايز رقم دقيق، ابعتلنا اسم المنتج والكمية.'
+          : "If the two warehouses are only a few km apart, the shipping leg itself is basically same-day or next-day — most of the timeline is the supplier's prep/production time, not distance. So with that short a distance you're looking at roughly 7-14 days total instead of the full 10-20. For an exact number, send us the product name and quantity.";
+      } else {
+        payload.text = locale === 'ar'
+          ? 'كتقدير عام: تجهيز وشحن كمية زي 100 قطعة من منتج خفيف الوزن بياخد غالباً حوالي 10-20 يوم (تجهيز عند المورد + شحن)، والرقم ده بيختلف حسب المنتج والمورد والوجهة. لو عايز رقم دقيق لطلبك، ابعتلنا اسم المنتج والكمية ونأكدلك التوقيت الفعلي.'
+          : "As a general ballpark: sourcing and shipping a quantity like 100 units of a lightweight item typically runs about 10-20 days total (supplier prep + transit), though it varies by product, supplier, and destination. For an exact timeline on your order, send us the product name and quantity and we'll confirm the real number.";
+      }
+      payload.context_update.last_logistics_topic = true;
       addContactButton();
       break;
 
