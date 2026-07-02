@@ -3,7 +3,7 @@
 const { getBusinessItems } = require('../brains/shared/catalogStore');
 const { getBrandProfile, conceptMatchItems } = require('../brains/shared/brandProfile');
 const { normalize, tokenize } = require('./detector');
-const { fuzzyTokenScore } = require('../brains/shared/matcher');
+const { fuzzyTokenScore, detectCountry, countryMatchesItem } = require('../brains/shared/matcher');
 const { getItemThumbnail, buildThumbnailMessages } = require('../brains/shared/thumbnailMessages');
 
 function displayTitle(item, lang) {
@@ -91,6 +91,28 @@ function findItemsByText(items, value, lang) {
   });
 }
 
+// "send me one product", "just one", "منتج واحد بس" — the customer wants a
+// SINGLE result, not the AI-routed pipelines' default list. Mirrors the
+// ecommerce brain's local single_item_request patterns so the AI-classified
+// path (codes [2]/[3]/[4]/[5], resolved locally against the catalog) respects
+// the same "just one" signal instead of always dumping up to 8 matches.
+const SINGLE_ITEM_RE = [
+  /\bone\b[\w\s]{0,15}\bproducts?\b/i,
+  /\bproducts?\b[\w\s]{0,15}\bone\b/i,
+  /\bjust one\b/i,
+  /\bonly one\b/i,
+  /\bsingle (item|product)\b/i,
+  /\bgive me one\b/i,
+  /\bshow (me )?(just )?one\b/i,
+  /\bat\s*least\s*one\b/i,
+  /(واحد بس|واحد فقط|منتج واحد|قطعة واحدة|عايز واحد|عاوز واحد|عايزة واحد|ولو واحد|على الاقل واحد|على الأقل واحد)/,
+];
+
+function wantsOnlyOne(text) {
+  const value = String(text || '');
+  return SINGLE_ITEM_RE.some((re) => re.test(value));
+}
+
 function getValueByDynamicKey(item, key) {
   if (!key) return undefined;
   if (Object.prototype.hasOwnProperty.call(item, key)) return item[key];
@@ -147,8 +169,8 @@ function makeListPayload({ items, lang, business, heading, intent }) {
 function buildNotFoundPayload(lang, business) {
   return {
     text: lang === 'ar'
-      ? `لم أجد نتيجة واضحة لهذا الطلب بدون سياق إضافي. يمكنك سؤالي عن القائمة أو الأسعار أو التواصل معنا على ${business.phone || 'رقم التواصل'}.`
-      : `I could not find a clear match for that request without more context. You can ask about the catalog, prices, or contact us at ${business.phone || 'our contact number'}.`,
+      ? `مش لاقي نتيجة مطابقة للطلب ده تحديداً — ممكن توصفلي المنتج بشكل تاني أو تقولي اسمه؟ وتقدر دايماً تسألني عن القائمة أو الأسعار أو تتواصل معنا على ${business.phone || 'رقم التواصل'}.`
+      : `I could not spot an exact match for that one — could you describe it differently or give me the name? You can always ask me about the catalog and prices, or reach us at ${business.phone || 'our contact number'}.`,
     type: 'text',
     buttons: [],
     suggestions: [],
@@ -160,9 +182,14 @@ function buildNotFoundPayload(lang, business) {
 // Soup" or "latte | espresso"). Split on explicit separators only — NOT the word
 // "and", which appears inside real item names ("Fish and Chips") — so each part
 // can be resolved to its own item.
+// The classifier's own prompt instructs it to separate multi-item slots with
+// COMMAS ONLY. Splitting on |, /, &, + as well used to fragment a single
+// item's own title when the title itself contained one of those characters
+// ("Soap&Shampoo", "USB & PD") into two bogus "item" names — one of which
+// would then false-match some unrelated product.
 function splitItemSlot(slot) {
   return String(slot || '')
-    .split(/\s*[,|/&+]\s*|\s*،\s*/) // comma, pipe, slash, &, +, Arabic comma
+    .split(/\s*,\s*|\s*،\s*/) // comma, Arabic comma
     .map((part) => part.trim())
     .filter(Boolean);
 }
@@ -224,6 +251,57 @@ function buildMultiDetailPayload({ items, brain, business, lang }) {
   };
 }
 
+// [8]'s schema is ONE item / ONE detail, but the classifier sometimes fills
+// the item slot with a comma-separated list anyway ("are those available in
+// SA, or which country?" about several items just shown) — collapsing that to
+// whichever ONE item findItemsByText happens to return first silently answers
+// about the wrong product. Build one concise line per item instead.
+// "availability" as a detail slot has no matching field — the real data lives
+// in the boolean `available` column plus the item's country (what a Gulf
+// sourcing customer actually means by "is it available / which country").
+// resolveDetail's generic key lookup can't bridge that name gap, so special-
+// case it the same way price/size already are in the single-item branch below.
+function isAvailabilityDetail(detail) {
+  return /(availab|in\s*stock|stock)/i.test(String(detail || ''));
+}
+
+function formatAvailabilityLine(item, lang) {
+  const isAvailable = Number(item.available) === 1 || item.available === true;
+  const meta = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+  const country = lang === 'ar' ? (meta.country_ar || meta.country_en) : (meta.country_en || meta.country);
+  const status = lang === 'ar' ? (isAvailable ? 'متوفر' : 'غير متوفر') : (isAvailable ? 'Available' : 'Not available');
+  return country ? `${status} (${country})` : status;
+}
+
+function buildMultiDetailFieldPayload({ items, detail, lang, business }) {
+  const lines = items.map((item) => {
+    if (isAvailabilityDetail(detail)) {
+      return `- ${displayTitle(item, lang)}: ${formatAvailabilityLine(item, lang)}`;
+    }
+    const resolved = resolveDetail(item, detail, lang);
+    const value = resolved
+      ? stringifySearch(resolved.value)
+      : (lang === 'ar' ? 'غير محدد' : 'not specified');
+    return `- ${displayTitle(item, lang)}: ${value}`;
+  });
+  const heading = lang === 'ar' ? 'إليك التفاصيل المطلوبة لكل عنصر:' : 'Here is that detail for each item:';
+  const last = items[items.length - 1];
+  return {
+    intent: 'ai_multi_specific_detail',
+    payload: {
+      text: [heading, ...lines].join('\n'),
+      type: 'text',
+      buttons: [],
+      suggestions: items.slice(0, 4).map((item) => displayTitle(item, lang)),
+      context_update: {
+        last_item: last.id,
+        last_category: displayCategory(last, lang) || null,
+        last_recommended_ids: items.map((item) => item.id).filter((id) => Number.isFinite(id)),
+      },
+    },
+  };
+}
+
 function resolveDetail(item, detail, lang) {
   const key = normalize(detail, 'en').replace(/\s+/g, '_');
   const candidates = [
@@ -247,9 +325,39 @@ function resolveDetail(item, detail, lang) {
   return null;
 }
 
-function resolveAiPipeline({ pipeline, brain, business, lang, context }) {
+// Shared "we don't have that from country X" honest reply — used whenever a
+// country filter wipes out every candidate, so the bot never silently
+// substitutes an item from the wrong country as if it satisfied the request.
+function buildCountryMissPayload({ activeCountry, lang, business }) {
+  const locale = lang === 'ar' ? 'ar' : 'en';
+  const text = locale === 'ar'
+    ? `لم نجد هذا متوفراً من ${activeCountry} حالياً، لكن يمكننا توفيره من شبكتنا — تواصل معنا على ${business.phone || 'رقم التواصل'}.`
+    : `We don't currently have that available from ${activeCountry}, but we can source it from our network — contact us at ${business.phone || 'our contact number'}.`;
+  return { intent: 'ecommerce_country_products', payload: { text, type: 'text', buttons: [], suggestions: [], context_update: {} } };
+}
+
+function resolveAiPipeline({ pipeline, brain, business, lang, context, text }) {
   const locale = lang === 'ar' ? 'ar' : 'en';
   const items = getBusinessItems(business.id);
+  const capToOne = wantsOnlyOne(text);
+  // The AI's pipeline slots ([2]/[3]/[5] especially) have NO country field, so
+  // "electronics in Saudi Arabia" can classify as a plain item/category search
+  // and silently drop the country the customer actually asked for. Detect it
+  // locally from the raw message and narrow the AI's candidate set with it —
+  // independent of which pipeline code the classifier picked.
+  const activeCountry = detectCountry(text, locale, items);
+  // When a country is named but filtering it wipes out every candidate, DO NOT
+  // silently fall back to showing an item from a different country as if it
+  // satisfied the request — that is exactly the "silent substitution" that
+  // caused real confusion. Flag the miss so the caller can say so honestly.
+  let countryMiss = false;
+  const narrowByCountry = (matches) => {
+    if (!activeCountry) return matches;
+    const filtered = matches.filter((item) => countryMatchesItem(item, activeCountry));
+    if (!filtered.length && matches.length) countryMiss = true;
+    return filtered;
+  };
+  const countryMissPayload = () => buildCountryMissPayload({ activeCountry, lang, business });
 
   if (!pipeline.valid) return null;
 
@@ -265,7 +373,9 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context }) {
     if (!matches.length) {
       matches = conceptMatchItems({ text: pipeline.item, lang: locale, items, profile: getBrandProfile(business.id) });
     }
-    if (matches.length === 1) {
+    matches = narrowByCountry(matches);
+    if (countryMiss) return countryMissPayload();
+    if (matches.length && (matches.length === 1 || capToOne)) {
       return { intent: 'item_found', payload: brain.buildResponse({ intent: 'item_found', item: matches[0] }, locale, business) };
     }
     return makeListPayload({
@@ -278,7 +388,21 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context }) {
   }
 
   if (pipeline.code === 3) {
-    const matches = findItemsByText(items, pipeline.item, locale);
+    // A category lookup must filter on the CATEGORY field, not fuzzy-search
+    // titles — findItemsByText's typo tolerance is tuned for product names and
+    // can conflate a category word with an unrelated title that merely shares
+    // a prefix ("Electronics" fuzzy-matching "Electric Facial Massager").
+    // Fall back to the fuzzy title search only if no real category matched,
+    // in case the classifier's slot isn't an exact category name.
+    const categoryNeedle = normalize(pipeline.item, locale);
+    let matches = items.filter((item) =>
+      normalize(`${item.category_en || ''} ${item.category_ar || ''}`, locale).includes(categoryNeedle));
+    if (!matches.length) matches = findItemsByText(items, pipeline.item, locale);
+    matches = narrowByCountry(matches);
+    if (countryMiss) return countryMissPayload();
+    if (capToOne && matches.length) {
+      return { intent: 'item_found', payload: brain.buildResponse({ intent: 'item_found', item: matches[0] }, locale, business) };
+    }
     return makeListPayload({
       items: matches,
       lang: locale,
@@ -307,6 +431,11 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context }) {
         .filter((item) => getValueByDynamicKey(item, pipeline.fields.sort_by) !== undefined)
         .sort((a, b) => compareValues(getValueByDynamicKey(a, pipeline.fields.sort_by), getValueByDynamicKey(b, pipeline.fields.sort_by), pipeline.fields.order || 'asc'));
     }
+    matches = narrowByCountry(matches);
+    if (countryMiss) return countryMissPayload();
+    if (capToOne && matches.length) {
+      return { intent: 'item_found', payload: brain.buildResponse({ intent: 'item_found', item: matches[0] }, locale, business) };
+    }
     return makeListPayload({
       items: matches,
       lang: locale,
@@ -318,7 +447,11 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context }) {
 
   if (pipeline.code === 5) {
     const excludes = pipeline.item.split(',').map((value) => normalize(value.trim(), locale)).filter(Boolean);
-    const matches = items.filter((item) => !excludes.some((term) => itemSearchText(item, locale).includes(term)));
+    const matches = narrowByCountry(items.filter((item) => !excludes.some((term) => itemSearchText(item, locale).includes(term))));
+    if (countryMiss) return countryMissPayload();
+    if (capToOne && matches.length) {
+      return { intent: 'item_found', payload: brain.buildResponse({ intent: 'item_found', item: matches[0] }, locale, business) };
+    }
     return makeListPayload({
       items: matches,
       lang: locale,
@@ -355,6 +488,27 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context }) {
   }
 
   if (pipeline.code === 8) {
+    const detailParts = splitItemSlot(pipeline.itemForDetail);
+    if (detailParts.length > 1) {
+      const resolvedItems = [];
+      const seen = new Set();
+      for (const part of detailParts) {
+        let best = bestItemForName(items, part, locale);
+        if (!best) {
+          const m = conceptMatchItems({ text: part, lang: locale, items, profile: getBrandProfile(business.id) });
+          best = m[0] || null;
+        }
+        if (best && !seen.has(best.id)) {
+          seen.add(best.id);
+          resolvedItems.push(best);
+        }
+      }
+      if (resolvedItems.length > 1) {
+        return buildMultiDetailFieldPayload({ items: resolvedItems, detail: pipeline.detail, lang: locale, business });
+      }
+      // Only one name actually resolved — fall through to the normal
+      // single-item path below using the original slot text.
+    }
     const matches = findItemsByText(items, pipeline.itemForDetail, locale);
     const item = matches[0];
     if (!item) return { intent: 'ai_not_found', payload: buildNotFoundPayload(locale, business) };
@@ -397,14 +551,20 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context }) {
 // be judged over, so the answer call stays cheap. Priority: an explicit
 // category in the criteria -> the category just shown (follow-up "which is
 // best?") -> a keyword/concept search on the criteria -> the whole menu.
-function recommendationPool({ criteria, business, lang, context }) {
+function recommendationPool({ criteria, business, lang, context, text }) {
   const locale = lang === 'ar' ? 'ar' : 'en';
   const items = getBusinessItems(business.id);
   const crit = normalize(criteria || '', locale);
 
+  // Check each language's category name SEPARATELY against the criteria — the
+  // previous version concatenated "electronics إلكترونيات" into one string and
+  // tested if THAT (bilingual) blob was a substring of the (single-language)
+  // criteria sentence, which can never be true. That silently broke category
+  // narrowing entirely, always falling through to the whole catalog below.
   let pool = items.filter((item) => {
-    const cat = normalize(`${item.category_en || ''} ${item.category_ar || ''}`, locale);
-    return cat && crit.includes(cat);
+    const catEn = normalize(item.category_en || '', locale);
+    const catAr = normalize(item.category_ar || '', locale);
+    return (catEn && crit.includes(catEn)) || (catAr && crit.includes(catAr));
   });
 
   if (!pool.length && context && context.last_category) {
@@ -415,7 +575,22 @@ function recommendationPool({ criteria, business, lang, context }) {
   if (!pool.length) pool = conceptMatchItems({ text: criteria, lang: locale, items, profile: getBrandProfile(business.id) });
   if (!pool.length) pool = items.slice();
 
-  return pool.slice(0, 12);
+  // A country named in the request/criteria ("recommend electronics for Saudi
+  // Arabia") must actually narrow the candidates — otherwise the recommend
+  // call has no way to know it should only pick from that country, and can
+  // (and did) suggest an item from somewhere else entirely.
+  const activeCountry = detectCountry(text || criteria, locale, items);
+  let countryMiss = false;
+  if (activeCountry) {
+    const filtered = pool.filter((item) => countryMatchesItem(item, activeCountry));
+    if (filtered.length) {
+      pool = filtered;
+    } else {
+      countryMiss = true;
+    }
+  }
+
+  return { pool: pool.slice(0, 12), countryMiss, activeCountry };
 }
 
 // Compact, token-light shape for the recommend answer call: short keys, a
@@ -428,6 +603,10 @@ function compactCandidates(items, lang) {
     const desc = locale === 'ar' ? (item.description_ar || item.description_en) : (item.description_en || item.description_ar);
     if (desc) out.d = String(desc).slice(0, 90);
     const meta = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+    // Country travels WITH the candidate so the recommend call can reference
+    // or (when the customer named one) honor it — it used to be dropped
+    // entirely, so the model had no way to know a candidate's country.
+    if (meta.country_en || meta.country) out.country = meta.country_en || meta.country;
     for (const [key, value] of Object.entries(meta)) {
       if (typeof value === 'number' || /^\d+(\.\d+)?$/.test(String(value))) out[key] = value;
     }
@@ -435,8 +614,14 @@ function compactCandidates(items, lang) {
   });
 }
 
-function buildRecommendationCandidates({ criteria, business, lang, context }) {
-  return compactCandidates(recommendationPool({ criteria, business, lang, context }), lang);
+function buildRecommendationCandidates({ criteria, business, lang, context, text }) {
+  const { pool, countryMiss, activeCountry } = recommendationPool({ criteria, business, lang, context, text });
+  // "suggest ONE product" — the recommend prompt can still pad its reply with
+  // a second "if you're interested" suggestion when it has more than one
+  // candidate to work with. Physically cap the candidate set to 1 so there is
+  // nothing else in scope for it to mention.
+  const cappedPool = wantsOnlyOne(text) ? pool.slice(0, 1) : pool;
+  return { candidates: compactCandidates(cappedPool, lang), countryMiss, activeCountry };
 }
 
 // Strip a leading list marker ("1. ", "- ", "• ", "* ") from a recommendation
@@ -546,4 +731,5 @@ module.exports = {
   resolveAiPipeline,
   buildRecommendationCandidates,
   buildRecommendationMessages,
+  buildCountryMissPayload,
 };

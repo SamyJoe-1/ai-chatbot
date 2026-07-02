@@ -358,8 +358,8 @@ function buildResponse(intentResult, lang, business) {
     case 'unknown':
     default:
       payload.text = locale === 'ar'
-        ? `لا أملك إجابة دقيقة على هذا السؤال حالياً. تواصل معنا على ${business.phone || 'رقم التواصل'}، وما زلت أقدر أساعدك في الخدمات أو الأسعار أو المواعيد.`
-        : `I do not have an exact answer for that yet. Please contact us at ${business.phone || 'our contact number'}, and I can still help with services, pricing, or appointments.`;
+        ? `سؤال جميل! عشان أضمنلك إجابة دقيقة، تواصل مع فريقنا على ${business.phone || 'رقم التواصل'} — وفي نفس الوقت اسألني عن الخدمات أو الأسعار أو المواعيد وهجاوبك فوراً.`
+        : `Good question! To make sure you get an accurate answer, reach our team at ${business.phone || 'our contact number'} — and meanwhile, ask me about services, pricing, or appointments and I'll answer right away.`;
       payload.suggestions = suggestions.slice(0, 3);
       break;
   }

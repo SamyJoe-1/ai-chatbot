@@ -504,8 +504,8 @@ function buildResponse(intentResult, lang, business) {
     case 'unknown':
     default:
       payload.text = locale === 'ar'
-        ? `لا أملك إجابة دقيقة على هذا السؤال حاليًا. تواصل معنا على ${business.phone || 'رقم التواصل'}، وما زلت أقدر أساعدك في الأسعار أو المواقع أو المواصفات أو السداد.`
-        : `I do not have an exact answer for that yet. Please contact us at ${business.phone || 'our contact number'}, and I can still help with pricing, location, specs, or payment details.`;
+        ? `سؤال جميل! عشان أضمنلك إجابة دقيقة، تواصل مع فريقنا على ${business.phone || 'رقم التواصل'} — وفي نفس الوقت اسألني عن الأسعار أو المواقع أو المواصفات أو السداد وهجاوبك فوراً.`
+        : `Good question! To make sure you get an accurate answer, reach our team at ${business.phone || 'our contact number'} — and meanwhile, ask me about pricing, locations, specs, or payment plans and I'll answer right away.`;
       payload.suggestions = suggestions.slice(0, 3);
       break;
   }

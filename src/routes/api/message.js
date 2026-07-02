@@ -12,6 +12,8 @@ const {
   isOrderingEnabled,
   isInternalOrderCommand,
   looksLikeOrderIntent,
+  isYesText,
+  isCancelText,
   getExistingPhoneStatus,
   startOrderFlow,
   handleOrderMessage,
@@ -35,6 +37,7 @@ const {
   resolveAiPipeline,
   buildRecommendationCandidates,
   buildRecommendationMessages,
+  buildCountryMissPayload,
 } = require('../../engine/aiPipelines');
 const { canUseAi, recordAiUse } = require('../../engine/aiRateLimiter');
 const { matchFaq } = require('../../engine/faqMatcher');
@@ -142,8 +145,8 @@ function resolveItemsByIds(businessId, ids) {
 // that is a PRECISE set, so seedAll tells the order flow to add every one.
 function resolveOrderSeedItems({ text, lang, businessId, context }) {
   // 1. Items explicitly named in THIS message win.
-  const explicit = matchItemsForOrder({ text, lang, businessId, context });
-  if (explicit.length) return { items: explicit, seedAll: false };
+  const explicitItems = matchItemsForOrder({ text, lang, businessId, context });
+  if (explicitItems.length) return { items: explicitItems, seedAll: false, explicit: true };
 
   const raw = String(text || '');
   // 2. "order them / those / both" -> the SET we last recommended/showed.
@@ -151,7 +154,10 @@ function resolveOrderSeedItems({ text, lang, businessId, context }) {
     const ids = Array.isArray(context.last_recommended_ids) && context.last_recommended_ids.length
       ? context.last_recommended_ids
       : (Array.isArray(context.recent_item_ids) ? context.recent_item_ids.slice(-3) : []);
-    return { items: resolveItemsByIds(businessId, ids), seedAll: true };
+    // `explicit: false` — the item set is INFERRED from conversation history,
+    // not named in this message, so a caller relying on a purely AI-guessed
+    // order intent (see isOrderIntent below) must confirm before it acts on it.
+    return { items: resolveItemsByIds(businessId, ids), seedAll: true, explicit: false };
   }
 
   // 3. Bare order intent with NO product named ("make an order", "i want to
@@ -159,13 +165,13 @@ function resolveOrderSeedItems({ text, lang, businessId, context }) {
   //    looking at, else the most recent one. This is what lets "make order"
   //    after viewing a product seed THAT product instead of opening empty.
   if (Number.isFinite(context.last_item)) {
-    return { items: resolveItemsByIds(businessId, [context.last_item]), seedAll: true };
+    return { items: resolveItemsByIds(businessId, [context.last_item]), seedAll: true, explicit: false };
   }
   const recent = Array.isArray(context.recent_item_ids) ? context.recent_item_ids : [];
   if (recent.length) {
-    return { items: resolveItemsByIds(businessId, [recent[recent.length - 1]]), seedAll: true };
+    return { items: resolveItemsByIds(businessId, [recent[recent.length - 1]]), seedAll: true, explicit: false };
   }
-  return { items: [], seedAll: false };
+  return { items: [], seedAll: false, explicit: false };
 }
 
 function shouldRetryWithRecovery(intent) {
@@ -211,6 +217,26 @@ function isFillerAiReply(text) {
 
 function hasUsablePayload(payload) {
   return Boolean(payload && payload.text && !['unknown', 'item_not_found', 'need_item_context', 'ai_not_found'].includes(payload.intent));
+}
+
+// Compact store profile + category names for the last-resort generic answer
+// call. Item rows are deliberately excluded so the call stays a few hundred
+// tokens — product lookups were already resolved (or genuinely missed)
+// upstream, this call only has to answer meta/general questions in character.
+function buildGenericAnswerSource(business) {
+  const { getBusinessItems } = require('../../brains/shared/catalogStore');
+  const items = getBusinessItems(business.id);
+  const categories = [...new Set(items.map((i) => i.category_en || i.category_ar).filter(Boolean))];
+  return {
+    store: {
+      name: business.name || business.name_ar || '',
+      about: business.about_en || business.about_ar || '',
+      phone: business.phone || '',
+      email: business.email || '',
+      working_hours: business.working_hours_en || business.working_hours_ar || '',
+    },
+    categories,
+  };
 }
 
 function looksLikeName(text) {
@@ -319,7 +345,12 @@ router.post('/', tokenValidator, async (req, res) => {
     // history exists — so it stays cacheable. (This previously keyed off the
     // gate's followup_context flag, which fires for ANY question once history
     // exists and wrongly blocked caching of plain repeated questions.)
-    const ANAPHOR_RE = /\b(it|its|this|that|these|those|them|they|same)\b/i;
+    // Casual typing drops the apostrophe ("thats", "whats") — without it the
+    // contraction misses \bthat\b/\bwhat\b entirely (no word boundary before
+    // the trailing "s"), so a real follow-up ("thats cool but I insist on
+    // Saudi Arabia") gets treated as self-contained and sent with NO history,
+    // leaving the classifier to guess the category blind.
+    const ANAPHOR_RE = /\b(it|its|it's|this|that|that's|thats|these|those|them|they|they're|theyre|same)\b/i;
     const ANAPHOR_AR_RE = /(ده|دى|دي|دا|هذا|هذه|نفس|فيها|فيه)/;
     function isContextReferencing(message) {
       const m = String(message || '');
@@ -329,6 +360,10 @@ router.post('/', tokenValidator, async (req, res) => {
     const classifyCacheable = !isContextReferencing(text);
     const classifyKey = `${lang}|${String(text || '').trim().toLowerCase().replace(/\s+/g, ' ')}`;
     let aiUnavailable = false;
+    // The classifier's [11] reply when it was rejected as a content-free
+    // bounce. Held as a LAST-resort reply: if every other pipeline also comes
+    // up empty, a warm "I'm here to help" still beats a canned not-found.
+    let aiDirectBounceText = '';
     async function tryAiPipeline(reason) {
       if (aiUnavailable || !isAiEnabledForBusiness(business)) return { handled: false };
 
@@ -380,7 +415,14 @@ router.post('/', tokenValidator, async (req, res) => {
       // and let a focused AI answer pick one. Only this intent pays the second
       // call, and it sees just the candidates — not the whole menu.
       if (pipeline.code === 12) {
-        const candidates = buildRecommendationCandidates({ criteria: pipeline.item, business, lang, context });
+        const { candidates, countryMiss, activeCountry } = buildRecommendationCandidates({ criteria: pipeline.item, business, lang, context, text });
+        // A country was named but nothing in the candidate pool is FROM that
+        // country — don't let the recommend call improvise a wrong-country
+        // pick and present it as satisfying the request.
+        if (countryMiss) {
+          const miss = buildCountryMissPayload({ activeCountry, lang, business });
+          return { handled: true, intent: miss.intent, payload: miss.payload, raw: aiResult.raw };
+        }
         if (!candidates.length) return { handled: false, raw: aiResult.raw };
         const answer = await callAiAnswer({
           prompt: text,
@@ -449,8 +491,12 @@ router.post('/', tokenValidator, async (req, res) => {
         const direct = (pipeline.direct || '').trim();
         // Content-free bounce -> let local rules answer instead (e.g. the
         // brain's 'help' intent, which offers real, actionable next steps)
-        // rather than parroting the same dead-end question back.
-        if (isFillerAiReply(direct)) return { handled: false, raw: aiResult.raw };
+        // rather than parroting the same dead-end question back. Keep the
+        // text though — if the rules ALSO dead-end, it's still a real reply.
+        if (isFillerAiReply(direct)) {
+          aiDirectBounceText = direct;
+          return { handled: false, raw: aiResult.raw };
+        }
         return {
           handled: true,
           intent: 'ai_answer',
@@ -469,7 +515,7 @@ router.post('/', tokenValidator, async (req, res) => {
       // greeting) is resolved LOCALLY: the classifier returned a structured
       // query, we run it against our own catalog and format the reply. The menu
       // is NEVER sent to the AI — only the tiny classify call costs tokens.
-      const resolved = resolveAiPipeline({ pipeline, brain, business, lang, context });
+      const resolved = resolveAiPipeline({ pipeline, brain, business, lang, context, text });
       if (!resolved || !resolved.payload) {
         return { handled: false, invalid: true, raw: aiResult.raw };
       }
@@ -527,7 +573,50 @@ router.post('/', tokenValidator, async (req, res) => {
       };
     }
 
-    function sendPayloadResult({ payload, intent, nextContext, phase = session.phase }) {
+    // ZERO-not-found guarantee. When every pipeline has failed and the reply
+    // would be a canned not-found, spend ONE focused AI answer call
+    // (mode 'answer' -> rules/<service>_answer.txt on the AI service) so the
+    // customer always gets a real reply in their language. Only the compact
+    // store profile + category names are sent — never the item rows — so the
+    // call stays a few hundred tokens. Context-free replies are cached under
+    // a 'generic|' key so a repeated question costs nothing.
+    async function resolveGenericAiAnswer() {
+      try {
+        if (aiUnavailable || !isAiEnabledForBusiness(business)) return null;
+
+        const genericKey = `generic|${classifyKey}`;
+        if (classifyCacheable) {
+          const cached = getCachedClassification(business.id, genericKey);
+          if (cached) return cached;
+        }
+
+        const gate = canUseAi({ businessId: business.id, ip: clientIp, deviceId });
+        if (!gate.allowed) {
+          console.warn('[ai-routing] rate limited, generic answer skipped', { limit: gate.reason });
+          return null;
+        }
+        recordAiUse({ businessId: business.id, ip: clientIp, deviceId });
+
+        const answer = await callAiAnswer({
+          prompt: text,
+          business,
+          lang,
+          history: isContextReferencing(text) ? aiHistory : '',
+          candidates: buildGenericAnswerSource(business),
+          mode: 'answer',
+        });
+        recordAiCall({ businessId: business.id, sessionId: session.id, message: text, mode: 'answer', result: answer });
+        const reply = answer.ok ? String(answer.reply || '').trim() : '';
+        if (!reply) return null;
+        if (classifyCacheable) setCachedClassification(business.id, genericKey, reply);
+        return reply;
+      } catch (error) {
+        console.warn('[ai-routing] generic answer failed', error.message);
+        return null;
+      }
+    }
+
+    async function sendPayloadResult({ payload, intent, nextContext, phase = session.phase }) {
       const faq = applyFaqFallback({ payload, intent });
       payload = faq.payload;
       intent = faq.intent;
@@ -537,6 +626,29 @@ router.post('/', tokenValidator, async (req, res) => {
           last_faq: faq.faqQuestion,
           last_suggestions: normalizeSuggestions(payload.suggestions),
         };
+      }
+
+      // Still a not-found after the FAQ pass -> the zero-not-found guarantee:
+      // a real AI-written reply, else the classifier's own [11] text, before
+      // any canned fallback is allowed out the door.
+      if (NOT_FOUND_INTENTS.has(intent)) {
+        const genericReply = await resolveGenericAiAnswer();
+        const replacement = genericReply || aiDirectBounceText;
+        if (replacement) {
+          intent = genericReply ? 'ai_generic_answer' : 'ai_answer';
+          payload = {
+            text: replacement,
+            type: 'text',
+            buttons: [],
+            suggestions: parseSuggestions(business, lang),
+            thumbnail: null,
+            context_update: {},
+          };
+          nextContext = {
+            ...nextContext,
+            last_suggestions: normalizeSuggestions(payload.suggestions),
+          };
+        }
       }
 
       updateSession.run(
@@ -632,6 +744,70 @@ router.post('/', tokenValidator, async (req, res) => {
       });
     }
 
+    // The AI classifier is the ONLY signal for order intent (no "order"/"اطلب"
+    // wording in the message, no item literally named) and the item(s) it would
+    // seed were guessed from conversation history, not this message. That combo
+    // has caused real false positives (a complaint like "انا قلت منتج واحد بس"
+    // misread as an order request) that silently opened a live order. Ask once
+    // instead of acting — "yes" resumes exactly the seed we would have used.
+    function startOrderConfirmResponse(orderSeed) {
+      const titles = orderSeed.items
+        .map((item) => (lang === 'ar' ? item.title_ar || item.title_en : item.title_en || item.title_ar))
+        .filter(Boolean);
+      const itemLine = titles.length ? titles.join('، ') : '';
+      const text = lang === 'ar'
+        ? (itemLine
+          ? `يبدو إنك تقصد طلب "${itemLine}". هل أبدأ الطلب فعلاً؟`
+          : 'يبدو إنك تقصد بدء طلب جديد. هل أفتح طلباً الآن؟')
+        : (itemLine
+          ? `Looks like you want to order "${itemLine}". Should I start the order?`
+          : 'Looks like you want to start an order. Should I open one now?');
+      const suggestions = lang === 'ar' ? ['نعم، ابدأ الطلب', 'لا'] : ['Yes, start the order', 'No'];
+
+      const nextContext = {
+        ...context,
+        pending_order_confirm: {
+          item_ids: orderSeed.items.map((item) => item.id),
+          seed_all: orderSeed.seedAll,
+        },
+        last_suggestions: suggestions,
+      };
+      updateSession.run(session.phase, lang, session.guest_name, session.guest_phone, JSON.stringify(nextContext), session.id);
+      insertMessage.run(session.id, 'bot', text, 'order_confirm_prompt');
+
+      return res.json({
+        automated: true,
+        response: {
+          text,
+          type: 'text',
+          buttons: [],
+          suggestions,
+          ui_state: emptyUiState(),
+          order_suggestions: [],
+          thumbnail: null,
+          messages: null,
+        },
+        language: lang,
+        phase: session.phase,
+        intent: 'order_confirm_prompt',
+        order_suggestions: [],
+      });
+    }
+
+    // Resume from the confirmation prompt above. "Yes" opens the order with the
+    // exact seed we proposed; anything else drops the flag and continues as a
+    // normal message so the customer is never trapped answering a yes/no bot.
+    if (context.pending_order_confirm && isOrderingEnabled(business)) {
+      const pending = context.pending_order_confirm;
+      delete context.pending_order_confirm;
+      if (isYesText(text, lang)) {
+        const seedItems = resolveItemsByIds(business.id, pending.item_ids || []);
+        return startOrderResponse(seedItems, Boolean(pending.seed_all));
+      }
+      // Any other reply (including "no") falls through to normal handling
+      // below with the flag already cleared.
+    }
+
     if (session.phase === 'collect_name') {
       if (!looksLikeName(text)) {
         const reply = COMMON_RESPONSES.invalid_name[lang]();
@@ -672,7 +848,7 @@ router.post('/', tokenValidator, async (req, res) => {
           last_suggestions: normalizeSuggestions(recallPayload.suggestions),
           recent_item_ids: mergeRecentItemIds(context, collectTrackedItemIds(recallProbe)),
         };
-        return sendPayloadResult({ payload: recallPayload, intent: 'item_recall', nextContext });
+        return await sendPayloadResult({ payload: recallPayload, intent: 'item_recall', nextContext });
       }
       // Context follow-up ("tell me more about it", "قلي تفاصيل اكتر عنه"): the
       // brain resolved the message against the product already in context. Answer
@@ -688,7 +864,7 @@ router.post('/', tokenValidator, async (req, res) => {
           last_suggestions: normalizeSuggestions(followupPayload.suggestions),
           recent_item_ids: mergeRecentItemIds(context, collectTrackedItemIds(recallProbe)),
         };
-        return sendPayloadResult({ payload: followupPayload, intent: recallProbe.intent, nextContext });
+        return await sendPayloadResult({ payload: followupPayload, intent: recallProbe.intent, nextContext });
       }
     }
 
@@ -726,7 +902,7 @@ router.post('/', tokenValidator, async (req, res) => {
             awaiting_order_products: true,
             last_suggestions: normalizeSuggestions(howtoPayload.suggestions),
           };
-          return sendPayloadResult({ payload: howtoPayload, intent: 'order_howto', nextContext });
+          return await sendPayloadResult({ payload: howtoPayload, intent: 'order_howto', nextContext });
         }
       }
     }
@@ -766,7 +942,7 @@ router.post('/', tokenValidator, async (req, res) => {
           ...aiPipeline.payload.context_update,
           last_suggestions: normalizeSuggestions(aiPipeline.payload.suggestions),
         };
-        return sendPayloadResult({
+        return await sendPayloadResult({
           payload: aiPipeline.payload,
           intent: aiPipeline.intent,
           nextContext,
@@ -860,7 +1036,8 @@ router.post('/', tokenValidator, async (req, res) => {
       }
     }
 
-    const isOrderIntent = forceOrderFromAi || looksLikeOrderIntent(text, lang) || (lang === 'ar' && looksLikeOrderIntent(require('../../engine/translation').translateArabicToEnglish(text), 'en'));
+    const localOrderIntent = looksLikeOrderIntent(text, lang) || (lang === 'ar' && looksLikeOrderIntent(require('../../engine/translation').translateArabicToEnglish(text), 'en'));
+    const isOrderIntent = forceOrderFromAi || localOrderIntent;
     if (isOrderingEnabled(business) && (session.phase === 'active' || String(session.phase || '').startsWith('order_')) && (isOrderIntent || isInternalOrderCommand(text))) {
       const orderSeed = resolveOrderSeedItems({
         text,
@@ -868,7 +1045,17 @@ router.post('/', tokenValidator, async (req, res) => {
         businessId: business.id,
         context,
       });
-      return startOrderResponse(orderSeed.items, orderSeed.seedAll);
+      // The ONLY signal was the AI classifier (no local "order" wording) and the
+      // seed item(s) were inferred from history rather than named right here —
+      // the riskiest, least-corroborated combination. Confirm before opening a
+      // real order instead of acting on a possible misclassification.
+      if (forceOrderFromAi && !localOrderIntent && !isInternalOrderCommand(text) && !orderSeed.explicit) {
+        if (orderSeed.items.length) return startOrderConfirmResponse(orderSeed);
+        // Nothing to seed either — too weak a guess to act on at all; let
+        // normal intent detection answer the message below instead.
+      } else {
+        return startOrderResponse(orderSeed.items, orderSeed.seedAll);
+      }
     }
 
     let resolvedText = text;
@@ -931,7 +1118,7 @@ router.post('/', tokenValidator, async (req, res) => {
         ...payload.context_update,
         last_suggestions: normalizeSuggestions(payload.suggestions),
       };
-      return sendPayloadResult({
+      return await sendPayloadResult({
         payload,
         intent: fallbackIsUsable ? intentResult.intent : 'ai_not_found',
         nextContext,
@@ -947,7 +1134,16 @@ router.post('/', tokenValidator, async (req, res) => {
           businessId: business.id,
           context,
         });
-        return startOrderResponse(orderSeed.items, orderSeed.seedAll);
+        // See the identical guard above: the AI classifier is the only order
+        // signal here too (local rules already produced 'unknown'/'item_not_found'
+        // above this branch), so an inferred, unnamed seed must be confirmed first.
+        const localOrderIntentFallback = looksLikeOrderIntent(text, lang)
+          || (lang === 'ar' && looksLikeOrderIntent(require('../../engine/translation').translateArabicToEnglish(text), 'en'));
+        if (!localOrderIntentFallback && !orderSeed.explicit) {
+          if (orderSeed.items.length) return startOrderConfirmResponse(orderSeed);
+        } else {
+          return startOrderResponse(orderSeed.items, orderSeed.seedAll);
+        }
       }
       if (aiPipeline.handled) {
         const nextContext = {
@@ -955,7 +1151,7 @@ router.post('/', tokenValidator, async (req, res) => {
           ...aiPipeline.payload.context_update,
           last_suggestions: normalizeSuggestions(aiPipeline.payload.suggestions),
         };
-        return sendPayloadResult({
+        return await sendPayloadResult({
           payload: aiPipeline.payload,
           intent: aiPipeline.intent,
           nextContext,
@@ -971,7 +1167,7 @@ router.post('/', tokenValidator, async (req, res) => {
           ...payload.context_update,
           last_suggestions: normalizeSuggestions(payload.suggestions),
         };
-        return sendPayloadResult({
+        return await sendPayloadResult({
           payload,
           intent: hasUsablePayload({ ...fallbackPayload, intent: intentResult.intent }) ? intentResult.intent : 'ai_not_found',
           nextContext,
@@ -984,68 +1180,18 @@ router.post('/', tokenValidator, async (req, res) => {
       collectTrackedItemIds(intentResult)
     );
     const basePayload = brain.buildResponse(intentResult, lang, business);
-    const faqFallback = applyFaqFallback({ payload: basePayload, intent: intentResult.intent });
-    const payload = faqFallback.payload;
-    const finalIntent = faqFallback.intent;
     const nextContext = {
       ...context,
-      ...payload.context_update,
-      last_suggestions: normalizeSuggestions(payload.suggestions),
+      ...basePayload.context_update,
+      last_suggestions: normalizeSuggestions(basePayload.suggestions),
       recent_item_ids: trackedItemIds,
     };
     if (resolvedText !== text) {
       nextContext.last_recovered_query = resolvedText;
     }
-
-    updateSession.run(
-      session.phase,
-      lang,
-      session.guest_name,
-      session.guest_phone,
-      JSON.stringify(nextContext),
-      session.id
-    );
-    if (Array.isArray(payload.messages) && payload.messages.length > 0) {
-      payload.messages.forEach((msg) => {
-        insertMessage.run(session.id, 'bot', msg.text, finalIntent, msg.thumbnail || null);
-      });
-    } else {
-      insertMessage.run(session.id, 'bot', payload.text, finalIntent, payload.thumbnail || null);
-    }
-
-    const orderState = resolveOrderUiState({ business, session, context: nextContext, lang });
-    const orderSuggestions = orderState.suggestions || [];
-    
-    let finalUiState = orderState.ui_state;
-    if (!dashboardActive) {
-      finalUiState = {
-        ui_state: {
-          input_locked: false,
-          choice_buttons: [],
-          address_preview: '',
-          order_draft: orderState.ui_state?.order_draft || null,
-        },
-        suggestions: [],
-      }.ui_state;
-    }
-
-    return res.json({
-      automated: true,
-      response: {
-        text: payload.text,
-        type: payload.type,
-        buttons: payload.buttons,
-        suggestions: payload.suggestions,
-        ui_state: finalUiState,
-        order_suggestions: orderSuggestions,
-        thumbnail: payload.thumbnail,
-        messages: payload.messages || null,
-      },
-      language: lang,
-      phase: session.phase,
-      intent: finalIntent,
-      order_suggestions: orderSuggestions,
-    });
+    // sendPayloadResult applies the FAQ fallback and the zero-not-found
+    // guarantee (generic AI answer) before anything canned can go out.
+    return await sendPayloadResult({ payload: basePayload, intent: intentResult.intent, nextContext });
   } catch (error) {
     console.error('[message]', error);
     const lang = detectLanguage(req.body?.message || '');

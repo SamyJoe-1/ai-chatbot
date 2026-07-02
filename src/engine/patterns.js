@@ -223,8 +223,8 @@ const RESPONSES = {
     ar: (cafe) => `للحجز تواصل معنا مباشرة على ${cafe.phone || 'رقم الهاتف'}.`,
   },
   unknown: {
-    en: (cafe) => `I do not have an exact answer for that yet. Please contact us at ${cafe.phone || 'our contact number'}, and I can still help with the menu, prices, hours, or location.`,
-    ar: (cafe) => `لا أملك إجابة دقيقة على هذا السؤال حالياً. تواصل معنا على ${cafe.phone || 'رقم التواصل'}، وما زلت أقدر أساعدك في القائمة أو الأسعار أو المواعيد أو الموقع.`,
+    en: (cafe) => `Good question! To make sure you get an accurate answer, reach our team at ${cafe.phone || 'our contact number'} — and meanwhile, ask me about the menu, prices, hours, or location and I'll answer right away.`,
+    ar: (cafe) => `سؤال جميل! عشان أضمنلك إجابة دقيقة، تواصل مع فريقنا على ${cafe.phone || 'رقم التواصل'} — وفي نفس الوقت اسألني عن القائمة أو الأسعار أو المواعيد أو الموقع وهجاوبك فوراً.`,
   },
   error: {
     en: (cafe) => `Something went wrong. Please contact us at ${cafe?.phone || 'our contact number'}.`,

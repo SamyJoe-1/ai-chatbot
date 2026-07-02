@@ -1377,6 +1377,8 @@ module.exports = {
   isOrderingEnabled,
   isInternalOrderCommand,
   looksLikeOrderIntent,
+  isYesText,
+  isCancelText,
   getExistingPhoneStatus,
   startOrderFlow,
   handleOrderMessage,

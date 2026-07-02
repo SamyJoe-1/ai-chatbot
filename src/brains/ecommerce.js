@@ -2,8 +2,9 @@
 
 const { tokenize, normalize } = require('../engine/detector');
 const { getBusinessItems, getAllBusinessItems } = require('./shared/catalogStore');
-const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle } = require('./shared/matcher');
+const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle, detectCountry, countryMatchesItem } = require('./shared/matcher');
 const { getItemThumbnail, buildThumbnailMessages } = require('./shared/thumbnailMessages');
+const { matchFaq } = require('../engine/faqMatcher');
 
 const FEATURE_SYNONYMS = {
   color: ['color', 'colors', 'لون', 'اللون', 'ألوان', 'الوان'],
@@ -79,13 +80,26 @@ const PATTERNS = {
       /\bbeginn?er\b.*\btips?\b/i,
       /\bany (tips|advice)\b/i,
       /\badvice for (beginners|newbies|starting out)\b/i,
+      // Confusion / lost signals and "help me find" — the customer is asking
+      // to be walked through a choice, not for the capabilities blurb.
+      /\b(i'?m|i am|i feel|feeling|im) (a bit |so |really |kinda )?(confused|lost|overwhelmed|unsure)\b/i,
+      /\bhelp me (find|look for|search)\b/i,
+      /\bhelp\b.{0,25}\bfind (my|a|the right|me a) product\b/i,
+      /\bfind (me )?(my|the right) product\b/i,
+      /\bnot sure what (i|to)\b/i,
     ],
     help: [/\bhelp\b/i, /\bwhat can you do\b/i, /\bhow does this work\b/i],
     contact: [/\bcontact\b/i, /\bphone\b/i, /\bwhatsapp\b/i, /\bcall\b/i, /\bemail\b/i],
     working_hours: [/\bhours\b/i, /\bopen\b/i, /\bclose\b/i, /\bworking hours\b/i],
     location: [/\blocation\b/i, /\baddress\b/i, /\bwhere are you\b/i, /\bdirections\b/i],
     brand_info: [/\bwho are you\b/i, /\babout you\b/i, /\babout the store\b/i, /\bwhat do you provide\b/i],
-    catalog_general: [/\bcatalog\b/i, /\bmarketplace\b/i, /\bproducts\b/i, /\bwhat do you have\b/i, /\bshow me\b/i],
+    catalog_general: [/\bcatalog\b/i, /\bwhat do you have\b/i, /\bshow me\b/i],
+    // Bare generic nouns — "marketplace"/"products" show up inside all kinds of
+    // unrelated sentences ("not marketplace", "do you have products for SA in
+    // this category") and would otherwise hijack them into the canned browse
+    // reply. Only trust a bare hit when it's the CORE of a short message —
+    // see the length gate at the call site.
+    catalog_general_generic: [/\bmarketplace\b/i, /\bproducts\b/i],
     // Enumerating ALL categories ("what categories do you have", "list the
     // categories") is distinct from ecommerce_category_info, which only fires
     // once a SPECIFIC known category is already matched in the text. This one
@@ -112,6 +126,19 @@ const PATTERNS = {
     ecommerce_check_availability: [/\bavailability\b/i, /\bavailable\b/i, /\bin stock\b/i],
     ecommerce_country_info: [/\bmarketplace in\b/i, /\babout country\b/i, /\bcountry\b/i],
     ecommerce_country_products: [/\bproducts in\b/i, /\bfrom country\b/i, /\bmarketplace in\b/i, /\bin the country\b/i],
+    // "send me one product", "just one", "one fuckin product" — the customer
+    // wants a SINGLE result, not the whole matching list. Loose gap between
+    // "one" and "product" so filler/profanity in between still matches.
+    single_item_request: [
+      /\bone\b[\w\s]{0,15}\bproducts?\b/i,
+      /\bproducts?\b[\w\s]{0,15}\bone\b/i,
+      /\bjust one\b/i,
+      /\bonly one\b/i,
+      /\bsingle (item|product)\b/i,
+      /\bgive me one\b/i,
+      /\bshow (me )?(just )?one\b/i,
+      /\bat\s*least\s*one\b/i,
+    ],
     item_price: [/\bprice\b/i, /\bcost\b/i, /\bhow much\b/i, /\bquote\b/i, /\bwholesale\b/i],
     logistics_inquiry: [
       /\bhow (many days?|long|much time|soon)\b/i,
@@ -127,13 +154,14 @@ const PATTERNS = {
     greeting_how_are_you: [/^(ايه اخبارك|عامل ايه|عامل اية|انت كويس|كيفك|شلونك|شلونكم|شخباركم|اخبارك|ازيك|إزيك|ايش اخبارك|كيف حالك)/],
     greeting_yasta: [/^(يسطا|يا اسطى|ياسطى|ي زميلي|يا زميلي|يصاحبي|يا صاحبي)/],
     thanks: [/(شكرا|شكراً|تسلم|يسلمو|ممنون|يعطيك العافية)/],
-    guided_discovery: [/(مش عارف اختار|مش عارفة اختار|مش عارف ابدأ|مش عارف ابدا|منين ابدأ|منين ابدا|من وين ابدأ|معنديش خبرة|معنديش خبره|اول مرة اشتري|أول مرة اشتري|اختارلي|اختاري لي|رشحلي|رشح لي|وجهني|علمني اختار|ازاي اختار|إزاي اختار|كيف اختار|عايز حد يساعدني اختار|عاوز حد يساعدني اختار)/],
+    guided_discovery: [/(مش عارف اختار|مش عارفة اختار|مش عارف ابدأ|مش عارف ابدا|منين ابدأ|منين ابدا|من وين ابدأ|معنديش خبرة|معنديش خبره|اول مرة اشتري|أول مرة اشتري|اختارلي|اختاري لي|رشحلي|رشح لي|وجهني|علمني اختار|ازاي اختار|إزاي اختار|كيف اختار|عايز حد يساعدني اختار|عاوز حد يساعدني اختار|محتار|محتارة|متلخبط|متلخبطة|تايه|تايهة|حاسس اني تايه|ساعدني الاقي|ساعدني ألاقي|ساعديني الاقي|عايز الاقي منتج|مش لاقي اللي يناسبني)/],
     help: [/(مساعدة|ساعدني|كيف يشتغل|كيف يعمل|ماذا يمكنك|بتعمل ايه|تساعدني)/],
     contact: [/(تواصل|اتصال|رقم|واتساب|هاتف|موبايل|ايميل|إيميل|تليفون|تلفون|كلمكم|اكلمكم)/],
     working_hours: [/(ساعات|مواعيد|عمل|الدوام|شغالين|تفتح|تقفل|تفتحون|تغلقون|امتى|امتا|الساعة كام|الساعه كام)/],
     location: [/(العنوان|الموقع|وين|فين|أين|اتجاهات|خريطة|مكان|فروعكم|فرعكم)/],
     brand_info: [/(من انتم|مين انتم|نبذه عنكم|نبذة عنكم|من انتو|ماذا تقدمون|عن المتجر|عن المعرض|مين انت)/],
-    catalog_general: [/(كتالوج|المنتجات|ايش عندكم|شو عندكم|عندكم ايه|عندك ايه|الكتالوج|وش عندكم|السوق|الماركت|المتجر)/],
+    catalog_general: [/(كتالوج|ايش عندكم|شو عندكم|عندكم ايه|عندك ايه|الكتالوج|وش عندكم)/],
+    catalog_general_generic: [/(المنتجات|السوق|الماركت|المتجر)/],
     list_categories: [/(كل الاقسام|كل الأقسام|جميع الاقسام|جميع الأقسام|الاقسام الموجودة|الأقسام الموجودة|ايه الاقسام|إيه الأقسام|ايش الاقسام|شو الاقسام|عندكم اقسام ايه|عندكم أقسام ايه|الفئات المتاحة|كل الفئات|جميع الفئات|انواع المنتجات|أنواع المنتجات|التصنيفات)/],
     order_howto: [
       /كيف[؀-ۿ\s]{0,15}(اطلب|أطلب|الطلب|اعمل طلب|اعمل اوردر|اوردر)/,
@@ -153,6 +181,7 @@ const PATTERNS = {
     ecommerce_check_availability: [/(متاح|متوفر|متوفره|متوفرة|موجود|موجوده|في المخزون)/],
     ecommerce_country_info: [/(سوق|اسواق|في بلد|في دوله|في دولة|السوق)/],
     ecommerce_country_products: [/(منتجات من|من بلد|من دولة|منتجات في|في السعودية|في مصر|في الإمارات|السعودية|مصر|الإمارات)/],
+    single_item_request: [/(واحد بس|واحد فقط|منتج واحد|قطعة واحدة|عايز واحد|عاوز واحد|عايزة واحد|ولو واحد|على الاقل واحد|على الأقل واحد)/],
     item_price: [/(سعر|اسعار|أسعار|بكام|بقديش|كم السعر|الثمن|حسابه|حسابها|كم حقها|حقها كم|عرض سعر|الجمله|الجملة)/],
     logistics_inquiry: [/(كم يوم|كم يومًا|كم يوماً|امتى|متى يوصل|كم مدة|وقت التوصيل|وقت الشحن|وقت التوريد|المخزن|المستودع|مدة التوريد|مدة الشحن|التسليم|فترة التوريد|هيوصل امتى|يوصل امتى|تاريخ التسليم)/],
   }
@@ -271,43 +300,20 @@ function buildFeatureLines(item, locale) {
   return out;
 }
 
-function getCountryNames(items) {
-  const countriesEn = new Set();
-  const countriesAr = new Set();
-  items.forEach(item => {
-    const meta = item.metadata || {};
-    if (meta.country_en) countriesEn.add(meta.country_en.toLowerCase());
-    if (meta.country) countriesEn.add(meta.country.toLowerCase());
-    if (meta.country_ar) countriesAr.add(meta.country_ar);
-  });
-  return { en: Array.from(countriesEn), ar: Array.from(countriesAr) };
-}
-
-function detectCountry(text, lang, items) {
-  const { en, ar } = getCountryNames(items);
-  const searchList = lang === 'ar' ? ar : en;
-  const normalized = text.toLowerCase();
-  for (const country of searchList) {
-    if (normalized.includes(country.toLowerCase())) {
-      return country;
-    }
-  }
-  const altList = lang === 'ar' ? en : ar;
-  for (const country of altList) {
-    if (normalized.includes(country.toLowerCase())) {
-      return country;
-    }
-  }
-  return null;
-}
-
 // Detect a marketing-badge filter ("what's new", "limited products", "trending").
 function detectBadge(text) {
   const normalized = String(text || '').toLowerCase();
   for (const [canonical, synonyms] of Object.entries(BADGE_SYNONYMS)) {
-    if (synonyms.some((syn) => normalized.includes(syn.toLowerCase()))) {
-      return canonical;
-    }
+    const hit = synonyms.some((syn) => {
+      const s = syn.toLowerCase();
+      // Latin synonyms match on word boundaries — "wholesale" must NOT hit
+      // "sale". Arabic has no \b semantics, so keep substring matching there.
+      if (/^[a-z\s]+$/.test(s)) {
+        return new RegExp(`\\b${s.replace(/\s+/g, '\\s+')}\\b`).test(normalized);
+      }
+      return normalized.includes(s);
+    });
+    if (hit) return canonical;
   }
   return null;
 }
@@ -478,6 +484,19 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   if (matchesAny(normalizedText, patterns.greeting_yasta)) return { intent: 'greeting_yasta' };
   if (matchesAny(normalizedText, patterns.thanks)) return { intent: 'thanks' };
 
+  // Kick-off continuation. After we invited the customer to explore (help /
+  // browse / discovery reply sets awaiting_discovery), a bare "so lets start" /
+  // "ok go ahead" / "يلا" means "walk me through it" — start guided discovery
+  // instead of falling to unknown (or, worse, a random FAQ). Strictly gated on
+  // the flag AND an affirmative-only message so nothing else is hijacked.
+  const KICKOFF_RE = /^(so |ok |okay |yes |yeah |well )*(let'?s? |lets )?(start|begin|go|go ahead|do it|do this|discover|explore)( together| now| then)?\s*[!.?]*$/i;
+  const KICKOFF_AR_RE = /^(يلا|يالله|يلا بينا|ابدأ|ابدا|نبدأ|نبدا|خلينا نبدأ|خلينا نبدا|تمام يلا|ماشي يلا|جاهز|جاهزة)\s*[!.؟]*$/;
+  if (context.awaiting_discovery
+    && (KICKOFF_RE.test(String(text || '').trim()) || KICKOFF_AR_RE.test(String(text || '').trim()))) {
+    const categories = [...new Set(items.map((item) => getDisplayCategory(item, lang)).filter(Boolean))];
+    return { intent: 'guided_discovery', categories };
+  }
+
   // Checked before the generic `help` intent (phrases like "help me choose"
   // contain "help" too) so a customer with no idea what to buy gets walked
   // through a real choice instead of a capabilities blurb or an AI freeform
@@ -535,30 +554,56 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   }
 
   const asksPriceBase = matchesAny(normalizedText, patterns.item_price);
+  // "send me one product", "one fuckin product" — a hard cap to a SINGLE
+  // result. Checked everywhere a list would otherwise be returned so a
+  // quantity-limited ask never gets dumped the full matching set.
+  const wantsOne = matchesAny(normalizedText, patterns.single_item_request);
 
-  // Country checking
+  // Country checking. A category named in the SAME message ("electronics in
+  // saudi arabia") narrows the pool before the country filter runs, so the
+  // two constraints combine instead of the category being silently dropped.
   const countryForProducts = detectCountry(normalizedText, lang, items);
-  if (countryForProducts) {
-    const filterCountry = (i) => {
-      let meta = i.metadata || {};
-      if (typeof meta === 'string') {
-        try { meta = JSON.parse(meta); } catch { meta = {}; }
-      }
-      const cEn = String(meta.country_en || '').toLowerCase();
-      const cAr = String(meta.country_ar || '');
-      const c = String(meta.country || '').toLowerCase();
-      const target = countryForProducts.toLowerCase();
-      return cEn === target || cAr === countryForProducts || c === target;
-    };
+  // No country in THIS message, but a category was just asked about right
+  // after we filtered by country ("but it should be electronics") -> keep
+  // narrowing the same country instead of reverting to all countries.
+  const carriedCountry = !countryForProducts && categoryMatches.length === 1 && context.last_country
+    ? context.last_country
+    : null;
+  const activeCountry = countryForProducts || carriedCountry;
+
+  if (activeCountry) {
+    const filterCountry = (i) => countryMatchesItem(i, activeCountry);
+    const categoryMatch = categoryMatches.length === 1 ? categoryMatches[0] : null;
+    const basePool = categoryMatch ? categoryMatch.items : items;
 
     if (matchesAny(normalizedText, patterns.ecommerce_search_hot)) {
-      const filtered = items.filter(isHotSelling).filter(filterCountry);
-      return { intent: 'ecommerce_search_hot', items: filtered, country: countryForProducts };
+      const filtered = basePool.filter(isHotSelling).filter(filterCountry);
+      if (wantsOne && filtered.length) {
+        return { intent: 'item_found', item: filtered[0], country: activeCountry };
+      }
+      return { intent: 'ecommerce_search_hot', items: filtered, country: activeCountry, category: categoryMatch?.display };
     }
 
-    if (matchesAny(normalizedText, patterns.ecommerce_country_products) || tokensCount(normalizedText) <= 3) {
-      const filtered = items.filter(filterCountry);
-      return { intent: 'ecommerce_country_products', items: filtered, country: countryForProducts };
+    if (matchesAny(normalizedText, patterns.ecommerce_country_products)
+      || tokensCount(normalizedText) <= 3
+      || categoryMatch
+      || wantsOne) {
+      const filtered = basePool.filter(filterCountry);
+      if (wantsOne && filtered.length) {
+        return { intent: 'item_found', item: filtered[0], country: activeCountry };
+      }
+      return { intent: 'ecommerce_country_products', items: filtered, country: activeCountry, category: categoryMatch?.display };
+    }
+  }
+
+  // "just give me one" with no country/category named THIS turn -> resolve
+  // against whatever we already showed instead of bouncing to a content-free
+  // AI filler reply (that reply doesn't know "one" refers to the prior list).
+  if (wantsOne && !foundItem) {
+    const recentIds = Array.isArray(context.recent_item_ids) ? context.recent_item_ids : [];
+    if (recentIds.length) {
+      const pick = items.find((i) => i.id === recentIds[recentIds.length - 1]);
+      if (pick) return { intent: 'item_found', item: pick, fromContext: true };
     }
   }
 
@@ -576,8 +621,16 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   if (!foundItem) {
     const badge = detectBadge(normalizedText);
     if (badge) {
-      const badgeItems = items.filter((i) => itemBadge(i).includes(badge));
-      return { intent: 'ecommerce_badge', items: badgeItems, badge };
+      // An owner-authored FAQ that strongly matches the message ("do you
+      // offer samples", "discounts for bulk quantities") outranks a badge
+      // listing — "offer"/"discount" appear in both, but the FAQ is the
+      // actual answer. Falling through ends in `unknown`, where the FAQ
+      // fallback in message.js serves that exact answer.
+      const faqHit = matchFaq({ text, lang, business });
+      if (!(faqHit && faqHit.overlap >= 2)) {
+        const badgeItems = items.filter((i) => itemBadge(i).includes(badge));
+        return { intent: 'ecommerce_badge', items: badgeItems, badge };
+      }
     }
   }
 
@@ -620,14 +673,17 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     return { intent: 'ecommerce_price_quote' };
   }
 
-  if (matchesAny(normalizedText, patterns.catalog_general)) return { intent: 'catalog_general' };
+  if (matchesAny(normalizedText, patterns.catalog_general)
+    || (matchesAny(normalizedText, patterns.catalog_general_generic) && tokensCount(normalizedText) <= 6)) {
+    return { intent: 'catalog_general' };
+  }
 
   if (categoryMatches.length === 1) {
     const categoryMatch = categoryMatches[0];
     if (matchesAny(normalizedText, patterns.ecommerce_category_info)) {
       return { intent: 'ecommerce_category_info', category: categoryMatch.display, items: categoryMatch.items };
     }
-    if (categoryMatch.items.length === 1) {
+    if (categoryMatch.items.length === 1 || wantsOne) {
       if (asksPriceBase) return { intent: 'item_price', item: categoryMatch.items[0] };
       return { intent: 'item_found', item: categoryMatch.items[0] };
     }
@@ -745,9 +801,11 @@ function buildResponse(intentResult, lang, business) {
       break;
     case 'help':
       payload.text = locale === 'ar'
-        ? 'أقدر أساعدك في تصفّح السوق، المنتجات الأكثر مبيعاً، تفاصيل المنتجات ومزاياها، وإتمام الطلب.'
-        : 'I can help you browse the Marketplace, find best-selling products, check product details, and place an order.';
+        ? 'أقدر أساعدك في تصفّح السوق، المنتجات الأكثر مبيعاً، تفاصيل المنتجات ومزاياها، وإتمام الطلب. نبدأ؟'
+        : 'I can help you browse the Marketplace, find best-selling products, check product details, and place an order. Shall we start?';
       payload.suggestions = suggestions.slice(0, 4);
+      // A follow-up "yes / lets start" walks them into guided discovery.
+      payload.context_update.awaiting_discovery = true;
       break;
 
     // "How do I order?" -> ask which products; the awaiting flag (set here and in
@@ -761,8 +819,13 @@ function buildResponse(intentResult, lang, business) {
       break;
 
     case 'catalog_general':
-      payload.text = locale === 'ar' ? 'تفضّل، يمكنك تصفّح السوق كاملاً من الزر بالأسفل.' : 'Sure — you can browse our full Marketplace from the button below.';
+      payload.text = locale === 'ar'
+        ? 'تفضّل، يمكنك تصفّح السوق كاملاً من الزر بالأسفل — أو قولي بتدور على إيه وأنا أساعدك تلاقيه.'
+        : "Sure — you can browse our full Marketplace from the button below, or tell me what you're looking for and I'll help you find it.";
       addMarketplaceButton();
+      // "lets discover the marketplace together" ... "so lets start" -> walk
+      // them into guided discovery instead of dead-ending.
+      payload.context_update.awaiting_discovery = true;
       break;
 
     case 'logistics_inquiry':
@@ -826,17 +889,27 @@ function buildResponse(intentResult, lang, business) {
 
     case 'ecommerce_country_products':
       if (intentResult.items && intentResult.items.length > 0) {
-        const heading = locale === 'ar'
-          ? `إليك المنتجات المتوفرة في ${intentResult.country}:`
-          : `Here are the products available in ${intentResult.country}:`;
+        const heading = intentResult.category
+          ? (locale === 'ar'
+            ? `إليك منتجات ${intentResult.category} المتوفرة في ${intentResult.country}:`
+            : `Here are the ${intentResult.category} products available in ${intentResult.country}:`)
+          : (locale === 'ar'
+            ? `إليك المنتجات المتوفرة في ${intentResult.country}:`
+            : `Here are the products available in ${intentResult.country}:`);
         applyItemList(intentResult.items.slice(0, 6), heading);
         payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       } else {
-        payload.text = locale === 'ar'
-          ? `لم نجد منتجات متوفرة في ${intentResult.country} حالياً، لكن يمكننا توفير ما تحتاجه من شبكتنا — تواصل معنا.`
-          : `We couldn't find products in ${intentResult.country} right now, but we can source what you need from our network — contact us.`;
+        payload.text = intentResult.category
+          ? (locale === 'ar'
+            ? `لم نجد منتجات ${intentResult.category} متوفرة في ${intentResult.country} حالياً، لكن يمكننا توفير ما تحتاجه من شبكتنا — تواصل معنا.`
+            : `We couldn't find ${intentResult.category} products in ${intentResult.country} right now, but we can source what you need from our network — contact us.`)
+          : (locale === 'ar'
+            ? `لم نجد منتجات متوفرة في ${intentResult.country} حالياً، لكن يمكننا توفير ما تحتاجه من شبكتنا — تواصل معنا.`
+            : `We couldn't find products in ${intentResult.country} right now, but we can source what you need from our network — contact us.`);
         addContactButton();
       }
+      payload.context_update.last_country = intentResult.country;
+      if (intentResult.category) payload.context_update.last_category = intentResult.category;
       break;
 
     case 'ecommerce_search_hot':
@@ -850,6 +923,8 @@ function buildResponse(intentResult, lang, business) {
         payload.text = locale === 'ar' ? 'لم نحدد منتجات كأكثر مبيعاً حالياً، لكن يمكنك تصفّح السوق لأحدث ما لدينا.' : 'No best-sellers are flagged right now, but you can browse the Marketplace for our latest products.';
         addMarketplaceButton();
       }
+      if (intentResult.country) payload.context_update.last_country = intentResult.country;
+      if (intentResult.category) payload.context_update.last_category = intentResult.category;
       break;
 
     case 'ecommerce_badge': {
@@ -947,6 +1022,7 @@ function buildResponse(intentResult, lang, business) {
       payload.suggestions = locale === 'ar' ? [`اطلب ${title}`, 'المميزات'] : [`Order ${title}`, 'Advantages'];
       payload.context_update.last_item = item.id;
       payload.context_update.last_category = category || null;
+      if (intentResult.country) payload.context_update.last_country = intentResult.country;
       break;
     }
     case 'item_sizes': {
@@ -1042,6 +1118,9 @@ function buildResponse(intentResult, lang, business) {
           ? 'ولا يهمك، هنساعدك. قولي بتدور على منتج لإيه أو لمين، ونضبطلك الاختيار.'
           : "No problem — we'll help. Tell me what the product is for or who it's for, and we'll narrow it down together.";
       }
+      // Discovery has started — consume the kickoff flag so a later bare
+      // "ok" doesn't loop the same tips again.
+      payload.context_update.awaiting_discovery = false;
       addContactButton();
       break;
     }
@@ -1080,8 +1159,8 @@ function buildResponse(intentResult, lang, business) {
     case 'unknown':
     default:
       payload.text = locale === 'ar'
-        ? `لا أملك إجابة دقيقة على هذا السؤال حالياً. يمكنك تصفّح السوق أو الاستفسار عن منتج محدد.`
-        : `I do not have an exact answer for that yet. You can browse the Marketplace or ask about a specific product.`;
+        ? `سؤال جميل! عشان أضمنلك إجابة دقيقة، تقدر تتواصل مع فريقنا${business.phone ? ` على ${business.phone}` : ''} في أي وقت — وفي نفس الوقت اسألني عن أي منتج أو قسم أو سعر وهجاوبك فوراً.`
+        : `Good question! To make sure you get an accurate answer, you can reach our team${business.phone ? ` at ${business.phone}` : ''} anytime — and meanwhile, ask me about any product, category, or price and I'll answer right away.`;
       payload.suggestions = suggestions.slice(0, 3);
       break;
   }

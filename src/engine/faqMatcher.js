@@ -22,6 +22,9 @@ const STOPWORDS = new Set([
   'would', 'should', 'will', 'this', 'that', 'there', 'here', 'have', 'has',
   'had', 'much', 'many', 'please', 'pls', 'it', 'its', 'from', 'us', 'so',
   'if', 'any', 'get', 'got', 'tell', 'know', 'give', 'want', 'need',
+  // Conversational filler — never carries FAQ meaning on its own
+  'lets', 'let', 'ok', 'okay', 'yes', 'yeah', 'yep', 'sure', 'no', 'now',
+  'just', 'go', 'well', 'hmm', 'hm',
   // Arabic (light)
   'في', 'من', 'على', 'و', 'هل', 'ما', 'هي', 'هو', 'ان', 'انا', 'عن', 'مع',
   'الى', 'ايه', 'ايش', 'ليه', 'فيه', 'عندكم', 'عندك',
@@ -76,6 +79,11 @@ const GENERIC_WORDS = new Set([
   'drink', 'drinks', 'meal', 'meals', 'cafe', 'restaurant', 'here', 'today',
   'time', 'want', 'need', 'give', 'thing', 'something', 'anything', 'stuff',
   'available', 'info',
+  // Conversation verbs that appear inside FAQ questions but say nothing about
+  // WHICH question ("so lets start" must not hit "...does the wholesale price
+  // start"; "help me find my product" must not hit a product FAQ).
+  'start', 'starts', 'starting', 'begin', 'begins', 'help', 'find',
+  'product', 'products', 'question', 'questions', 'store', 'shop', 'buy',
 ]);
 
 function isDistinctive(word) {

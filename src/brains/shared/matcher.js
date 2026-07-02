@@ -41,8 +41,14 @@ function findScoredItems({ text, lang, items, context = {}, getItemVariants, get
         score += 12 + variant.length;
       }
 
-      const itemTokens = tokenize(variant).filter((token) => token.length > 1);
-      
+      // Tokens of length 2 ("SA", "US", "AI"...) are near-universally common
+      // abbreviations/words that coincidentally appear inside unrelated titles
+      // or product codes ("CeraVe SA Smoothing Cleanser", code "SA-BC1308") —
+      // scoring on them turns a country abbreviation in casual text into a
+      // false product match. Require 3+ chars, same bar the extras loop below
+      // already uses for metadata/code fields.
+      const itemTokens = tokenize(variant).filter((token) => token.length > 2);
+
       const matches = messageTokens.filter((token) => itemTokens.includes(token));
       if (matches.length > 0) {
         if (matches.length === messageTokens.length) {
@@ -251,6 +257,98 @@ function uniqueScoredByTitle(scoredEntries, lang) {
   });
 }
 
+// Keyed by lowercased name so matching stays case-insensitive, but the VALUE
+// keeps the catalog's original casing ("Saudi Arabia") so any caller that
+// displays the detected country back to the customer doesn't show it in
+// all-lowercase.
+function getCountryNames(items) {
+  const countriesEn = new Map();
+  const countriesAr = new Map();
+  items.forEach(item => {
+    const meta = item.metadata || {};
+    if (meta.country_en) countriesEn.set(meta.country_en.toLowerCase(), meta.country_en);
+    if (meta.country) countriesEn.set(meta.country.toLowerCase(), meta.country);
+    if (meta.country_ar) countriesAr.set(meta.country_ar, meta.country_ar);
+  });
+  return { en: Array.from(countriesEn.values()), ar: Array.from(countriesAr.values()) };
+}
+
+// A single distinguishing word from a multi-word country name ("Saudi" out of
+// "Saudi Arabia", "Emirates" out of "United Arab Emirates") — short/common
+// words are dropped so a generic word never stands in for the whole country.
+function countryTokenHints(country) {
+  return String(country || '')
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 5);
+}
+
+// Initials acronym for a multi-word country name ("Saudi Arabia" -> "SA",
+// "United Arab Emirates" -> "UAE") — customers commonly write the bare code
+// instead of the full name. Only for 2+ word names, only matched as its own
+// standalone word (never as a substring), and only as the LAST-resort tier
+// below since a bare 2-letter code is the most ambiguous signal.
+function countryAcronym(country) {
+  const words = String(country || '').split(/\s+/).filter(Boolean);
+  if (words.length < 2) return null;
+  const acronym = words.map((word) => word[0]).join('');
+  return acronym.length >= 2 ? acronym : null;
+}
+
+// Detects a country NAMED IN THE CATALOG ITSELF (not a hardcoded list) so any
+// country the business sources from is recognized without a maintained list.
+function detectCountry(text, lang, items) {
+  const { en, ar } = getCountryNames(items);
+  const searchList = lang === 'ar' ? ar : en;
+  const altList = lang === 'ar' ? en : ar;
+  const normalized = String(text || '').toLowerCase();
+  const allCountries = [...searchList, ...altList];
+
+  // Full name match wins first — most precise, no ambiguity.
+  for (const country of allCountries) {
+    if (normalized.includes(country.toLowerCase())) {
+      return country;
+    }
+  }
+
+  // Fall back to a distinguishing single WORD of the country name ("Saudi" ->
+  // "Saudi Arabia") so informal phrasing ("in Saudi") still resolves. Latin
+  // hints require a word boundary so they can't match inside another word;
+  // Arabic has no \b semantics in JS regex, so it stays substring-based.
+  for (const country of allCountries) {
+    for (const hint of countryTokenHints(country)) {
+      const isLatin = /^[a-z]+$/i.test(hint);
+      const matched = isLatin
+        ? new RegExp(`\\b${hint.toLowerCase()}\\b`).test(normalized)
+        : normalized.includes(hint.toLowerCase());
+      if (matched) return country;
+    }
+  }
+
+  // Last resort: a bare initials acronym ("SA" for "Saudi Arabia"). Standalone
+  // word only — never a substring — so it doesn't fire inside an unrelated
+  // word or product code.
+  for (const country of allCountries) {
+    const acronym = countryAcronym(country);
+    if (acronym && new RegExp(`\\b${acronym.toLowerCase()}\\b`).test(normalized)) {
+      return country;
+    }
+  }
+  return null;
+}
+
+function countryMatchesItem(item, targetCountry) {
+  let meta = item.metadata || {};
+  if (typeof meta === 'string') {
+    try { meta = JSON.parse(meta); } catch { meta = {}; }
+  }
+  const cEn = String(meta.country_en || '').toLowerCase();
+  const cAr = String(meta.country_ar || '');
+  const c = String(meta.country || '').toLowerCase();
+  const target = String(targetCountry || '').toLowerCase();
+  return cEn === target || cAr === targetCountry || c === target;
+}
+
 module.exports = {
   findMatchingCategories,
   findScoredItems,
@@ -259,4 +357,6 @@ module.exports = {
   uniqueById,
   uniqueByTitle,
   uniqueScoredByTitle,
+  detectCountry,
+  countryMatchesItem,
 };
