@@ -240,13 +240,16 @@
         opacity: 0.8;
       }
       .cb-close {
-        width: 38px;
-        height: 38px;
+        width: 42px;
+        height: 42px;
         border-radius: 999px;
         border: 0;
         background: rgba(255,255,255,0.14);
         color: #fff;
         cursor: pointer;
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 1;
       }
       .cb-messages {
         flex: 1;
