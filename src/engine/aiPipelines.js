@@ -3,7 +3,7 @@
 const { getBusinessItems } = require('../brains/shared/catalogStore');
 const { getBrandProfile, conceptMatchItems } = require('../brains/shared/brandProfile');
 const { normalize, tokenize } = require('./detector');
-const { fuzzyTokenScore, detectCountry, countryMatchesItem } = require('../brains/shared/matcher');
+const { fuzzyTokenScore, detectCountry, detectCountries, countryMatchesItem } = require('../brains/shared/matcher');
 const { getItemThumbnail, buildThumbnailMessages } = require('../brains/shared/thumbnailMessages');
 
 function displayTitle(item, lang) {
@@ -328,11 +328,16 @@ function resolveDetail(item, detail, lang) {
 // Shared "we don't have that from country X" honest reply — used whenever a
 // country filter wipes out every candidate, so the bot never silently
 // substitutes an item from the wrong country as if it satisfied the request.
-function buildCountryMissPayload({ activeCountry, lang, business }) {
+function buildCountryMissPayload({ activeCountry, activeCountries, lang, business }) {
   const locale = lang === 'ar' ? 'ar' : 'en';
+  // Detection may resolve to several countries at once (a region like "Gulf").
+  // Show the full list so the honest "not available" reply names exactly what
+  // was searched, not just one of them.
+  const list = Array.isArray(activeCountries) && activeCountries.length ? activeCountries : [activeCountry];
+  const label = list.filter(Boolean).join(locale === 'ar' ? '، ' : ', ');
   const text = locale === 'ar'
-    ? `لم نجد هذا متوفراً من ${activeCountry} حالياً، لكن يمكننا توفيره من شبكتنا — تواصل معنا على ${business.phone || 'رقم التواصل'}.`
-    : `We don't currently have that available from ${activeCountry}, but we can source it from our network — contact us at ${business.phone || 'our contact number'}.`;
+    ? `لم نجد هذا متوفراً من ${label} حالياً، لكن يمكننا توفيره من شبكتنا — تواصل معنا على ${business.phone || 'رقم التواصل'}.`
+    : `We don't currently have that available from ${label}, but we can source it from our network — contact us at ${business.phone || 'our contact number'}.`;
   return { intent: 'ecommerce_country_products', payload: { text, type: 'text', buttons: [], suggestions: [], context_update: {} } };
 }
 
@@ -345,19 +350,23 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context, text }) {
   // and silently drop the country the customer actually asked for. Detect it
   // locally from the raw message and narrow the AI's candidate set with it —
   // independent of which pipeline code the classifier picked.
-  const activeCountry = detectCountry(text, locale, items);
+  // May resolve to several countries when a REGION is named ("Gulf" -> every
+  // Gulf country the catalog stocks). activeCountry keeps the first for any
+  // single-value use; activeCountries drives filtering + the miss message.
+  const activeCountries = detectCountries(text, locale, items);
+  const activeCountry = activeCountries[0] || null;
   // When a country is named but filtering it wipes out every candidate, DO NOT
   // silently fall back to showing an item from a different country as if it
   // satisfied the request — that is exactly the "silent substitution" that
   // caused real confusion. Flag the miss so the caller can say so honestly.
   let countryMiss = false;
   const narrowByCountry = (matches) => {
-    if (!activeCountry) return matches;
-    const filtered = matches.filter((item) => countryMatchesItem(item, activeCountry));
+    if (!activeCountries.length) return matches;
+    const filtered = matches.filter((item) => activeCountries.some((c) => countryMatchesItem(item, c)));
     if (!filtered.length && matches.length) countryMiss = true;
     return filtered;
   };
-  const countryMissPayload = () => buildCountryMissPayload({ activeCountry, lang, business });
+  const countryMissPayload = () => buildCountryMissPayload({ activeCountry, activeCountries, lang, business });
 
   if (!pipeline.valid) return null;
 
@@ -579,10 +588,11 @@ function recommendationPool({ criteria, business, lang, context, text }) {
   // Arabia") must actually narrow the candidates — otherwise the recommend
   // call has no way to know it should only pick from that country, and can
   // (and did) suggest an item from somewhere else entirely.
-  const activeCountry = detectCountry(text || criteria, locale, items);
+  const activeCountries = detectCountries(text || criteria, locale, items);
+  const activeCountry = activeCountries[0] || null;
   let countryMiss = false;
-  if (activeCountry) {
-    const filtered = pool.filter((item) => countryMatchesItem(item, activeCountry));
+  if (activeCountries.length) {
+    const filtered = pool.filter((item) => activeCountries.some((c) => countryMatchesItem(item, c)));
     if (filtered.length) {
       pool = filtered;
     } else {
@@ -590,7 +600,7 @@ function recommendationPool({ criteria, business, lang, context, text }) {
     }
   }
 
-  return { pool: pool.slice(0, 12), countryMiss, activeCountry };
+  return { pool: pool.slice(0, 12), countryMiss, activeCountry, activeCountries };
 }
 
 // Compact, token-light shape for the recommend answer call: short keys, a
@@ -615,13 +625,13 @@ function compactCandidates(items, lang) {
 }
 
 function buildRecommendationCandidates({ criteria, business, lang, context, text }) {
-  const { pool, countryMiss, activeCountry } = recommendationPool({ criteria, business, lang, context, text });
+  const { pool, countryMiss, activeCountry, activeCountries } = recommendationPool({ criteria, business, lang, context, text });
   // "suggest ONE product" — the recommend prompt can still pad its reply with
   // a second "if you're interested" suggestion when it has more than one
   // candidate to work with. Physically cap the candidate set to 1 so there is
   // nothing else in scope for it to mention.
   const cappedPool = wantsOnlyOne(text) ? pool.slice(0, 1) : pool;
-  return { candidates: compactCandidates(cappedPool, lang), countryMiss, activeCountry };
+  return { candidates: compactCandidates(cappedPool, lang), countryMiss, activeCountry, activeCountries };
 }
 
 // Strip a leading list marker ("1. ", "- ", "• ", "* ") from a recommendation

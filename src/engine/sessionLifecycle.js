@@ -17,14 +17,14 @@ function buildFreshSessionMessages(business, language) {
   const brain = getBrain(business.service_type);
   return [
     { role: 'bot', content: brain.getWelcomeMessage(business, language), intent: 'welcome' },
-    { role: 'bot', content: COMMON_RESPONSES.collect_name[language](), intent: 'collect_name' },
+    { role: 'bot', content: COMMON_RESPONSES.ready_to_help[language](), intent: 'ready_to_help' },
   ];
 }
 
 function resetSessionState(db, sessionId, language, business) {
   db.prepare(`
     UPDATE sessions
-    SET guest_name = NULL, guest_phone = NULL, language = ?, phase = 'collect_name', context = '{}', last_active = datetime('now')
+    SET guest_name = NULL, guest_phone = NULL, language = ?, phase = 'active', context = '{}', last_active = datetime('now')
     WHERE id = ?
   `).run(language, sessionId);
 

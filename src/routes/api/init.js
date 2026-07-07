@@ -16,7 +16,7 @@ const router = express.Router();
 const getSession = db.prepare('SELECT * FROM sessions WHERE session_key = ? AND business_id = ?');
 const createSession = db.prepare(`
   INSERT INTO sessions (session_key, business_id, language, ip, phase, context)
-  VALUES (?, ?, ?, ?, 'collect_name', '{}')
+  VALUES (?, ?, ?, ?, 'active', '{}')
 `);
 const touchSession = db.prepare("UPDATE sessions SET last_active = datetime('now') WHERE id = ?");
 const insertMessage = db.prepare('INSERT INTO messages (session_id, role, content, intent, thumbnail) VALUES (?, ?, ?, ?, ?)');
@@ -78,7 +78,7 @@ router.post('/', tokenValidator, (req, res) => {
       isNew = true;
 
       insertMessage.run(session.id, 'bot', brain.getWelcomeMessage(business, language), 'welcome', null);
-      insertMessage.run(session.id, 'bot', COMMON_RESPONSES.collect_name[language](), 'collect_name', null);
+      insertMessage.run(session.id, 'bot', COMMON_RESPONSES.ready_to_help[language](), 'ready_to_help', null);
     } else if (isSessionExpired(session.last_active)) {
       const language = session.guest_name ? detectLanguage(session.guest_name) : detectHeaderLanguage(req);
       resetSessionState(db, session.id, language, business);

@@ -273,6 +273,98 @@ function getCountryNames(items) {
   return { en: Array.from(countriesEn.values()), ar: Array.from(countriesAr.values()) };
 }
 
+// Built-in synonym groups so one catalog country is recognized from ANY of its
+// common spellings across BOTH languages, colloquial forms, and ISO codes —
+// "الإمارات" / "امارات" / "UAE" / "UA" / "emirates" all resolve to the same
+// place. Each inner array is one country's full set of aliases (mixed ar/en/
+// codes); order inside doesn't matter. Matched after normalization, so bare
+// alef/hamza/ta-marbuta differences ("امارات" vs "إمارات") already collapse —
+// these aliases add the cross-language + short-code + colloquial coverage that
+// normalization alone can't. Keep additions here; it's the single maintenance
+// point.
+const COUNTRY_ALIAS_GROUPS = [
+  ['united arab emirates', 'uae', 'ua', 'emirates', 'الامارات', 'امارات', 'الامارات العربيه المتحده'],
+  ['saudi arabia', 'saudi', 'ksa', 'sa', 'السعوديه', 'سعوديه', 'المملكه العربيه السعوديه'],
+  ['qatar', 'qa', 'قطر'],
+  ['kuwait', 'kw', 'الكويت', 'كويت'],
+  ['bahrain', 'bh', 'البحرين', 'بحرين'],
+  ['oman', 'om', 'عمان', 'سلطنه عمان'],
+  ['egypt', 'eg', 'مصر'],
+  ['jordan', 'jo', 'الاردن', 'اردن'],
+  ['lebanon', 'lb', 'لبنان'],
+  ['iraq', 'iq', 'العراق', 'عراق'],
+  ['syria', 'sy', 'سوريا'],
+  ['yemen', 'ye', 'اليمن', 'يمن'],
+  ['palestine', 'ps', 'فلسطين'],
+  ['libya', 'ly', 'ليبيا'],
+  ['sudan', 'sd', 'السودان', 'سودان'],
+  ['tunisia', 'tn', 'تونس'],
+  ['algeria', 'dz', 'الجزائر', 'جزائر'],
+  ['morocco', 'ma', 'المغرب', 'مغرب'],
+  ['turkey', 'turkiye', 'tr', 'تركيا'],
+  ['iran', 'ir', 'ايران'],
+  ['united states', 'united states of america', 'usa', 'us', 'america', 'امريكا', 'الولايات المتحده'],
+  ['united kingdom', 'uk', 'britain', 'england', 'بريطانيا', 'انجلترا', 'المملكه المتحده'],
+  ['china', 'cn', 'الصين', 'صين'],
+  ['india', 'in', 'الهند', 'هند'],
+  ['japan', 'jp', 'اليابان', 'يابان'],
+  ['south korea', 'korea', 'kr', 'كوريا', 'كوريا الجنوبيه'],
+  ['germany', 'de', 'المانيا', 'ألمانيا'],
+  ['france', 'fr', 'فرنسا'],
+  ['italy', 'it', 'ايطاليا'],
+  ['spain', 'es', 'اسبانيا', 'إسبانيا'],
+  ['russia', 'ru', 'روسيا'],
+];
+
+// Normalize an alias/name to a language-agnostic comparison key: Arabic runs
+// through the shared Arabic normalizer (collapses alef/hamza/ta-marbuta/ya +
+// strips diacritics), Latin is lowercased, and a leading Arabic definite
+// article "ال" is stripped so "الامارات" and "امارات" compare equal.
+function countryKey(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const isArabic = /[؀-ۿ]/.test(raw);
+  let key = normalize(raw, isArabic ? 'ar' : 'en');
+  if (isArabic && key.startsWith('ال') && key.length > 4) key = key.slice(2);
+  return key.trim();
+}
+
+// Precomputed lookup from a normalized alias key -> its whole alias group, so a
+// catalog country can pull in every equivalent spelling in O(1).
+const ALIAS_KEY_TO_GROUP = (() => {
+  const map = new Map();
+  for (const group of COUNTRY_ALIAS_GROUPS) {
+    const keys = group.map(countryKey).filter(Boolean);
+    for (const key of keys) map.set(key, keys);
+  }
+  return map;
+})();
+
+// Match one comparison key against the message. Rules by kind:
+//  • Arabic keys  -> substring on the Arabic-normalized text.
+//  • Latin 2-char codes ("ua","sa","uk","us","in") -> ONLY when written as a
+//    standalone UPPERCASE token in the RAW text. Two-letter codes collide with
+//    ordinary words ("in", "us") and product lines ("CeraVe SA"), so a bare
+//    lowercase hit is far more likely noise than a country — requiring the
+//    uppercase form (how people actually type a country code) kills that.
+//  • Latin 3-char codes ("uae","ksa","usa") -> standalone word, any case; these
+//    don't collide with common words.
+//  • Longer Latin keys -> substring, so "from the emirates" still resolves.
+function keyMatchesText(key, rawText, normalizedLatin, normalizedArabic) {
+  if (!key) return false;
+  const isArabic = /[؀-ۿ]/.test(key);
+  if (isArabic) return normalizedArabic ? normalizedArabic.includes(key) : false;
+  if (!normalizedLatin) return false;
+
+  if (key.length <= 2) {
+    return new RegExp(`(?:^|[^A-Za-z0-9])${key.toUpperCase()}(?:[^A-Za-z0-9]|$)`).test(rawText);
+  }
+  if (key.length === 3) {
+    return new RegExp(`(?:^|[^a-z0-9])${key}(?:[^a-z0-9]|$)`, 'i').test(normalizedLatin);
+  }
+  return normalizedLatin.includes(key);
+}
+
 // A single distinguishing word from a multi-word country name ("Saudi" out of
 // "Saudi Arabia", "Emirates" out of "United Arab Emirates") — short/common
 // words are dropped so a generic word never stands in for the whole country.
@@ -283,55 +375,146 @@ function countryTokenHints(country) {
     .filter((token) => token.length >= 5);
 }
 
-// Initials acronym for a multi-word country name ("Saudi Arabia" -> "SA",
-// "United Arab Emirates" -> "UAE") — customers commonly write the bare code
-// instead of the full name. Only for 2+ word names, only matched as its own
-// standalone word (never as a substring), and only as the LAST-resort tier
-// below since a bare 2-letter code is the most ambiguous signal.
-function countryAcronym(country) {
-  const words = String(country || '').split(/\s+/).filter(Boolean);
-  if (words.length < 2) return null;
-  const acronym = words.map((word) => word[0]).join('');
-  return acronym.length >= 2 ? acronym : null;
+// Every recognized comparison key for one catalog country: its own normalized
+// name (+ "ال"-stripped form) plus every alias in its group if it belongs to a
+// known one.
+function countryForms(country) {
+  const forms = new Set();
+  const key = countryKey(country);
+  if (key) forms.add(key);
+  const group = ALIAS_KEY_TO_GROUP.get(key);
+  if (group) group.forEach((k) => forms.add(k));
+  return forms;
 }
 
 // Detects a country NAMED IN THE CATALOG ITSELF (not a hardcoded list) so any
-// country the business sources from is recognized without a maintained list.
+// country the business sources from is recognized without a maintained list —
+// now matched across normalized spellings, cross-language aliases, and codes.
 function detectCountry(text, lang, items) {
   const { en, ar } = getCountryNames(items);
-  const searchList = lang === 'ar' ? ar : en;
-  const altList = lang === 'ar' ? en : ar;
-  const normalized = String(text || '').toLowerCase();
-  const allCountries = [...searchList, ...altList];
+  // Search order still prefers the active language's names first, but every
+  // form is normalized so language of the STORED name no longer matters.
+  const allCountries = lang === 'ar' ? [...ar, ...en] : [...en, ...ar];
+  const rawText = String(text || '');
+  const normalizedLatin = normalize(rawText, 'en');
+  const normalizedArabic = normalize(rawText, 'ar');
 
-  // Full name match wins first — most precise, no ambiguity.
+  // Tier 1 — full name or any alias/code. Most precise; wins first.
   for (const country of allCountries) {
-    if (normalized.includes(country.toLowerCase())) {
-      return country;
+    for (const key of countryForms(country)) {
+      if (keyMatchesText(key, rawText, normalizedLatin, normalizedArabic)) return country;
     }
   }
 
-  // Fall back to a distinguishing single WORD of the country name ("Saudi" ->
-  // "Saudi Arabia") so informal phrasing ("in Saudi") still resolves. Latin
-  // hints require a word boundary so they can't match inside another word;
-  // Arabic has no \b semantics in JS regex, so it stays substring-based.
+  // Tier 2 — a distinguishing single WORD of the name ("Saudi" -> "Saudi
+  // Arabia") so informal phrasing still resolves.
   for (const country of allCountries) {
     for (const hint of countryTokenHints(country)) {
-      const isLatin = /^[a-z]+$/i.test(hint);
-      const matched = isLatin
-        ? new RegExp(`\\b${hint.toLowerCase()}\\b`).test(normalized)
-        : normalized.includes(hint.toLowerCase());
-      if (matched) return country;
+      if (keyMatchesText(countryKey(hint), rawText, normalizedLatin, normalizedArabic)) return country;
     }
   }
+  return null;
+}
 
-  // Last resort: a bare initials acronym ("SA" for "Saudi Arabia"). Standalone
-  // word only — never a substring — so it doesn't fire inside an unrelated
-  // word or product code.
-  for (const country of allCountries) {
-    const acronym = countryAcronym(country);
-    if (acronym && new RegExp(`\\b${acronym.toLowerCase()}\\b`).test(normalized)) {
-      return country;
+// Stable identity for a country across languages/spellings: if it belongs to a
+// known alias group, that group's first key; otherwise its own normalized key.
+// Lets us treat "Saudi Arabia" and "السعودية" as the same real country.
+function countryCanonicalId(country) {
+  const key = countryKey(country);
+  const group = ALIAS_KEY_TO_GROUP.get(key);
+  return group ? group[0] : key;
+}
+
+// Regional umbrella terms -> the set of member-country canonical ids. When a
+// customer names a REGION ("دول الخليج", "Gulf", "GCC") instead of one country,
+// we expand it to every member the catalog actually stocks. Members are written
+// as any alias (resolved to canonical ids at load) so this list stays readable.
+const REGION_GROUPS = [
+  {
+    aliases: ['gulf', 'gcc', 'khaleej', 'الخليج', 'دول الخليج', 'الخليج العربي', 'مجلس التعاون', 'الخليجيه'],
+    members: ['united arab emirates', 'saudi arabia', 'qatar', 'kuwait', 'bahrain', 'oman'],
+  },
+  {
+    aliases: ['levant', 'الشام', 'بلاد الشام', 'المشرق العربي'],
+    members: ['syria', 'lebanon', 'jordan', 'palestine', 'iraq'],
+  },
+  {
+    aliases: ['north africa', 'maghreb', 'المغرب العربي', 'شمال افريقيا', 'شمال أفريقيا'],
+    members: ['egypt', 'libya', 'tunisia', 'algeria', 'morocco', 'sudan'],
+  },
+  {
+    aliases: ['europe', 'european', 'اوروبا', 'أوروبا', 'الاتحاد الاوروبي'],
+    members: ['germany', 'france', 'italy', 'spain', 'united kingdom', 'russia'],
+  },
+].map((region) => ({
+  aliasKeys: region.aliases.map(countryKey).filter(Boolean),
+  memberIds: new Set(region.members.map(countryCanonicalId)),
+}));
+
+// If the message names a region, return that region's member-id Set; else null.
+function detectRegionMemberIds(rawText, normalizedLatin, normalizedArabic) {
+  for (const region of REGION_GROUPS) {
+    for (const key of region.aliasKeys) {
+      if (keyMatchesText(key, rawText, normalizedLatin, normalizedArabic)) return region.memberIds;
+    }
+  }
+  return null;
+}
+
+// Plural detection: a region term expands to EVERY catalog country in that
+// group; otherwise falls back to the single best country. Returns an array of
+// the catalog's own country strings (deduped, active-language name preferred),
+// suitable for filtering with countryMatchesItem and for display.
+function detectCountries(text, lang, items) {
+  const rawText = String(text || '');
+  const normalizedLatin = normalize(rawText, 'en');
+  const normalizedArabic = normalize(rawText, 'ar');
+
+  const { en, ar } = getCountryNames(items);
+  const allCountries = lang === 'ar' ? [...ar, ...en] : [...en, ...ar];
+
+  const memberIds = detectRegionMemberIds(rawText, normalizedLatin, normalizedArabic);
+  if (memberIds) {
+    const seen = new Set();
+    const matched = [];
+    for (const country of allCountries) {
+      const id = countryCanonicalId(country);
+      if (!memberIds.has(id) || seen.has(id)) continue;
+      seen.add(id);
+      matched.push(country);
+    }
+    if (matched.length) return matched;
+  }
+
+  const single = detectCountry(text, lang, items);
+  return single ? [single] : [];
+}
+
+// English/Arabic display names per alias group, for echoing a recognized
+// country back in the customer's language.
+const GROUP_DISPLAY = new Map();
+for (const group of COUNTRY_ALIAS_GROUPS) {
+  const id = countryCanonicalId(group[0]);
+  const en = group.find((a) => /^[a-z .]+$/i.test(a)) || group[0];
+  const ar = group.find((a) => /[؀-ۿ]/.test(a)) || '';
+  GROUP_DISPLAY.set(id, { en, ar });
+}
+
+// Recognizes ANY well-known country named in the text — independent of the
+// catalog — so a "do you serve <country>?" question can be answered yes/no even
+// when the country is one we DON'T stock (e.g. "المغرب"). Returns { id, en, ar }
+// or null. Use countryCanonicalId on catalog countries to test membership.
+function detectAnyKnownCountry(text, lang) {
+  const rawText = String(text || '');
+  const normalizedLatin = normalize(rawText, 'en');
+  const normalizedArabic = normalize(rawText, 'ar');
+  for (const group of COUNTRY_ALIAS_GROUPS) {
+    for (const alias of group) {
+      if (keyMatchesText(countryKey(alias), rawText, normalizedLatin, normalizedArabic)) {
+        const id = countryCanonicalId(group[0]);
+        const disp = GROUP_DISPLAY.get(id) || { en: group[0], ar: '' };
+        return { id, en: disp.en, ar: disp.ar };
+      }
     }
   }
   return null;
@@ -358,5 +541,8 @@ module.exports = {
   uniqueByTitle,
   uniqueScoredByTitle,
   detectCountry,
+  detectCountries,
+  detectAnyKnownCountry,
+  countryCanonicalId,
   countryMatchesItem,
 };

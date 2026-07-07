@@ -167,18 +167,36 @@
         z-index: 10;
         box-shadow: 0 2px 4px rgba(0,0,0,0.2);
       }
-      .cb-bubble::after {
-        content: "Ask us";
+      .cb-bubble-tip {
+        display: none;
+        transform: translateY(-30px) translateX(10px);
         position: absolute;
-        right: 78px;
-        white-space: nowrap;
-        background: var(--cb-surface);
-        color: var(--cb-text);
-        border: 1px solid var(--cb-border);
+        right: 82px;
+        width: 240px;
+        max-width: calc(100vw - 120px);
+        background: rgba(255, 255, 255, 0.68);
+        -webkit-backdrop-filter: blur(14px) saturate(160%);
+        backdrop-filter: blur(14px) saturate(160%);
+        color: #1c2b27;
+        border: 1px solid rgba(255, 255, 255, 0.55);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
         padding: 10px 14px;
-        border-radius: 999px;
+        border-radius: 18px 18px 6px 18px;
         font-size: 13px;
-        opacity: 0.96;
+        line-height: 1.4;
+        opacity: 0.98;
+        pointer-events: none;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .cb-bubble-tip.show {
+        display: block;
+      }
+      .cb-bubble-tip.unread {
+        border-color: var(--cb-primary);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2), 0 0 0 1px var(--cb-primary) inset;
+        font-weight: 600;
       }
       .cb-panel {
         position: absolute;
@@ -204,7 +222,7 @@
         opacity: 1;
         pointer-events: auto;
       }
-      .cb-root.open .cb-bubble::after { display: none; }
+      .cb-root.open .cb-bubble-tip { display: none; }
       .cb-header {
         padding: 18px 18px 14px;
         background: var(--cb-primary);
@@ -512,7 +530,7 @@
       @media (max-width: 640px) {
         .cb-root { right: 12px; bottom: 12px; left: 12px; }
         .cb-panel { width: 100%; height: min(80vh, 540px); }
-        .cb-bubble::after { display: none; }
+        .cb-bubble-tip { display: none; }
       }
       
       .cb-panel.order-dashboard-mode .cb-messages,
@@ -1094,6 +1112,7 @@
     refs.messages.scrollTop = refs.messages.scrollHeight;
     if (allowAutoOpen !== false && role === 'bot' && !state.open) {
       refs.bubble.classList.add('has-unread');
+      showUnreadPreview(text);
       playNotifySound();
     }
     return message;
@@ -1109,6 +1128,7 @@
       refs.messages.scrollTop = refs.messages.scrollHeight;
       if (allowAutoOpen !== false && !state.open) {
         refs.bubble.classList.add('has-unread');
+        showUnreadPreview(entry.content);
         playNotifySound();
       }
       return notice;
@@ -1147,9 +1167,29 @@
     if (currentId === state.typingId) textSpan.innerHTML = formatRichText(text);
     if (!state.open) {
       refs.bubble.classList.add('has-unread');
+      showUnreadPreview(text);
       playNotifySound();
     }
     return message;
+  }
+
+  function showUnreadPreview(text) {
+    if (!refs.bubbleTip) return;
+    // Truncation is width based (CSS clamps to one line + ellipsis), not a
+    // fixed char count — long text just ellipsizes at the widget's current
+    // size, e.g. "hello there...".
+    const plain = stripMarkdown(String(text || '')).trim();
+    if (!plain) { clearUnreadPreview(); return; }
+    refs.bubbleTip.textContent = plain;
+    refs.bubbleTip.classList.add('unread', 'show');
+  }
+
+  function clearUnreadPreview() {
+    if (!refs.bubbleTip) return;
+    // Once the guest has opened the chat and seen it, the tip is hidden
+    // entirely — it must NOT fall back to a static "Ask us" bubble.
+    refs.bubbleTip.textContent = '';
+    refs.bubbleTip.classList.remove('unread', 'show');
   }
 
   function playNotifySound() {
@@ -2088,6 +2128,7 @@
     refs.root.classList.toggle('open', state.open);
     if (state.open) {
       refs.bubble.classList.remove('has-unread');
+      clearUnreadPreview();
       if (!state.orderDashboardActive && !refs.input.disabled) {
         refs.input.focus();
       } else if (state.orderDashboardActive) {
@@ -2114,6 +2155,7 @@
         <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M12 3C6.477 3 2 6.91 2 11.733c0 2.143.904 4.106 2.41 5.622L3.3 21l4.575-1.527c1.228.46 2.567.705 3.995.705 5.523 0 10-3.91 10-8.445S17.523 3 12 3Z"></path>
         </svg>
+        <span class="cb-bubble-tip"></span>
       </button>
       <section class="cb-panel" aria-label="Chatbot panel">
         <header class="cb-header">
@@ -2161,6 +2203,7 @@
     return {
       root,
       bubble: root.querySelector('.cb-bubble'),
+      bubbleTip: root.querySelector('.cb-bubble-tip'),
       newChat: root.querySelector('.cb-new'),
       close: root.querySelector('.cb-close:not(.cb-new)'),
       messages: root.querySelector('.cb-messages'),
@@ -2394,8 +2437,13 @@
     applyPayloadUi(payload);
     startPolling();
 
-    if (payload.is_new || !state.hasHistory) {
-      openPanel(true);
+    // No auto-open on load — just surface the unread mark + a short preview
+    // of the last bot message (if the guest hasn't replied to it yet) so
+    // they're nudged to open the chat themselves.
+    const lastMessage = state.history[state.history.length - 1];
+    if (lastMessage && lastMessage.role === 'bot' && !state.open) {
+      refs.bubble.classList.add('has-unread');
+      showUnreadPreview(lastMessage.content);
     }
   }
 

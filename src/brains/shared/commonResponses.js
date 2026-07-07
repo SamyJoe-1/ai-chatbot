@@ -9,6 +9,10 @@ const COMMON_RESPONSES = {
     en: () => 'What is your phone number?',
     ar: () => 'ما رقم هاتفك؟',
   },
+  ready_to_help: {
+    en: () => 'How can I help you today?',
+    ar: () => 'كيف أقدر أساعدك اليوم؟',
+  },
   invalid_name: {
     en: () => 'Please enter a valid name using letters only before continuing.',
     ar: () => 'يرجى إدخال اسم صحيح باستخدام الأحرف فقط قبل المتابعة.',

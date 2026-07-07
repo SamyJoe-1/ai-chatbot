@@ -189,6 +189,7 @@ const ALWAYS_LOCAL_INTENTS = new Set([
   'greeting_hello', 'greeting_how_are_you', 'greeting_yasta', 'thanks',
   'help', 'guided_discovery', 'list_categories', 'contact', 'working_hours',
   'location', 'brand_info', 'order_howto', 'logistics_inquiry', 'logistics_average',
+  'service_area', 'business_model',
 ]);
 
 // The classifier's [11] direct-answer sometimes bottoms out on a completely
@@ -311,9 +312,9 @@ router.post('/', tokenValidator, async (req, res) => {
       return res.json({
         reset: true,
         history: freshMessages,
-        response: { text: COMMON_RESPONSES.collect_name[lang](), type: 'text', buttons: [], suggestions: [] },
+        response: { text: COMMON_RESPONSES.ready_to_help[lang](), type: 'text', buttons: [], suggestions: [] },
         language: lang,
-        phase: 'collect_name',
+        phase: 'active',
       });
     }
 
@@ -415,12 +416,12 @@ router.post('/', tokenValidator, async (req, res) => {
       // and let a focused AI answer pick one. Only this intent pays the second
       // call, and it sees just the candidates — not the whole menu.
       if (pipeline.code === 12) {
-        const { candidates, countryMiss, activeCountry } = buildRecommendationCandidates({ criteria: pipeline.item, business, lang, context, text });
+        const { candidates, countryMiss, activeCountry, activeCountries } = buildRecommendationCandidates({ criteria: pipeline.item, business, lang, context, text });
         // A country was named but nothing in the candidate pool is FROM that
         // country — don't let the recommend call improvise a wrong-country
         // pick and present it as satisfying the request.
         if (countryMiss) {
-          const miss = buildCountryMissPayload({ activeCountry, lang, business });
+          const miss = buildCountryMissPayload({ activeCountry, activeCountries, lang, business });
           return { handled: true, intent: miss.intent, payload: miss.payload, raw: aiResult.raw };
         }
         if (!candidates.length) return { handled: false, raw: aiResult.raw };

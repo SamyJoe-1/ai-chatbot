@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   automated INTEGER NOT NULL DEFAULT 1,
   language TEXT DEFAULT 'en',
   ip TEXT,
-  phase TEXT DEFAULT 'collect_name',
+  phase TEXT DEFAULT 'active',
   context TEXT DEFAULT '{}',
   created_at TEXT DEFAULT (datetime('now')),
   last_active TEXT DEFAULT (datetime('now'))

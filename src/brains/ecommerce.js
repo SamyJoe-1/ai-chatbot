@@ -2,7 +2,7 @@
 
 const { tokenize, normalize } = require('../engine/detector');
 const { getBusinessItems, getAllBusinessItems } = require('./shared/catalogStore');
-const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle, detectCountry, countryMatchesItem } = require('./shared/matcher');
+const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle, detectCountry, detectCountries, detectAnyKnownCountry, countryCanonicalId, countryMatchesItem } = require('./shared/matcher');
 const { getItemThumbnail, buildThumbnailMessages } = require('./shared/thumbnailMessages');
 const { matchFaq } = require('../engine/faqMatcher');
 
@@ -124,6 +124,23 @@ const PATTERNS = {
       /\bwhat (else|more) (can you tell|about it)\b/i,
     ],
     ecommerce_check_availability: [/\bavailability\b/i, /\bavailable\b/i, /\bin stock\b/i],
+    // "which countries do you serve / do you ship to X / where do you operate" —
+    // a SERVICE-AREA question (not opening hours, not a product filter). Kept
+    // ahead of working_hours in detectIntent so "do you work in Morocco" never
+    // gets answered with business hours.
+    service_area: [
+      /\b(which|what) countr(y|ies)\b/i,
+      /\bcountries (do|are) you\b/i,
+      /\bdo you (work|operate|sell|ship|deliver|serve|source|export|cover|reach|have anything)\s+(in|to|from|out)\b/i,
+      /\bdo you (ship|deliver|export)\s+(to|internationally|abroad|worldwide)\b/i,
+      /\bwhere (do|are) you (operate|operating|based|located|ship|shipping|work|working|source|sourcing)\b/i,
+      /\b(work|operate|available|present|sell|ship)\s+in\s+(which|what)\s+countr/i,
+    ],
+    // Verb of presence/operation — combined with a recognized country name to
+    // catch "do you work in <specific country>" even when the generic patterns
+    // above don't fire.
+    service_area_verb: [/\b(work|operate|sell|ship|deliver|serve|source|export|present|available|based|located|reach)\b/i],
+    business_model: [/\b(drop\s?shipping|drop\s?ship|wholesale|reseller|reselling|bulk (order|supply|supplier)|affiliate|distributor|distribution|do you supply)\b/i],
     ecommerce_country_info: [/\bmarketplace in\b/i, /\babout country\b/i, /\bcountry\b/i],
     ecommerce_country_products: [/\bproducts in\b/i, /\bfrom country\b/i, /\bmarketplace in\b/i, /\bin the country\b/i],
     // "send me one product", "just one", "one fuckin product" — the customer
@@ -139,7 +156,7 @@ const PATTERNS = {
       /\bshow (me )?(just )?one\b/i,
       /\bat\s*least\s*one\b/i,
     ],
-    item_price: [/\bprice\b/i, /\bcost\b/i, /\bhow much\b/i, /\bquote\b/i, /\bwholesale\b/i],
+    item_price: [/\bprice\b/i, /\bcost\b/i, /\bhow much\b/i, /\bquote\b/i, /\bwholesale\b/i, /\b\d{1,7}\s*(pcs?|pieces?|units?|dozen|cartons?|boxes?|kg)\b/i],
     logistics_inquiry: [
       /\bhow (many days?|long|much time|soon)\b/i,
       /\bwhen (will|would|can|could)\b/i,
@@ -157,7 +174,13 @@ const PATTERNS = {
     guided_discovery: [/(مش عارف اختار|مش عارفة اختار|مش عارف ابدأ|مش عارف ابدا|منين ابدأ|منين ابدا|من وين ابدأ|معنديش خبرة|معنديش خبره|اول مرة اشتري|أول مرة اشتري|اختارلي|اختاري لي|رشحلي|رشح لي|وجهني|علمني اختار|ازاي اختار|إزاي اختار|كيف اختار|عايز حد يساعدني اختار|عاوز حد يساعدني اختار|محتار|محتارة|متلخبط|متلخبطة|تايه|تايهة|حاسس اني تايه|ساعدني الاقي|ساعدني ألاقي|ساعديني الاقي|عايز الاقي منتج|مش لاقي اللي يناسبني)/],
     help: [/(مساعدة|ساعدني|كيف يشتغل|كيف يعمل|ماذا يمكنك|بتعمل ايه|تساعدني)/],
     contact: [/(تواصل|اتصال|رقم|واتساب|هاتف|موبايل|ايميل|إيميل|تليفون|تلفون|كلمكم|اكلمكم)/],
-    working_hours: [/(ساعات|مواعيد|عمل|الدوام|شغالين|تفتح|تقفل|تفتحون|تغلقون|امتى|امتا|الساعة كام|الساعه كام)/],
+    // Two ambiguity traps handled here:
+    //  • "عمل" collides with "بتعمله"/"نعمل" (do you do…) -> dropped (مواعيد/ساعات
+    //    العمل still match via مواعيد / the qualified ساعات below).
+    //  • "ساعات"/"ساعة" ALSO means WATCHES (a product). Bare "ساعات" must NOT mean
+    //    hours — only "ساعات العمل / الدوام / الفتح / عملكم" does. "عايزة ساعات"
+    //    (I want watches) then flows to product search instead of hours.
+    working_hours: [/(ساعات\s*(العمل|عمل|الدوام|عملكم|الفتح|التشغيل|الرسميه|الرسمية)|مواعيد|الدوام|شغالين|تفتح|تقفل|تفتحون|تغلقون|امتى|امتا|الساعة كام|الساعه كام)/],
     location: [/(العنوان|الموقع|وين|فين|أين|اتجاهات|خريطة|مكان|فروعكم|فرعكم)/],
     brand_info: [/(من انتم|مين انتم|نبذه عنكم|نبذة عنكم|من انتو|ماذا تقدمون|عن المتجر|عن المعرض|مين انت)/],
     catalog_general: [/(كتالوج|ايش عندكم|شو عندكم|عندكم ايه|عندك ايه|الكتالوج|وش عندكم)/],
@@ -179,10 +202,30 @@ const PATTERNS = {
     // Context follow-up in Arabic: "قلي تفاصيل اكتر عنه"، "اعرف اكتر"، "تفاصيل عنه".
     more_details: [/(تفاصيل اكتر|تفاصيل أكتر|تفاصيل اكثر|تفاصيل أكثر|اكتر عنه|أكتر عنه|اكثر عنه|اعرف اكتر|أعرف اكتر|معلومات اكتر|معلومات أكثر|قلي اكتر|قولي اكتر|قلي تفاصيل|قولي تفاصيل|تفاصيل عنه|تفاصيل عنها|زودني|فاصيل اكتر|ايه تفاصيله|ايه تفاصيلها|قلي عنه|قولي عنه|احكيلي عنه)/],
     ecommerce_check_availability: [/(متاح|متوفر|متوفره|متوفرة|موجود|موجوده|في المخزون)/],
+    // Service-area question in Arabic: "شغالين في دول ايه؟"، "بتشتغلوا في اي
+    // دوله؟"، "بتشحنوا لبرا؟"، "في اي بلد متواجدين؟". Requires a country/region
+    // NOUN (دول/دوله/بلد/بلاد/الخليج) or a shipping-abroad verb so a plain
+    // "شغالين النهاردة؟" (open today) still falls through to working_hours.
+    service_area: [
+      /(اي|أي|انهي|إنهي|إيه|ايه|مين|وش|شو|كام)\s*دول/,
+      /دول\s*(اي|أي|ايه|إيه|انهي|إنهي|مين|كام)/,
+      /(شغالين|شغال|بتشتغل|تشتغل|تشتغلون|بتشتغلوا|تشتغلوا|موجودين|متوفرين|متواجدين|بتبيعوا|تبيعون|بتوصلوا|توصلون|بتشحنوا|تشحنون|بتصدروا|تصدرون|بتوفروا|توفرون|تغطون|بتغطوا)\s*(في|ل|لـ|إلى|الى)?\s*(اي\s*)?(دول|دوله|دولة|بلد|بلاد|بلدان|الخليج|منطقه|منطقة|مناطق)/,
+      /(تشحنوا|بتشحنوا|تشحنون|شحن|توصلوا|بتوصلوا|توصلون|توصيل|تصدير|بتصدروا)\s*(ل|لـ|إلى|الى)?\s*(اي|أي)?\s*(دول|دوله|دولة|بلد|بلاد|برا|بره|خارج|الخارج)/,
+      /(دولكم|بلدكم|بلدانكم|الدول اللي|البلاد اللي|فروعكم في|متواجدين في|بتغطوا اي)/,
+    ],
+    // Presence/operation verb — combined with a recognized country name to catch
+    // "انتم بتشتغله في المغرب؟" (specific country, no generic noun).
+    service_area_verb: [/(شغالين|شغال|بتشتغل|تشتغل|تشتغلون|بتشتغلوا|تشتغلوا|تشتغله|بتشتغله|تعملون|بتعملوا|موجودين|متوفرين|متواجدين|بتبيعوا|تبيعون|بتوصلوا|توصلون|بتشحنوا|تشحنون|بتصدروا|تصدرون|عندكم|بتوفروا|توفرون|تغطون|بتغطوا)/],
+    // "do you do dropshipping / wholesale / reselling?" — a business-model
+    // question, NOT hours and NOT a product. "بتعمله دروبشبنج" used to hit hours.
+    business_model: [/(دروب\s?شيبنج|دروب\s?شبنج|دروبشيب|دروبشبنج|دروب شيب|ريسيلر|اعاده بيع|إعادة بيع|بيع بالجمله|بيع بالجملة|بالجمله|بالجملة|جمله|جملة|وسيط|وكيل|توريد|بتوردوا|شراكه|شراكة|تسويق بالعموله|عموله|عمولة|افلييت|افليت)/],
     ecommerce_country_info: [/(سوق|اسواق|في بلد|في دوله|في دولة|السوق)/],
     ecommerce_country_products: [/(منتجات من|من بلد|من دولة|منتجات في|في السعودية|في مصر|في الإمارات|السعودية|مصر|الإمارات)/],
     single_item_request: [/(واحد بس|واحد فقط|منتج واحد|قطعة واحدة|عايز واحد|عاوز واحد|عايزة واحد|ولو واحد|على الاقل واحد|على الأقل واحد)/],
-    item_price: [/(سعر|اسعار|أسعار|بكام|بقديش|كم السعر|الثمن|حسابه|حسابها|كم حقها|حقها كم|عرض سعر|الجمله|الجملة)/],
+    // Adds "بكم" (variant of بكام) and a NUMBER+UNIT trigger: "بكم 100 حبة",
+    // "سعر 50 قطعة". "حبة/قطعة/علبة/كرتونة/درزن/دستة/طن" are quantity units —
+    // a quantity ask is inherently a price/quote question in a wholesale store.
+    item_price: [/(سعر|اسعار|أسعار|بكام|بكم|بقديش|كم السعر|الثمن|حسابه|حسابها|كم حقها|حقها كم|عرض سعر|الجمله|الجملة|\d{1,7}\s*(حبة|حبه|قطعة|قطعه|قطع|علبة|علبه|كرتون|كرتونه|كرتونة|درزن|دستة|دسته|طن|كيلو))/],
     logistics_inquiry: [/(كم يوم|كم يومًا|كم يوماً|امتى|متى يوصل|كم مدة|وقت التوصيل|وقت الشحن|وقت التوريد|المخزن|المستودع|مدة التوريد|مدة الشحن|التسليم|فترة التوريد|هيوصل امتى|يوصل امتى|تاريخ التسليم)/],
   }
 };
@@ -208,8 +251,47 @@ function getDisplayDescription(item, lang) {
   return lang === 'ar' ? item.description_ar || item.description_en : item.description_en || item.description_ar;
 }
 
+// The distinct countries the catalog actually sources from, as display names in
+// the active language. Drives the "which countries do you serve" answer.
+function getServedCountries(items, lang) {
+  const seen = new Set();
+  const list = [];
+  for (const item of items) {
+    const display = getDisplayCountry(item, lang);
+    if (!display) continue;
+    const id = countryCanonicalId(getDisplayCountry(item, 'en') || display);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    list.push(display);
+  }
+  return list;
+}
+
+// Set of canonical ids the catalog serves, for a yes/no membership test against
+// a specific country the customer named.
+function getServedCountryIds(items) {
+  const ids = new Set();
+  for (const item of items) {
+    const en = getDisplayCountry(item, 'en');
+    if (en) ids.add(countryCanonicalId(en));
+  }
+  return ids;
+}
+
 function isSourcing(business) {
   return Number(business && business.sourcing_mode) === 1;
+}
+
+// Pulls a "<number> <unit>" quantity out of a message ("100 حبة", "50 pieces").
+// حبة/حبه = unit/piece (colloquial "بكم 100 حبة" = price for 100 units). Returns
+// { qty, unit } or null. Used so a price reply can acknowledge the exact
+// quantity the customer already stated instead of asking for it again.
+const QTY_UNIT_RE = /(\d{1,7})\s*(حبة|حبه|قطعة|قطعه|قطع|علبة|علبه|كرتون|كرتونه|كرتونة|درزن|دستة|دسته|طن|كيلو|pcs?|pieces?|units?|dozen|cartons?|boxes?|kg)/i;
+function extractQuantity(text) {
+  const match = String(text || '').match(QTY_UNIT_RE);
+  if (!match) return null;
+  const qty = Number(match[1]);
+  return Number.isFinite(qty) && qty > 0 ? { qty, unit: match[2] } : null;
 }
 
 // Metadata keys that are internal plumbing imported from the source JSON, NOT
@@ -515,8 +597,45 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     return { intent: 'order_howto' };
   }
 
+  // "Do you do dropshipping / wholesale / reselling?" — a business-model
+  // question. Checked before working_hours (its "بتعمله" used to hit hours) and
+  // before service_area so a dropshipping ask isn't answered as a country query.
+  if (matchesAny(normalizedText, patterns.business_model)) {
+    return { intent: 'business_model' };
+  }
+
+  // Service-area / "which countries do you serve" — MUST be checked before
+  // working_hours, because "شغالين"/"work" appear in both and the hours pattern
+  // would otherwise hijack "انتم شغالين في دول ايه؟". Answered from the catalog's
+  // real country data so the customer gets a concrete yes/no + the served list.
+  const namedCountry = detectAnyKnownCountry(normalizedText, lang);
+  const servedIds = getServedCountryIds(items);
+  const namedServed = namedCountry ? servedIds.has(namedCountry.id) : false;
+  // A recognized country we DON'T stock, mentioned in ANY way — a bare follow-up
+  // ("طب والمغرب؟"), a "do you serve X", or a "products from X" — must be answered
+  // honestly ("we don't cover X"). Otherwise the AI hallucinated a "yes", and the
+  // product path showed a wrong-country item as if it were from there.
+  const namedUnservedCountry = Boolean(namedCountry) && !namedServed;
+  const serviceAreaAsked = matchesAny(normalizedText, patterns.service_area)
+    || (namedCountry && matchesAny(normalizedText, patterns.service_area_verb));
+  if (serviceAreaAsked || namedUnservedCountry) {
+    const servedList = getServedCountries(items, lang);
+    return {
+      intent: 'service_area',
+      named: namedCountry,
+      isServed: namedServed,
+      servedList,
+      hasCountryData: servedList.length > 0,
+    };
+  }
+
   if (matchesAny(normalizedText, patterns.contact)) return { intent: 'contact' };
-  if (matchesAny(normalizedText, patterns.working_hours)) return { intent: 'working_hours' };
+  // The hours pattern now only matches UNAMBIGUOUS forms (مواعيد / امتى / "ساعات
+  // العمل"...), never bare "ساعات" (=watches) — so no foundItem gate is needed:
+  // "ساعات العمل ايه" is hours even when the catalog sells watches. The one guard
+  // left is explicit negation ("منتج مش ساعات العمل" = a product, NOT hours).
+  const negatesHours = /(مش|مو|ليس|مهو|مب|لا)\s*(ال)?ساعات/.test(normalizedText);
+  if (!negatesHours && matchesAny(normalizedText, patterns.working_hours)) return { intent: 'working_hours' };
   if (matchesAny(normalizedText, patterns.location)) return { intent: 'location' };
   if (matchesAny(normalizedText, patterns.brand_info)) return { intent: 'brand_info' };
 
@@ -554,6 +673,8 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   }
 
   const asksPriceBase = matchesAny(normalizedText, patterns.item_price);
+  // Quantity the customer stated ("بكم 100 حبة") — echoed back in price replies.
+  const askedQuantity = extractQuantity(text);
   // "send me one product", "one fuckin product" — a hard cap to a SINGLE
   // result. Checked everywhere a list would otherwise be returned so a
   // quantity-limited ask never gets dumped the full matching set.
@@ -562,37 +683,53 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   // Country checking. A category named in the SAME message ("electronics in
   // saudi arabia") narrows the pool before the country filter runs, so the
   // two constraints combine instead of the category being silently dropped.
-  const countryForProducts = detectCountry(normalizedText, lang, items);
+  // Detection can resolve to SEVERAL countries when a region is named ("دول
+  // الخليج" -> every Gulf country stocked). Filtering matches ANY of them.
+  const detectedCountries = detectCountries(normalizedText, lang, items);
+  // last_country may be stored as a single string (older turns) or an array
+  // (a region) — normalize either into a list for the carry-over case.
+  const priorCountries = Array.isArray(context.last_country)
+    ? context.last_country
+    : (context.last_country ? [context.last_country] : []);
   // No country in THIS message, but a category was just asked about right
   // after we filtered by country ("but it should be electronics") -> keep
-  // narrowing the same country instead of reverting to all countries.
-  const carriedCountry = !countryForProducts && categoryMatches.length === 1 && context.last_country
-    ? context.last_country
-    : null;
-  const activeCountry = countryForProducts || carriedCountry;
+  // narrowing the same country/countries instead of reverting to all.
+  const carriedCountries = !detectedCountries.length && categoryMatches.length === 1 && priorCountries.length
+    ? priorCountries
+    : [];
+  const activeCountries = detectedCountries.length ? detectedCountries : carriedCountries;
+  // A served country named RIGHT HERE ("منتج من الامارات") is an explicit request
+  // to see that country's products — show them, don't gate on the brittle
+  // hardcoded phrase list (which misses "منتج من" and any non-Saudi/Egypt/UAE
+  // country). The gating below only still matters for a CARRIED country.
+  const countryNamedThisTurn = detectedCountries.length > 0;
+  // Display label for headlines ("available in الإمارات، السعودية"); the array
+  // drives filtering + context so carry-over still does exact per-country matches.
+  const activeCountry = activeCountries.join(lang === 'ar' ? '، ' : ', ');
 
-  if (activeCountry) {
-    const filterCountry = (i) => countryMatchesItem(i, activeCountry);
+  if (activeCountries.length) {
+    const filterCountry = (i) => activeCountries.some((c) => countryMatchesItem(i, c));
     const categoryMatch = categoryMatches.length === 1 ? categoryMatches[0] : null;
     const basePool = categoryMatch ? categoryMatch.items : items;
 
     if (matchesAny(normalizedText, patterns.ecommerce_search_hot)) {
       const filtered = basePool.filter(isHotSelling).filter(filterCountry);
       if (wantsOne && filtered.length) {
-        return { intent: 'item_found', item: filtered[0], country: activeCountry };
+        return { intent: 'item_found', item: filtered[0], country: activeCountry, countries: activeCountries };
       }
-      return { intent: 'ecommerce_search_hot', items: filtered, country: activeCountry, category: categoryMatch?.display };
+      return { intent: 'ecommerce_search_hot', items: filtered, country: activeCountry, countries: activeCountries, category: categoryMatch?.display };
     }
 
-    if (matchesAny(normalizedText, patterns.ecommerce_country_products)
+    if (countryNamedThisTurn
+      || matchesAny(normalizedText, patterns.ecommerce_country_products)
       || tokensCount(normalizedText) <= 3
       || categoryMatch
       || wantsOne) {
       const filtered = basePool.filter(filterCountry);
       if (wantsOne && filtered.length) {
-        return { intent: 'item_found', item: filtered[0], country: activeCountry };
+        return { intent: 'item_found', item: filtered[0], country: activeCountry, countries: activeCountries };
       }
-      return { intent: 'ecommerce_country_products', items: filtered, country: activeCountry, category: categoryMatch?.display };
+      return { intent: 'ecommerce_country_products', items: filtered, country: activeCountry, countries: activeCountries, category: categoryMatch?.display };
     }
   }
 
@@ -662,7 +799,7 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   if (foundItem && topScore >= 10) {
     // (Advantages is handled above via itemInContext, which already covers foundItem.)
     if (matchedItems.length === 1 || (matchedItems.length > 1 && topScore >= secondScore + 3)) {
-      if (asksPriceBase) return { intent: 'item_price', item: foundItem };
+      if (asksPriceBase) return { intent: 'item_price', item: foundItem, quantity: askedQuantity };
       return { intent: 'item_found', item: foundItem };
     }
   }
@@ -670,7 +807,7 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   // Price question with no resolvable product -> quote invitation (sourcing) or
   // a "tell me which product" nudge (normal store).
   if (asksPriceBase && !foundItem && categoryMatches.length !== 1) {
-    return { intent: 'ecommerce_price_quote' };
+    return { intent: 'ecommerce_price_quote', quantity: askedQuantity };
   }
 
   if (matchesAny(normalizedText, patterns.catalog_general)
@@ -684,7 +821,7 @@ function runDetectIntent({ text, lang, business, context = {} }) {
       return { intent: 'ecommerce_category_info', category: categoryMatch.display, items: categoryMatch.items };
     }
     if (categoryMatch.items.length === 1 || wantsOne) {
-      if (asksPriceBase) return { intent: 'item_price', item: categoryMatch.items[0] };
+      if (asksPriceBase) return { intent: 'item_price', item: categoryMatch.items[0], quantity: askedQuantity };
       return { intent: 'item_found', item: categoryMatch.items[0] };
     }
     return {
@@ -849,15 +986,22 @@ function buildResponse(intentResult, lang, business) {
       addContactButton();
       break;
 
-    case 'ecommerce_price_quote':
-      payload.text = sourcing
+    case 'ecommerce_price_quote': {
+      const q = intentResult.quantity;
+      const qtyLine = q
+        ? (locale === 'ar'
+          ? `تمام، لكمية ${q.qty} ${q.unit}: `
+          : `Got it — for a quantity of ${q.qty} ${q.unit}: `)
+        : '';
+      payload.text = qtyLine + (sourcing
         ? sourcingPriceText(locale)
         : (locale === 'ar'
           ? 'أخبرني باسم المنتج الذي تريد معرفة سعره وسأساعدك.'
-          : 'Tell me which product you’d like a price for and I’ll help.');
+          : 'Tell me which product you’d like a price for and I’ll help.'));
       if (sourcing) addContactButton();
       payload.suggestions = suggestions.slice(0, 3);
       break;
+    }
 
     case 'ecommerce_unavailable': {
       const item = intentResult.item;
@@ -908,7 +1052,7 @@ function buildResponse(intentResult, lang, business) {
             : `We couldn't find products in ${intentResult.country} right now, but we can source what you need from our network — contact us.`);
         addContactButton();
       }
-      payload.context_update.last_country = intentResult.country;
+      payload.context_update.last_country = intentResult.countries || intentResult.country;
       if (intentResult.category) payload.context_update.last_category = intentResult.category;
       break;
 
@@ -923,7 +1067,7 @@ function buildResponse(intentResult, lang, business) {
         payload.text = locale === 'ar' ? 'لم نحدد منتجات كأكثر مبيعاً حالياً، لكن يمكنك تصفّح السوق لأحدث ما لدينا.' : 'No best-sellers are flagged right now, but you can browse the Marketplace for our latest products.';
         addMarketplaceButton();
       }
-      if (intentResult.country) payload.context_update.last_country = intentResult.country;
+      if (intentResult.country) payload.context_update.last_country = intentResult.countries || intentResult.country;
       if (intentResult.category) payload.context_update.last_category = intentResult.category;
       break;
 
@@ -1022,7 +1166,7 @@ function buildResponse(intentResult, lang, business) {
       payload.suggestions = locale === 'ar' ? [`اطلب ${title}`, 'المميزات'] : [`Order ${title}`, 'Advantages'];
       payload.context_update.last_item = item.id;
       payload.context_update.last_category = category || null;
-      if (intentResult.country) payload.context_update.last_country = intentResult.country;
+      if (intentResult.country) payload.context_update.last_country = intentResult.countries || intentResult.country;
       break;
     }
     case 'item_sizes': {
@@ -1046,8 +1190,12 @@ function buildResponse(intentResult, lang, business) {
     }
     case 'item_price': {
       const item = intentResult.item;
+      const q = intentResult.quantity;
+      const qtyLine = q
+        ? (locale === 'ar' ? `\nللكمية ${q.qty} ${q.unit}: ` : `\nFor ${q.qty} ${q.unit}: `)
+        : '';
       if (sourcing) {
-        payload.text = `${getDisplayTitle(item, locale)}\n${sourcingPriceText(locale)}`;
+        payload.text = `${getDisplayTitle(item, locale)}${qtyLine ? qtyLine : '\n'}${sourcingPriceText(locale)}`;
         addContactButton();
       } else {
         payload.text = item.price !== null && item.price !== undefined
@@ -1151,6 +1299,44 @@ function buildResponse(intentResult, lang, business) {
         ? (business.working_hours_ar ? `مواعيد العمل:\n${business.working_hours_ar}` : 'مواعيد العمل غير مضافة حالياً. تواصل معنا للتأكيد.')
         : (business.working_hours_en ? `Our working hours:\n${business.working_hours_en}` : 'Working hours are not listed yet. Please contact us to confirm.');
       break;
+    case 'business_model':
+      payload.text = locale === 'ar'
+        ? `نعم ✅ منتجاتنا مناسبة للدروبشيبنج والبيع بالجملة وإعادة البيع. أسعار الجملة تختلف حسب الكمية — تواصل معنا ونرتّبلك التفاصيل والتوريد.`
+        : `Yes ✅ our products are suited for dropshipping, wholesale, and reselling. Wholesale pricing varies with quantity — contact us and we'll sort out the details and sourcing.`;
+      addContactButton();
+      payload.suggestions = suggestions.slice(0, 3);
+      break;
+    case 'service_area': {
+      const list = Array.isArray(intentResult.servedList) ? intentResult.servedList : [];
+      const listText = list.join(locale === 'ar' ? '، ' : ', ');
+      const named = intentResult.named;
+      const namedLabel = named ? (locale === 'ar' ? (named.ar || named.en) : named.en) : '';
+
+      if (!intentResult.hasCountryData) {
+        // Catalog carries no country-of-origin data — answer from sourcing
+        // stance rather than pretending a list exists.
+        payload.text = locale === 'ar'
+          ? `نوفّر ونشحن لمختلف الدول حسب المنتج — تواصل معنا لتأكيد توفّر دولتك.`
+          : `We supply and ship to a range of countries depending on the product — contact us to confirm availability for your country.`;
+        addContactButton();
+      } else if (named && intentResult.isServed) {
+        payload.text = locale === 'ar'
+          ? `نعم ✅ نوفّر منتجات من ${namedLabel}. تقدر تسألني عن المنتجات المتوفرة منها.`
+          : `Yes ✅ we do carry products from ${namedLabel}. Ask me about what's available from there.`;
+      } else if (named && !intentResult.isServed) {
+        payload.text = locale === 'ar'
+          ? `حالياً لا نغطّي ${namedLabel}، لكن يمكننا توفير ما تحتاجه من شبكتنا — تواصل معنا. الدول المتوفرة حالياً: ${listText}.`
+          : `We don't currently cover ${namedLabel}, but we can source what you need from our network — contact us. Countries we currently cover: ${listText}.`;
+        addContactButton();
+      } else {
+        // General "which countries do you serve?" — list them.
+        payload.text = locale === 'ar'
+          ? `نوفّر منتجات من الدول التالية: ${listText}. لو تحتاج من دولة أخرى تواصل معنا ونوفّرها من شبكتنا.`
+          : `We source products from: ${listText}. Need another country? Contact us and we'll source it from our network.`;
+      }
+      payload.suggestions = suggestions.slice(0, 3);
+      break;
+    }
     case 'location':
       payload.text = locale === 'ar'
         ? (business.address_ar ? `عنواننا:\n${business.address_ar}` : 'العنوان غير مضاف حالياً.')
