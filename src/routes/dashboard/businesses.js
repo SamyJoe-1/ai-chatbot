@@ -160,11 +160,51 @@ router.get('/:id/sessions', (req, res) => {
     LEFT JOIN messages m ON m.session_id = s.id
     WHERE s.business_id = ?
     GROUP BY s.id
+    HAVING SUM(CASE WHEN m.role = 'user' THEN 1 ELSE 0 END) > 0
     ORDER BY s.last_active DESC
     LIMIT 200
   `).all(businessId);
 
   return res.json(sessions);
+});
+
+router.get('/:id/sessions/export', (req, res) => {
+  const businessId = Number(req.params.id);
+  if (!ensureAccess(req.admin, businessId)) return res.status(403).json({ error: 'forbidden' });
+
+  const sessions = db.prepare(`
+    SELECT s.id, s.guest_name, s.guest_phone, s.automated, s.created_at, s.last_active
+    FROM sessions s
+    WHERE s.business_id = ?
+      AND EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id AND m.role = 'user')
+    ORDER BY s.last_active DESC
+  `).all(businessId);
+
+  const getMessages = db.prepare(`
+    SELECT role, content, created_at FROM messages WHERE session_id = ? ORDER BY id ASC
+  `);
+
+  const csvCell = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  let csv = 'Session ID,Customer,Phone,Mode,Started At,Last Active,Transcript\n';
+  sessions.forEach(s => {
+    const transcript = getMessages.all(s.id)
+      .map(m => `[${m.created_at}] ${m.role === 'user' ? 'Customer' : 'Bot'}: ${m.content}`)
+      .join('\n');
+    const row = [
+      s.id,
+      s.guest_name || 'Guest',
+      s.guest_phone || '',
+      Number(s.automated) !== 0 ? 'Automated' : 'Human Joined',
+      s.created_at || '',
+      s.last_active || '',
+      transcript,
+    ];
+    csv += row.map(csvCell).join(',') + '\n';
+  });
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename=chats_${businessId}.csv`);
+  return res.send(csv);
 });
 
 router.get('/:id/sessions/:sessionId/messages', (req, res) => {

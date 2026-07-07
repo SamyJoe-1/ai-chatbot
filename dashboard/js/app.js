@@ -732,6 +732,11 @@ document.getElementById('filter-sessions-btn').addEventListener('click', () => {
   });
 });
 
+document.getElementById('export-sessions-btn').addEventListener('click', () => {
+  if (!state.selectedCafe) return;
+  window.open(`/dashboard/businesses/${state.selectedCafe.id}/sessions/export?token=${state.token}`, '_blank');
+});
+
 document.getElementById('clear-sessions-btn').addEventListener('click', async () => {
   if (!state.selectedCafe) return;
   const btn = document.getElementById('clear-sessions-btn');
