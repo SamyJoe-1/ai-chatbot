@@ -434,7 +434,14 @@
               <div class="form-field full-width">
                 <label>FAQ <small>customers get instant answers — hit ع on any question to add its Arabic translation</small></label>
                 <div id="cafe-faq-list" class="faq-list"></div>
-                <button type="button" id="cafe-faq-add" class="faq-add-btn"><i class="fas fa-plus"></i> Add question</button>
+                <div class="faq-toolbar">
+                  <button type="button" id="cafe-faq-add" class="faq-add-btn"><i class="fas fa-plus"></i> Add question</button>
+                  <button type="button" id="cafe-faq-import-en-btn" class="faq-add-btn"><i class="fas fa-file-import"></i> Import EN JSON</button>
+                  <button type="button" id="cafe-faq-import-ar-btn" class="faq-add-btn"><i class="fas fa-file-import"></i> Import AR JSON</button>
+                  <input type="file" id="cafe-faq-import-en" accept="application/json,.json" hidden>
+                  <input type="file" id="cafe-faq-import-ar" accept="application/json,.json" hidden>
+                </div>
+                <small class="faq-import-hint">JSON format: <code>[{"q": "question", "a": "answer"}, ...]</code>. Import EN and AR files with the same question order to pair them into rows automatically. Importing replaces the current list for that language.</small>
               </div>
             </div>
           </div>

@@ -480,6 +480,69 @@ function collectFaq() {
       }
     });
   }
+
+  // JSON import: a plain array of {q,a} (also accepts {question,answer}).
+  // Imported rows REPLACE the current list for that language only — the other
+  // language's column is preserved as-is, so importing EN then AR (same
+  // question order in both files) pairs them into the same rows by index.
+  function normalizeFaqUpload(parsed) {
+    if (!Array.isArray(parsed)) return null;
+    return parsed
+      .map((entry) => ({
+        q: String((entry && (entry.q ?? entry.question)) || '').trim(),
+        a: String((entry && (entry.a ?? entry.answer)) || '').trim(),
+      }))
+      .filter((entry) => entry.q && entry.a);
+  }
+
+  function wireFaqImport(btnId, inputId, lang) {
+    const btn = document.getElementById(btnId);
+    const input = document.getElementById(inputId);
+    if (!btn || !input) return;
+    btn.addEventListener('click', () => input.click());
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.value = ''; // allow re-picking the same file later
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        let parsed;
+        try {
+          parsed = JSON.parse(reader.result);
+        } catch {
+          toastErr('That file is not valid JSON.');
+          return;
+        }
+        const entries = normalizeFaqUpload(parsed);
+        if (!entries || !entries.length) {
+          toastErr('Expected a JSON array of {"q": "...", "a": "..."} objects with at least one valid entry.');
+          return;
+        }
+        const langLabel = lang === 'en' ? 'English' : 'Arabic';
+        Swal.fire({
+          title: `Import ${entries.length} ${langLabel} FAQ entries?`,
+          text: `This replaces the current ${langLabel} FAQ list. The other language column is kept as-is.`,
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonText: 'Import',
+        }).then((r) => {
+          if (!r.isConfirmed) return;
+          const current = collectFaq();
+          if (lang === 'en') {
+            renderFaqEditor(entries, current.faq_ar);
+          } else {
+            renderFaqEditor(current.faq_en, entries);
+          }
+          toast(`Imported ${entries.length} ${langLabel} FAQ entries`);
+        });
+      };
+      reader.onerror = () => toastErr('Could not read that file.');
+      reader.readAsText(file);
+    });
+  }
+
+  wireFaqImport('cafe-faq-import-en-btn', 'cafe-faq-import-en', 'en');
+  wireFaqImport('cafe-faq-import-ar-btn', 'cafe-faq-import-ar', 'ar');
 })();
 
 async function selectCafe(id, { updateHash = true } = {}) {

@@ -340,8 +340,27 @@ const ALIAS_KEY_TO_GROUP = (() => {
   return map;
 })();
 
+// A one-letter-off Arabic country name ("لبيا" for "ليبيا" — a dropped ي) must
+// still resolve: country correctness is safety-critical (a missed/misdetected
+// country either dumps the wrong items or wrongly claims/denies coverage), and
+// customers mistype on mobile keyboards constantly. Mirrors the exact
+// Levenshtein tolerance already proven for item-name typo recovery in
+// queryRecovery.js: distance scales with word length, and the first letter
+// must still match (kills unrelated-word false positives almost entirely
+// while still catching a dropped/swapped middle letter).
+function fuzzyArabicTokenMatch(key, normalizedArabic) {
+  if (key.length < 4 || key.includes(' ')) return false;
+  const threshold = key.length <= 5 ? 1 : key.length <= 8 ? 2 : 3;
+  return tokenize(normalizedArabic).some((token) => {
+    if (token.length < 4 || token[0] !== key[0]) return false;
+    if (Math.abs(token.length - key.length) > threshold) return false;
+    return levenshtein(token, key) <= threshold;
+  });
+}
+
 // Match one comparison key against the message. Rules by kind:
-//  • Arabic keys  -> substring on the Arabic-normalized text.
+//  • Arabic keys  -> substring on the Arabic-normalized text, with a small
+//    Levenshtein-tolerant fallback for a single typo'd letter.
 //  • Latin 2-char codes ("ua","sa","uk","us","in") -> ONLY when written as a
 //    standalone UPPERCASE token in the RAW text. Two-letter codes collide with
 //    ordinary words ("in", "us") and product lines ("CeraVe SA"), so a bare
@@ -353,7 +372,11 @@ const ALIAS_KEY_TO_GROUP = (() => {
 function keyMatchesText(key, rawText, normalizedLatin, normalizedArabic) {
   if (!key) return false;
   const isArabic = /[؀-ۿ]/.test(key);
-  if (isArabic) return normalizedArabic ? normalizedArabic.includes(key) : false;
+  if (isArabic) {
+    if (!normalizedArabic) return false;
+    if (normalizedArabic.includes(key)) return true;
+    return fuzzyArabicTokenMatch(key, normalizedArabic);
+  }
   if (!normalizedLatin) return false;
 
   if (key.length <= 2) {

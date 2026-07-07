@@ -4,7 +4,7 @@ const { tokenize, normalize } = require('../engine/detector');
 const { getBusinessItems, getAllBusinessItems } = require('./shared/catalogStore');
 const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle, detectCountry, detectCountries, detectAnyKnownCountry, countryCanonicalId, countryMatchesItem } = require('./shared/matcher');
 const { getItemThumbnail, buildThumbnailMessages } = require('./shared/thumbnailMessages');
-const { matchFaq } = require('../engine/faqMatcher');
+const { matchFaq, parseFaqList } = require('../engine/faqMatcher');
 
 const FEATURE_SYNONYMS = {
   color: ['color', 'colors', 'لون', 'اللون', 'ألوان', 'الوان'],
@@ -157,6 +157,10 @@ const PATTERNS = {
       /\bat\s*least\s*one\b/i,
     ],
     item_price: [/\bprice\b/i, /\bcost\b/i, /\bhow much\b/i, /\bquote\b/i, /\bwholesale\b/i, /\b\d{1,7}\s*(pcs?|pieces?|units?|dozen|cartons?|boxes?|kg)\b/i],
+    // Stock-COUNT question ("how many in stock / how many do you have"). We never
+    // publish exact counts, so this gets a clear canned answer, not a "which
+    // product?" runaround. A price word present means it's a price question.
+    stock_quantity: [/\bhow many\b[^?]*\b(in stock|available|left|do you have|units?|pieces?|pcs)\b/i, /\b(in stock|stock (level|count|quantity)|units? available|pieces? available|quantity available|qty available)\b/i],
     logistics_inquiry: [
       /\bhow (many days?|long|much time|soon)\b/i,
       /\bwhen (will|would|can|could)\b/i,
@@ -226,6 +230,10 @@ const PATTERNS = {
     // "سعر 50 قطعة". "حبة/قطعة/علبة/كرتونة/درزن/دستة/طن" are quantity units —
     // a quantity ask is inherently a price/quote question in a wholesale store.
     item_price: [/(سعر|اسعار|أسعار|بكام|بكم|بقديش|كم السعر|الثمن|حسابه|حسابها|كم حقها|حقها كم|عرض سعر|الجمله|الجملة|\d{1,7}\s*(حبة|حبه|قطعة|قطعه|قطع|علبة|علبه|كرتون|كرتونه|كرتونة|درزن|دستة|دسته|طن|كيلو))/],
+    // Stock-COUNT question: "فيه منه كام حبة"، "كام قطعة متوفرة"، "العدد المتاح".
+    // We hold no per-item stock count — only an availability flag — so naming the
+    // product changes nothing. Answered upfront instead of asking "which product?".
+    stock_quantity: [/(منه كام|منها كام|فيه منه|فيه منها|في منه|كام حبة|كم حبة|كام حبه|كم حبه|كام قطعة|كم قطعة|كام قطعه|كام واحد|كم العدد|العدد المتاح|الكميه المتاحه|الكمية المتاحة|كميه متوفره|كمية متوفرة|كام متوفر|متوفر كام|متوفر منه كام|المخزون|بالمخزون|عندكم كام|كام عندكم|الاستوك|ستوك)/],
     logistics_inquiry: [/(كم يوم|كم يومًا|كم يوماً|امتى|متى يوصل|كم مدة|وقت التوصيل|وقت الشحن|وقت التوريد|المخزن|المستودع|مدة التوريد|مدة الشحن|التسليم|فترة التوريد|هيوصل امتى|يوصل امتى|تاريخ التسليم)/],
   }
 };
@@ -276,6 +284,28 @@ function getServedCountryIds(items) {
     if (en) ids.add(countryCanonicalId(en));
   }
   return ids;
+}
+
+// Finds an owner-authored FAQ entry that is ITSELF about the given country —
+// matched by running the SAME typo-tolerant country detector against the
+// FAQ's own question text, not by generic keyword overlap. This deliberately
+// bypasses matchFaq()'s word-overlap matching: that system has no Arabic
+// stemming (a verb like "تبحثه" never lines up with a noun like "البحث" in the
+// FAQ text) and no typo tolerance, so a colloquial/misspelled capability
+// question ("تقدره تبحثه عن منتجات في لبيا") would never clear its overlap
+// threshold even though the COUNTRY itself was resolved correctly. Grounding
+// the match in the country — the one fact both sides agree on — is far more
+// reliable than comparing loose wording.
+function findCountryCapabilityFaq({ business, lang, country, items }) {
+  const faqList = parseFaqList(lang === 'ar' ? business.faq_ar : business.faq_en);
+  for (const entry of faqList) {
+    const q = String(entry.q || entry.question || '').trim();
+    const a = String(entry.a || entry.answer || '').trim();
+    if (!q || !a) continue;
+    const faqCountries = detectCountries(q, lang, items);
+    if (faqCountries.includes(country)) return { question: q, answer: a };
+  }
+  return null;
 }
 
 function isSourcing(business) {
@@ -672,6 +702,16 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     }
   }
 
+  // Stock-COUNT question ("فيه منه كام حبة", "how many in stock"). We hold no
+  // per-item count (only availability), so naming a product can't produce a
+  // number — answer that plainly instead of asking "which product?". A PRICE
+  // word present ("بكام حبة") means it's a price/quote question, so let that fall
+  // through to item_price below. "منه/it" resolves to the item in context.
+  const pricePresent = /(بكام|بكم|سعر|اسعار|أسعار|بقديش|الثمن|حق|عرض سعر|price|cost|how much|quote)/i.test(normalizedText);
+  if (!pricePresent && matchesAny(normalizedText, patterns.stock_quantity)) {
+    return { intent: 'stock_quantity', item: itemInContext || foundItem || null };
+  }
+
   const asksPriceBase = matchesAny(normalizedText, patterns.item_price);
   // Quantity the customer stated ("بكم 100 حبة") — echoed back in price replies.
   const askedQuantity = extractQuantity(text);
@@ -706,6 +746,32 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   // Display label for headlines ("available in الإمارات، السعودية"); the array
   // drives filtering + context so carry-over still does exact per-country matches.
   const activeCountry = activeCountries.join(lang === 'ar' ? '، ' : ', ');
+
+  // "Can you SEARCH for products in <country>?" is a CAPABILITY question
+  // ("تقدروا تبحثوا؟", "do you search/source in X") — NOT a request to browse
+  // the catalog. Dumping real matched items here is actively misleading: it
+  // reads as "we physically stock this in Libya" when the honest answer is
+  // "we CAN source from there" (sourcing business, no local inventory). The
+  // owner already authored an exact FAQ for this per served country ("هل
+  // يمكنكم البحث عن منتجات في ليبيا؟") — defer to it instead of the catalog
+  // dump. Only intercepts when a FAQ actually matches; otherwise falls
+  // through to the normal country-products listing unchanged.
+  const CAPABILITY_ASK_RE = lang === 'ar'
+    ? /(تقدر|يقدر|ممكن|يمكن|هل يمكن)[^؟?]{0,15}(تبحث|تدور|تلاق|توفر|تجيب|تحضر|تلقو|توفرو)/
+    : /\b(can|could|do)\s+you\s+(search|find|source|get|look for|check)\b/i;
+  if (activeCountries.length && CAPABILITY_ASK_RE.test(normalizedText)) {
+    // Country-grounded lookup FIRST: a typo'd/colloquial capability question
+    // ("تبحثه" vs the FAQ's "البحث", "لبيا" vs "ليبيا") can legitimately fail
+    // matchFaq()'s generic word-overlap even though the country itself was
+    // correctly resolved above — grounding on the country sidesteps that
+    // entirely. Generic matchFaq is the fallback for a capability FAQ that
+    // isn't written per-country.
+    const countryFaqHit = findCountryCapabilityFaq({ business, lang, country: activeCountries[0], items });
+    const faqHit = countryFaqHit || matchFaq({ text, lang, business });
+    if (faqHit) {
+      return { intent: 'faq', question: faqHit.question, answer: faqHit.answer };
+    }
+  }
 
   if (activeCountries.length) {
     const filterCountry = (i) => activeCountries.some((c) => countryMatchesItem(i, c));
@@ -986,6 +1052,25 @@ function buildResponse(intentResult, lang, business) {
       addContactButton();
       break;
 
+    case 'stock_quantity': {
+      const item = intentResult.item;
+      const name = item ? getDisplayTitle(item, locale) : '';
+      payload.text = locale === 'ar'
+        ? (name
+          ? `لا نعرض عدد القطع المتوفرة من **${name}** بشكل محدد، لكنه متوفر ويمكننا توفير الكمية التي تحتاجها — تواصل معنا وأخبرنا بالكمية المطلوبة.`
+          : `لا نعرض أعداد المخزون بشكل محدد، لكن يمكننا توفير الكمية التي تحتاجها — تواصل معنا وأخبرنا بالمنتج والكمية.`)
+        : (name
+          ? `We don't publish exact stock counts for **${name}**, but it's available and we can supply the quantity you need — contact us with your required quantity.`
+          : `We don't publish exact stock counts, but we can supply the quantity you need — contact us with the product and quantity.`);
+      if (item) {
+        const thumb = getItemThumbnail(item);
+        if (thumb) payload.thumbnail = thumb;
+        payload.context_update.last_item = item.id;
+      }
+      addContactButton();
+      payload.suggestions = suggestions.slice(0, 3);
+      break;
+    }
     case 'ecommerce_price_quote': {
       const q = intentResult.quantity;
       const qtyLine = q
@@ -1298,6 +1383,15 @@ function buildResponse(intentResult, lang, business) {
       payload.text = locale === 'ar'
         ? (business.working_hours_ar ? `مواعيد العمل:\n${business.working_hours_ar}` : 'مواعيد العمل غير مضافة حالياً. تواصل معنا للتأكيد.')
         : (business.working_hours_en ? `Our working hours:\n${business.working_hours_en}` : 'Working hours are not listed yet. Please contact us to confirm.');
+      break;
+    case 'faq':
+      // Owner-authored FAQ answer, matched directly by a rule (e.g. a
+      // capability question like "can you search for products in Libya?").
+      // Echoed verbatim — it's exact text the business wrote for this exact
+      // question, not something to be paraphrased or padded.
+      payload.text = intentResult.answer;
+      payload.suggestions = suggestions.slice(0, 3);
+      payload.context_update.last_faq = intentResult.question;
       break;
     case 'business_model':
       payload.text = locale === 'ar'
