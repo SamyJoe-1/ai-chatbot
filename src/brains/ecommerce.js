@@ -716,6 +716,60 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   if (matchesAny(normalizedText, patterns.greeting_yasta)) return { intent: 'greeting_yasta' };
   if (matchesAny(normalizedText, patterns.thanks)) return { intent: 'thanks' };
 
+  // "X in every country" ("عطر في كل بلد", "a perfume in each country") -> ONE X
+  // per served country, NOT a single item's origin. Must run before the item /
+  // feature-inquiry logic, which would otherwise collapse "عطر" to one perfume
+  // and read "بلد" as a country-of-origin question about it.
+  const PER_COUNTRY_RE = lang === 'ar'
+    ? /(كل|جميع|كافه|كافة)\s*(بلد|دوله|دولة|الدول|البلاد|بلاد|دول)|من\s*كل\s*(بلد|دوله|دولة|دول)/
+    : /\b(every|each|all)\s+countr(y|ies)\b|\bper country\b/i;
+  if (PER_COUNTRY_RE.test(normalizedText)) {
+    // Isolate the SUBJECT ("عطر"/"perfume") by stripping the "per country" phrase
+    // and command fillers — otherwise "perfume in every country" scores 0 against
+    // the catalog (the extra tokens don't match any item) and nothing resolves.
+    const subjectText = String(text)
+      .replace(lang === 'ar'
+        ? /(في|من)?\s*(كل|جميع|كافه|كافة)\s*(بلد|دوله|دولة|الدول|البلاد|بلاد|دول)/g
+        : /\b(in|from)?\s*(every|each|all)\s+countr(y|ies)\b|\bper country\b/gi, ' ')
+      .replace(lang === 'ar'
+        ? /(طلعلي|طلع لي|هاتلي|هات لي|قلي|قوللي|قول لي|اعرضلي|اعرض لي|اعرض|وريني|ورني|عايز|عاوز|بدي|اريد|أريد|ابغى|ابغي|اعطني|اعطيني|جيبلي|جيب لي)/g
+        : /\b(show|give|get|bring|find|tell)\s+me\b|\ba\b|\ban\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    // A GENERIC subject ("منتج"/"product"/"anything") or an empty one means "any
+    // product per country" — pool = the whole catalog, no category filter.
+    const GENERIC_SUBJECT_RE = lang === 'ar'
+      ? /^(منتج|منتجات|حاجه|حاجة|شي|شيء|صنف|اصناف|أصناف|اي\s*(حاجه|شي)|أي\s*(حاجة|شيء))$/
+      : /^(product|products|item|items|something|anything|good|goods)$/i;
+    let pool = [];
+    let subjectLabel = null;
+    if (!subjectText || GENERIC_SUBJECT_RE.test(subjectText)) {
+      pool = items;
+      subjectLabel = null;
+    } else {
+      const subj = findEcommerceItems(subjectText, lang, business.id, context);
+      if (subj.categoryMatches.length) {
+        pool = subj.categoryMatches[0].items;
+        subjectLabel = subj.categoryMatches[0].display;
+      } else if (subj.matchedItems.length) {
+        const topCat = String(subj.matchedItems[0].category_en || subj.matchedItems[0].category_ar || '').trim();
+        pool = topCat
+          ? items.filter((i) => String(i.category_en || i.category_ar || '').trim() === topCat)
+          : subj.matchedItems;
+        subjectLabel = getDisplayCategory(subj.matchedItems[0], lang);
+      }
+    }
+    if (pool.length) {
+      const served = getServedCountries(items, lang);
+      const groups = [];
+      for (const country of served) {
+        const pick = pool.find((it) => countryMatchesItem(it, country));
+        if (pick) groups.push({ country, item: pick });
+      }
+      if (groups.length) return { intent: 'ecommerce_per_country', groups, subjectLabel };
+    }
+  }
+
   // Kick-off continuation. After we invited the customer to explore (help /
   // browse / discovery reply sets awaiting_discovery), a bare "so lets start" /
   // "ok go ahead" / "يلا" means "walk me through it" — start guided discovery
@@ -1358,6 +1412,20 @@ function buildResponse(intentResult, lang, business) {
       if (thumb) payload.thumbnail = thumb;
       payload.suggestions = locale === 'ar' ? [`اطلب ${title}`, 'تفاصيل اكتر'] : [`Order ${title}`, 'More details'];
       payload.context_update.last_item = item.id;
+      break;
+    }
+
+    case 'ecommerce_per_country': {
+      const groups = Array.isArray(intentResult.groups) ? intentResult.groups : [];
+      const subject = intentResult.subjectLabel;
+      const heading = locale === 'ar'
+        ? `${subject ? subject + ' — ' : ''}واحد من كل دولة متوفرة:`
+        : `One ${subject || 'product'} from each available country:`;
+      const lines = groups.map((g) => `- ${g.country}: ${getDisplayTitle(g.item, locale)}`);
+      payload.text = [heading, ...lines].join('\n');
+      payload.suggestions = groups.slice(0, 4).map((g) => getDisplayTitle(g.item, locale));
+      payload.context_update.last_shown_ids = groups.map((g) => g.item.id).filter((id) => Number.isFinite(id));
+      addMarketplaceButton();
       break;
     }
 

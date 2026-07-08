@@ -242,6 +242,9 @@ const ALWAYS_LOCAL_INTENTS = new Set([
   // "where is it from?" -> the item's own country of origin (local, from catalog
   // data) instead of the AI guessing or the served-countries list.
   'ecommerce_item_origin',
+  // "a perfume in every country" -> one item per served country (local catalog
+  // grouping), not a single item's origin or an AI improvisation.
+  'ecommerce_per_country',
 ]);
 
 // The classifier's [11] direct-answer sometimes bottoms out on a completely
