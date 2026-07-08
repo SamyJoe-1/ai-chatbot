@@ -1480,8 +1480,13 @@
     removeFloatingOrderBadge();
     refs.root.querySelector('.cb-panel').classList.add('order-dashboard-mode');
 
-    // Modals/screens override the stage and rebuild entirely
+    // Modals/screens override the stage and rebuild entirely. Guard each with a
+    // data-screen signature so a background 3s poll does NOT rebuild the same
+    // screen's innerHTML underneath the user's finger — replacing a button
+    // mid-tap is exactly what made Cancel/Confirm need several presses to land.
     if (state.confirmCancelActive) {
+      if (refs.dashboard.dataset.screen !== 'confirm-cancel') {
+      refs.dashboard.dataset.screen = 'confirm-cancel';
       refs.dashboard.removeAttribute('data-stage');
       refs.dashboard.innerHTML = `
         <div class="cb-dash-confirm-screen">
@@ -1513,10 +1518,14 @@
         state.confirmCancelActive = false;
         updateDashboardUi();
       });
+      }
       return;
     }
 
     if (state.confirmDeleteItem) {
+      const deleteSig = 'delete:' + state.confirmDeleteItem.order_item_id;
+      if (refs.dashboard.dataset.screen !== deleteSig) {
+      refs.dashboard.dataset.screen = deleteSig;
       refs.dashboard.removeAttribute('data-stage');
       const itemToDelete = state.confirmDeleteItem;
       refs.dashboard.innerHTML = `
@@ -1554,8 +1563,13 @@
         state.confirmDeleteItem = null;
         updateDashboardUi();
       });
+      }
       return;
     }
+
+    // Not on a modal screen anymore — clear the screen marker so returning to a
+    // screen later rebuilds it, and so the shell logic below runs normally.
+    if (refs.dashboard.dataset.screen) delete refs.dashboard.dataset.screen;
 
     const status = draft.status;
     const currentStage = refs.dashboard.getAttribute('data-stage');
@@ -2019,38 +2033,49 @@
       const actionBarEl = refs.dashboard.querySelector('.cb-dash-action-bar');
       if (actionBarEl) {
         const hasItems = Array.isArray(draft.items) && draft.items.length > 0;
-        actionBarEl.innerHTML = `
-          <button type="button" class="cb-dash-btn-primary cb-dash-btn-confirm-items" ${hasItems ? '' : 'disabled'}>
-            ${state.language === 'ar' ? 'تأكيد أصناف الطلب' : 'Confirm Order Items'}
-          </button>
-        `;
+        // Only rebuild when the button's state actually changes — otherwise the
+        // 3s poll replaces the Confirm button under the user's tap (the "had to
+        // hit it a bunch of times" bug).
+        const sig = 'confirm-items:' + (hasItems ? '1' : '0');
+        if (actionBarEl.dataset.sig !== sig) {
+          actionBarEl.dataset.sig = sig;
+          actionBarEl.innerHTML = `
+            <button type="button" class="cb-dash-btn-primary cb-dash-btn-confirm-items" ${hasItems ? '' : 'disabled'}>
+              ${state.language === 'ar' ? 'تأكيد أصناف الطلب' : 'Confirm Order Items'}
+            </button>
+          `;
 
-        const btnConfirm = actionBarEl.querySelector('.cb-dash-btn-confirm-items');
-        if (btnConfirm) {
-          btnConfirm.addEventListener('click', async () => {
-            btnConfirm.disabled = true;
-            btnConfirm.textContent = state.language === 'ar' ? 'جاري التأكيد...' : 'Confirming...';
-            await sendMessage({ value: '__order__:confirm', silent: false });
-          });
+          const btnConfirm = actionBarEl.querySelector('.cb-dash-btn-confirm-items');
+          if (btnConfirm) {
+            btnConfirm.addEventListener('click', async () => {
+              btnConfirm.disabled = true;
+              btnConfirm.textContent = state.language === 'ar' ? 'جاري التأكيد...' : 'Confirming...';
+              await sendMessage({ value: '__order__:confirm', silent: false });
+            });
+          }
         }
       }
     } else if (status === 'awaiting_address') {
       const actionBarEl = refs.dashboard.querySelector('.cb-dash-action-bar');
       if (actionBarEl) {
         const isAddressValid = String(state.typedAddress || '').trim().length >= 6;
-        actionBarEl.innerHTML = `
-          <button type="button" class="cb-dash-btn-primary cb-dash-btn-confirm-address" ${isAddressValid ? '' : 'disabled'}>
-            ${state.language === 'ar' ? 'تأكيد العنوان' : 'Confirm Address'}
-          </button>
-        `;
+        const sig = 'addr:' + (isAddressValid ? '1' : '0');
+        if (actionBarEl.dataset.sig !== sig) {
+          actionBarEl.dataset.sig = sig;
+          actionBarEl.innerHTML = `
+            <button type="button" class="cb-dash-btn-primary cb-dash-btn-confirm-address" ${isAddressValid ? '' : 'disabled'}>
+              ${state.language === 'ar' ? 'تأكيد العنوان' : 'Confirm Address'}
+            </button>
+          `;
 
-        const btnConfirmAddr = actionBarEl.querySelector('.cb-dash-btn-confirm-address');
-        if (btnConfirmAddr) {
-          btnConfirmAddr.addEventListener('click', async () => {
-            btnConfirmAddr.disabled = true;
-            btnConfirmAddr.textContent = state.language === 'ar' ? 'جاري الحفظ...' : 'Saving...';
-            await sendMessage({ value: state.typedAddress, silent: false });
-          });
+          const btnConfirmAddr = actionBarEl.querySelector('.cb-dash-btn-confirm-address');
+          if (btnConfirmAddr) {
+            btnConfirmAddr.addEventListener('click', async () => {
+              btnConfirmAddr.disabled = true;
+              btnConfirmAddr.textContent = state.language === 'ar' ? 'جاري الحفظ...' : 'Saving...';
+              await sendMessage({ value: state.typedAddress, silent: false });
+            });
+          }
         }
       }
     } else if (status === 'awaiting_details') {
@@ -2067,7 +2092,9 @@
       });
 
       const actionBarEl = refs.dashboard.querySelector('.cb-dash-action-bar');
-      if (actionBarEl) {
+      const wizSig = 'wiz:' + step;
+      if (actionBarEl && actionBarEl.dataset.sig !== wizSig) {
+        actionBarEl.dataset.sig = wizSig;
         actionBarEl.style.display = 'flex';
         actionBarEl.style.gap = '8px';
         actionBarEl.innerHTML = `
@@ -2109,7 +2136,8 @@
       }
     } else if (status === 'address_confirmation') {
       const actionBarEl = refs.dashboard.querySelector('.cb-dash-action-bar');
-      if (actionBarEl) {
+      if (actionBarEl && actionBarEl.dataset.sig !== 'addr-confirm') {
+        actionBarEl.dataset.sig = 'addr-confirm';
         actionBarEl.innerHTML = `
           <button type="button" class="cb-dash-btn-primary cb-dash-btn-final-confirm">
             ${state.language === 'ar' ? 'تأكيد نهائي وإرسال الطلب' : 'Confirm and Place Order'}
@@ -2402,7 +2430,12 @@
           ? `حدث خطأ ما. تواصل معنا على ${state.cafe && state.cafe.phone ? state.cafe.phone : 'رقم الهاتف'}.`
           : `Something went wrong. Contact us at ${state.cafe && state.cafe.phone ? state.cafe.phone : 'our phone number'}.`;
         appendMessage(fallback, 'bot', state.language);
-        state.history.push({ role: 'bot', content: fallback });
+        // Deliberately NOT pushed into state.history: the backend never saved this
+        // client-only error bubble, so if we added it here the next 3s poll would
+        // see state.history longer than the server's, fail the same-prefix check,
+        // and renderHistory() would WIPE the whole thread — making this very
+        // message "fade out". Keeping it DOM-only lets the prefix stay in sync so
+        // the error stays visible until the conversation naturally moves on.
         applyUiState(emptyUiState());
       }
     } finally {
@@ -2430,7 +2463,10 @@
     if (!payload) return;
 
     refs = buildWidget({
-      name: state.language === 'ar' ? payload.cafe.name_ar || payload.cafe.name : payload.cafe.name,
+      // Brand name in the header is ALWAYS the English name (never switches to
+      // name_ar with the chat language). Falls back to name_ar only if there is
+      // no English name at all.
+      name: payload.cafe.name || payload.cafe.name_ar,
       logo_url: payload.cafe.logo_url,
       primary_color: payload.cafe.primary_color,
     });

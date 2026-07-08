@@ -4,7 +4,7 @@ const express = require('express');
 
 const db = require('../../db/db');
 const { tokenValidator } = require('../../middleware/tokenValidator');
-const { detectLanguage, detectDialect, normalizeArabicDigits } = require('../../engine/detector');
+const { detectLanguage, detectDialect, normalizeArabicDigits, normalize } = require('../../engine/detector');
 const { validatePhone } = require('../../engine/phoneValidator');
 const { recoverUserQuery } = require('../../engine/queryRecovery');
 const { isSessionExpired, resetSessionState } = require('../../engine/sessionLifecycle');
@@ -138,18 +138,59 @@ function resolveItemsByIds(businessId, ids) {
   return ids.map((id) => map.get(id)).filter(Boolean);
 }
 
+// Ordinal position words -> 1-based index, for "order the first/second one",
+// "اعملي اوردر بالمنتج الاول". Arabic matched as WHOLE tokens (below) so "اولاد"
+// (kids) never reads as "اول" (first).
+const ORDINAL_EN = { first: 1, '1st': 1, second: 2, '2nd': 2, third: 3, '3rd': 3, fourth: 4, '4th': 4, fifth: 5, '5th': 5, sixth: 6, '6th': 6, seventh: 7, '7th': 7, eighth: 8, '8th': 8 };
+const ORDINAL_AR = { 'الاول': 1, 'اول': 1, 'الاولي': 1, 'الثاني': 2, 'التاني': 2, 'ثاني': 2, 'الثالث': 3, 'التالت': 3, 'ثالث': 3, 'الرابع': 4, 'رابع': 4, 'الخامس': 5, 'خامس': 5, 'السادس': 6, 'سادس': 6, 'السابع': 7, 'سابع': 7, 'الثامن': 8, 'ثامن': 8 };
+
+function detectOrdinalIndex(text) {
+  const rawLow = String(text || '').toLowerCase();
+  // Numeric form: "number 3", "item 2", "#2", "رقم ٢", "المنتج 2".
+  const numeric = normalizeArabicDigits(rawLow).match(/(?:number|item|no\.?|#|رقم|المنتج|منتج|العنصر|عنصر|الصنف|صنف)\s*#?\s*(\d{1,2})/);
+  if (numeric) { const n = parseInt(numeric[1], 10); if (n >= 1 && n <= 20) return n; }
+  for (const [w, n] of Object.entries(ORDINAL_EN)) {
+    if (new RegExp(`\\b${w}\\b`).test(rawLow)) return n;
+  }
+  const tokens = normalize(rawLow, 'ar').split(/[^؀-ۿ]+/).filter(Boolean);
+  for (const [w, n] of Object.entries(ORDINAL_AR)) {
+    if (tokens.includes(normalize(w, 'ar'))) return n;
+  }
+  return null;
+}
+
 // Seed items for a NEW order: items explicitly named in THIS message win (a
 // fuzzy text match is ambiguous, so the order flow adds only the top one). If
 // none are named but the message refers back to a prior turn ("an order with
 // them"), fall back to the items we last recommended ([12]) or last showed —
 // that is a PRECISE set, so seedAll tells the order flow to add every one.
 function resolveOrderSeedItems({ text, lang, businessId, context }) {
-  // 1. Items explicitly named in THIS message win.
+  const raw = String(text || '');
+
+  // 1. Ordinal into the list we just showed ("order the first/second one",
+  //    "اعملي اوردر بالمنتج الاول"). Checked BEFORE fuzzy title matching: a
+  //    positional reference is a precise, deliberate pick, whereas a phrase like
+  //    "the third one" can spuriously fuzzy-match some product title. Only wins
+  //    when the ordinal actually resolves to a real item in the DISPLAY-ordered
+  //    last_shown_ids (fallback: last_recommended_ids). explicit: true (no
+  //    confirmation — it's an explicit choice, like a named item).
+  const ordinal = detectOrdinalIndex(raw);
+  if (ordinal) {
+    const shown = Array.isArray(context.last_shown_ids) && context.last_shown_ids.length
+      ? context.last_shown_ids
+      : (Array.isArray(context.last_recommended_ids) ? context.last_recommended_ids : []);
+    const pickId = shown[ordinal - 1];
+    if (Number.isFinite(pickId)) {
+      const items = resolveItemsByIds(businessId, [pickId]);
+      if (items.length) return { items, seedAll: true, explicit: true };
+    }
+  }
+
+  // 2. Items explicitly named in THIS message win.
   const explicitItems = matchItemsForOrder({ text, lang, businessId, context });
   if (explicitItems.length) return { items: explicitItems, seedAll: false, explicit: true };
 
-  const raw = String(text || '');
-  // 2. "order them / those / both" -> the SET we last recommended/showed.
+  // 3. "order them / those / both" -> the SET we last recommended/showed.
   if (ORDER_ANAPHOR_RE.test(raw) || ORDER_ANAPHOR_AR_RE.test(raw)) {
     const ids = Array.isArray(context.last_recommended_ids) && context.last_recommended_ids.length
       ? context.last_recommended_ids
@@ -195,6 +236,12 @@ const ALWAYS_LOCAL_INTENTS = new Set([
   // locally (honest — shows what's actually flagged, or says none is) instead of
   // letting the AI recommend fabricate a "best seller" it has no sales data for.
   'ecommerce_search_hot',
+  // Terse yes/no about a product's status ("is it a best seller?") — the local
+  // brain reads the real flag; keep the AI from turning it into a field dump.
+  'ecommerce_status_yesno',
+  // "where is it from?" -> the item's own country of origin (local, from catalog
+  // data) instead of the AI guessing or the served-countries list.
+  'ecommerce_item_origin',
 ]);
 
 // The classifier's [11] direct-answer sometimes bottoms out on a completely
@@ -1265,11 +1312,22 @@ router.post('/', tokenValidator, async (req, res) => {
       collectTrackedItemIds(intentResult)
     );
     const basePayload = brain.buildResponse(intentResult, lang, business);
+    // Persist the list in DISPLAY order when this turn showed 2+ items, so an
+    // ordinal follow-up ("order the second one") can index it. A single-item
+    // answer preserves the previous list rather than shrinking it to one.
+    const shownThisTurn = Array.isArray(intentResult.items)
+      ? intentResult.items.map((it) => it?.id).filter(Number.isFinite).slice(0, 8)
+      : [];
     const nextContext = {
       ...context,
       ...basePayload.context_update,
       last_suggestions: normalizeSuggestions(basePayload.suggestions),
       recent_item_ids: trackedItemIds,
+      ...(shownThisTurn.length >= 2
+        ? { last_shown_ids: shownThisTurn }
+        : (basePayload.context_update && 'last_shown_ids' in basePayload.context_update
+          ? {}
+          : { last_shown_ids: context.last_shown_ids })),
     };
     if (resolvedText !== text) {
       nextContext.last_recovered_query = resolvedText;

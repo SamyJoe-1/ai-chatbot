@@ -92,7 +92,7 @@ const PATTERNS = {
     contact: [/\bcontact\b/i, /\bphone\b/i, /\bwhatsapp\b/i, /\bcall\b/i, /\bemail\b/i],
     working_hours: [/\bhours\b/i, /\bopen\b/i, /\bclose\b/i, /\bworking hours\b/i],
     location: [/\blocation\b/i, /\baddress\b/i, /\bwhere are you\b/i, /\bdirections\b/i],
-    brand_info: [/\bwho are you\b/i, /\babout you\b/i, /\babout the store\b/i, /\bwhat do you provide\b/i],
+    brand_info: [/\bwho are you\b/i, /\babout you\b/i, /\babout the store\b/i, /\bwhat do you (provide|offer|sell|do)\b/i, /\bwhat( are|'?s)? your services?\b/i, /\bwhat services\b/i, /\byour services?\b/i],
     catalog_general: [/\bcatalog\b/i, /\bwhat do you have\b/i, /\bshow me\b/i],
     // Bare generic nouns — "marketplace"/"products" show up inside all kinds of
     // unrelated sentences ("not marketplace", "do you have products for SA in
@@ -169,7 +169,7 @@ const PATTERNS = {
       /\bshow (me )?(just )?one\b/i,
       /\bat\s*least\s*one\b/i,
     ],
-    item_price: [/\bprice\b/i, /\bcost\b/i, /\bhow much\b/i, /\bquote\b/i, /\bwholesale\b/i, /\b\d{1,7}\s*(pcs?|pieces?|units?|dozen|cartons?|boxes?|kg)\b/i],
+    item_price: [/\bprice\b/i, /\bcost\b/i, /\bhow much\b/i, /\bquote\b/i, /\bwholesale\b/i, /\b(expensive|cheap|affordable|pricey|pricy|budget)\b/i, /\bhow (expensive|cheap)\b/i, /\bprice range\b/i, /\bworth it\b/i, /\b\d{1,7}\s*(pcs?|pieces?|units?|dozen|cartons?|boxes?|kg)\b/i],
     // Stock-COUNT question ("how many in stock / how many do you have"). We never
     // publish exact counts, so this gets a clear canned answer, not a "which
     // product?" runaround. A price word present means it's a price question.
@@ -199,7 +199,7 @@ const PATTERNS = {
     //    (I want watches) then flows to product search instead of hours.
     working_hours: [/(ساعات\s*(العمل|عمل|الدوام|عملكم|الفتح|التشغيل|الرسميه|الرسمية)|مواعيد|الدوام|شغالين|تفتح|تقفل|تفتحون|تغلقون|امتى|امتا|الساعة كام|الساعه كام)/],
     location: [/(العنوان|الموقع|وين|فين|أين|اتجاهات|خريطة|مكان|فروعكم|فرعكم)/],
-    brand_info: [/(من انتم|مين انتم|نبذه عنكم|نبذة عنكم|من انتو|ماذا تقدمون|عن المتجر|عن المعرض|مين انت)/],
+    brand_info: [/(من انتم|مين انتم|نبذه عنكم|نبذة عنكم|من انتو|ماذا تقدمون|عن المتجر|عن المعرض|مين انت|خدمات|خدمتكم|وش تقدمون|ايش تقدمون|بتقدموا ايه|بتقدموا إيه|بتعملوا ايه|بتعملوا إيه|شغلكم ايه|شغلكم إيه|طبيعه عملكم|طبيعة عملكم|بتبيعوا ايه|بتبيعوا إيه|بتوفروا ايه|بتوفروا إيه|ايه اللي بتقدموه|إيه اللي بتقدموه)/],
     // "احنا كنا بنتكلم علي منتج ايه" / "راجع الشات وهتعرف احنا بنتكلم علي انهي
     // منتج" — recall the product under discussion from context instead of asking
     // the customer which product (which loops infuriatingly).
@@ -221,7 +221,10 @@ const PATTERNS = {
       // "عايز اطلب" / "عايز اعمل اوردر" / "ابغى اطلب" etc.
       /(عايز|عاوز|عايزه|عاوزه|أريد|اريد|بدي|ابي|أبي|ابغى|أبغى|ودي|محتاج)\s*(اطلب|أطلب|اعمل اوردر|اعمل طلب|اشتري)/,
     ],
-    ecommerce_search_hot: [/(الاكثر مبيعا|الأكثر مبيعا|ساخن|مشهور|مطلوب|اكتر مبيعا|البيست سيلر|الاكثر طلبا|الاكثر مبيعاً|الأكثر طلباً)/],
+    // "most/more selling/demanded" in any colloquial spelling: اكتر/اكثر/اعلى
+    // (also inside الاكثر/الاعلى) + بيع/مبيع/مبيعا/مبيعات/طلب/طلبا, so "اكتر بيع"
+    // (Gulf/Egyptian "more selling") lands the same as formal "الأكثر مبيعاً".
+    ecommerce_search_hot: [/(اكتر|اكثر|اعلي)\s*(بيع|مبيع|مبيعا|مبيعات|طلب|طلبا)/, /(بيست\s*سيلر|ساخن|مشهور|مطلوب|الاكثر رواجا)/],
     ecommerce_category_info: [/(عن القسم|القسم|قسم|صنف|تصنيف|تفاصيل القسم)/],
     ecommerce_product_advantages: [/(مميزات|مزايا|فوائد|ليه اشتري|مواصفات)/],
     // Context follow-up in Arabic: "قلي تفاصيل اكتر عنه"، "اعرف اكتر"، "تفاصيل عنه".
@@ -250,7 +253,7 @@ const PATTERNS = {
     // Adds "بكم" (variant of بكام) and a NUMBER+UNIT trigger: "بكم 100 حبة",
     // "سعر 50 قطعة". "حبة/قطعة/علبة/كرتونة/درزن/دستة/طن" are quantity units —
     // a quantity ask is inherently a price/quote question in a wholesale store.
-    item_price: [/(سعر|اسعار|أسعار|بكام|بكم|بقديش|كم السعر|الثمن|حسابه|حسابها|كم حقها|حقها كم|عرض سعر|الجمله|الجملة|\d{1,7}\s*(حبة|حبه|قطعة|قطعه|قطع|علبة|علبه|كرتون|كرتونه|كرتونة|درزن|دستة|دسته|طن|كيلو))/],
+    item_price: [/(سعر|اسعار|أسعار|بكام|بكم|بقديش|كم السعر|الثمن|حسابه|حسابها|كم حقها|حقها كم|عرض سعر|الجمله|الجملة|غالي|غاليه|غالية|رخيص|رخيصه|رخيصة|مناسب السعر|في المتناول|\d{1,7}\s*(حبة|حبه|قطعة|قطعه|قطع|علبة|علبه|كرتون|كرتونه|كرتونة|درزن|دستة|دسته|طن|كيلو))/],
     // Stock-COUNT question: "فيه منه كام حبة"، "كام قطعة متوفرة"، "العدد المتاح".
     // We hold no per-item stock count — only an availability flag — so naming the
     // product changes nothing. Answered upfront instead of asking "which product?".
@@ -558,6 +561,65 @@ function detectFeatureInquiry(text, lang, item) {
   return null;
 }
 
+// Boolean STATUS attributes people ask about with a yes/no question ("is it a
+// best seller?", "is it available?", "is it new/trending?"). Each entry maps the
+// question wording -> the item test that answers it. Kept separate from
+// detectFeatureInquiry (which dumps a "The X of Y is: value" line and SKIPS
+// hot_selling as an internal key) because these expect a terse yes/no, NOT a
+// field dump and NOT the hot-selling LIST.
+const STATUS_YESNO_GROUPS = [
+  {
+    key: 'hot_selling',
+    re: [/\bhot[\s_-]?sell/i, /\bbest[\s_-]?sell/i, /\bbest[\s_-]?seller/i, /\bbestsell/i, /\btop[\s_-]?sell/i, /\btop[\s_-]?seller/i],
+    reAr: [/الاكثر مبيعا|اكثر مبيعا|الاكثر طلبا|اكثر طلبا|بيست سيلر|بيست سلر|الافضل مبيعا/],
+    test: (item) => isHotSelling(item),
+  },
+  {
+    key: 'available',
+    re: [/\bavailable\b/i, /\bin stock\b/i, /\bavailability\b/i],
+    reAr: [/متوفر|متاح|موجود|بالمخزون|في المخزن/],
+    test: (item) => Number(item.available) === 1 || item.available === true,
+    // "is it available in <country>?" is a country question, not a stock yes/no.
+    skipWhenCountry: true,
+  },
+  { key: 'new', re: [/\bnew\b/i], reAr: [/جديد|الجديد/], test: (item) => itemBadge(item).includes('new') },
+  { key: 'trending', re: [/\btrending\b/i, /\btrend\b/i], reAr: [/رائج|الرائج|ترند|تريند/], test: (item) => itemBadge(item).includes('trending') },
+  { key: 'limited', re: [/\blimited\b/i], reAr: [/محدود/], test: (item) => itemBadge(item).includes('limited') },
+];
+
+// Interrogative shape: begins with a yes/no auxiliary, or explicitly says "or
+// not" / ends with "?" / Arabic "هل"/"ولا"/"مش" — so a plain LIST request
+// ("hot selling products", "show me new arrivals") with a stale item in context
+// is never mistaken for a yes/no about that item.
+function looksLikeYesNoQuestion(normalizedText, rawText) {
+  const t = String(normalizedText || '').trim();
+  const r = String(rawText || '');
+  return /^(is|are|does|do|did|was|were|has|have|it'?s|isn'?t|are'?nt)\b/i.test(t)
+    || /\bor not\b/i.test(t)
+    || /\?\s*$/.test(r)
+    || /(^|\s)هل(\s|$)/.test(r)
+    || /(^|\s)(ولا|مش|هو|هي|هوه|هيه)(\s|$)/.test(r);
+}
+
+// Yes/no about ONE resolved product's boolean status. Returns an intent the
+// handler renders as a terse "Yes ✅ …" / "No — …", or null.
+function detectStatusYesNo(normalizedText, rawText, lang, item) {
+  if (!item) return null;
+  if (!looksLikeYesNoQuestion(normalizedText, rawText)) return null;
+  const countryNamed = Boolean(detectAnyKnownCountry(rawText, lang));
+  for (const g of STATUS_YESNO_GROUPS) {
+    if (g.skipWhenCountry && countryNamed) continue;
+    // Latin keys are allowed in either chat language (users type "best seller"
+    // in Latin even mid-Arabic); Arabic keys only when the chat is Arabic.
+    const hit = g.re.some((re) => re.test(normalizedText))
+      || (lang === 'ar' && (g.reAr || []).some((re) => re.test(rawText)));
+    if (hit) {
+      return { intent: 'ecommerce_status_yesno', item, statusKey: g.key, statusValue: Boolean(g.test(item)) };
+    }
+  }
+  return null;
+}
+
 // Find a strong title match among OUT-OF-STOCK rows (which getBusinessItems hides)
 // so "do you have X?" for an existing-but-unavailable product can answer "we'll
 // source it" instead of a flat not-found. Requires a real overlap (a full-phrase
@@ -750,6 +812,27 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   // verb. Exclude it so it flows to the ecommerce_search_hot handler below.
   const looksLikeHotQuery = matchesAny(normalizedText, patterns.ecommerce_search_hot);
   const verbGate = !isProductCountryFilter && !looksLikeHotQuery;
+
+  // Item ORIGIN ("where is it from?", "what country is X from?", "made in?") ->
+  // the PRODUCT's own country, NOT the served-countries list. "what country"
+  // also matches the service_area pattern, so resolve this FIRST — but only when
+  // we have a specific item (named this turn or in context) and NO other country
+  // is named (a named country makes it a coverage/filter question instead).
+  const originItemRef = foundItem
+    || (Number.isFinite(context.last_item) ? items.find((i) => i.id === context.last_item) : null)
+    || (Array.isArray(context.recent_item_ids) && context.recent_item_ids.length
+      ? items.find((i) => i.id === context.recent_item_ids[context.recent_item_ids.length - 1]) : null);
+  const asksOrigin = lang === 'ar'
+    ? /(منين|من وين|من اي بلد|من أي بلد|من اي دوله|من أي دولة|بلد المنشا|بلد المنشأ|المنشا|المنشأ|صنع فين|مصنوع فين|جايه منين|بيجي منين|بتيجي منين)/.test(normalizedText)
+    : /\bwhere\b[^?]*\b(from|made|come|comes)\b/i.test(normalizedText)
+      || /\b(what|which)\s+countr(y|ies)\b[^?]*\bfrom\b/i.test(normalizedText)
+      || /\bcountry of origin\b/i.test(normalizedText)
+      || /\bmade in\b/i.test(normalizedText)
+      || /\bfrom which countr/i.test(normalizedText);
+  if (originItemRef && !namedCountry && asksOrigin) {
+    return { intent: 'ecommerce_item_origin', item: originItemRef };
+  }
+
   const serviceAreaAsked = matchesAny(normalizedText, patterns.service_area)
     || (verbGate && namedCountry && matchesAny(normalizedText, patterns.service_area_verb))
     || (verbGate && mentionsCountryTopic && matchesAny(normalizedText, patterns.service_area_verb));
@@ -792,6 +875,12 @@ function runDetectIntent({ text, lang, business, context = {} }) {
       : null);
   const itemInContext = foundItem || (contextItemId ? items.find(i => i.id === contextItemId) : null);
   if (itemInContext) {
+    // Terse yes/no about a boolean status ("is it a best seller?", "is it
+    // available?") — resolved on THIS product, answered "Yes/No", never the
+    // hot-selling list or a raw "hot_selling: false" field dump. Checked first so
+    // "is X hot selling?" about a named item doesn't fall through to the LIST.
+    const statusYesNo = detectStatusYesNo(normalizedText, text, lang, itemInContext);
+    if (statusYesNo) return statusYesNo;
     const featureInquiry = detectFeatureInquiry(normalizedText, lang, itemInContext);
     if (featureInquiry) return featureInquiry;
     // Context-dependent chips like the "Advantages" suggestion send only the word
@@ -1236,6 +1325,61 @@ function buildResponse(intentResult, lang, business) {
       break;
     }
 
+    case 'ecommerce_status_yesno': {
+      const item = intentResult.item;
+      const title = getDisplayTitle(item, locale);
+      const yes = intentResult.statusValue;
+      // Lead with the plain yes/no the customer asked for, then a short clause.
+      const clause = {
+        hot_selling: {
+          ar: [`نعم ✅ — **${title}** من الأكثر مبيعاً لدينا.`, `لا — **${title}** ليس من الأكثر مبيعاً حالياً.`],
+          en: [`Yes ✅ — **${title}** is one of our best-sellers.`, `No — **${title}** isn’t one of our best-sellers.`],
+        },
+        available: {
+          ar: [`نعم ✅ — **${title}** متوفر.`, `لا — **${title}** غير متوفر حالياً، لكن يمكننا توفيره من شبكتنا.`],
+          en: [`Yes ✅ — **${title}** is available.`, `No — **${title}** isn’t available right now, but we can source it from our network.`],
+        },
+        new: {
+          ar: [`نعم ✅ — **${title}** من المنتجات الجديدة.`, `لا — **${title}** ليس ضمن الجديد.`],
+          en: [`Yes ✅ — **${title}** is a new arrival.`, `No — **${title}** isn’t tagged as new.`],
+        },
+        trending: {
+          ar: [`نعم ✅ — **${title}** من المنتجات الرائجة.`, `لا — **${title}** ليس ضمن الرائج.`],
+          en: [`Yes ✅ — **${title}** is trending.`, `No — **${title}** isn’t trending.`],
+        },
+        limited: {
+          ar: [`نعم ✅ — **${title}** كمية محدودة.`, `لا — **${title}** ليس ضمن الكمية المحدودة.`],
+          en: [`Yes ✅ — **${title}** is a limited item.`, `No — **${title}** isn’t a limited item.`],
+        },
+      }[intentResult.statusKey];
+      const pair = (clause && clause[locale]) || clause?.en || ['Yes', 'No'];
+      payload.text = yes ? pair[0] : pair[1];
+      const thumb = getItemThumbnail(item);
+      if (thumb) payload.thumbnail = thumb;
+      payload.suggestions = locale === 'ar' ? [`اطلب ${title}`, 'تفاصيل اكتر'] : [`Order ${title}`, 'More details'];
+      payload.context_update.last_item = item.id;
+      break;
+    }
+
+    case 'ecommerce_item_origin': {
+      const item = intentResult.item;
+      const title = getDisplayTitle(item, locale);
+      const meta = item.metadata || {};
+      const country = locale === 'ar'
+        ? (meta.country_ar || meta.country_en || meta.country)
+        : (meta.country_en || meta.country || meta.country_ar);
+      payload.text = country
+        ? (locale === 'ar' ? `**${title}** من ${country}.` : `**${title}** is from ${country}.`)
+        : (locale === 'ar'
+          ? `بلد المنشأ لـ **${title}** غير محدد حالياً — تواصل معنا ونؤكده لك.`
+          : `The country of origin for **${title}** isn’t listed — contact us and we’ll confirm.`);
+      const thumb = getItemThumbnail(item);
+      if (thumb) payload.thumbnail = thumb;
+      payload.suggestions = locale === 'ar' ? [`اطلب ${title}`, 'تفاصيل اكتر'] : [`Order ${title}`, 'More details'];
+      payload.context_update.last_item = item.id;
+      break;
+    }
+
     case 'ecommerce_inquire_feature': {
       const item = intentResult.item;
       const title = getDisplayTitle(item, locale);
@@ -1519,11 +1663,25 @@ function buildResponse(intentResult, lang, business) {
         payload.text = locale === 'ar' ? 'وجدت مطابقات متعددة ولكن لم نتمكن من عرض التفاصيل.' : 'Multiple matches found but details could not be loaded.';
       }
       break;
-    case 'brand_info':
-      payload.text = locale === 'ar'
+    case 'brand_info': {
+      const about = locale === 'ar'
         ? (business.about_ar || `نحن ${business.name_ar || business.name}. تواصل معنا إذا أردت معرفة المزيد.`)
         : (business.about_en || `We are ${business.name}. Contact us if you want to know more.`);
+      // "What are your services?" deserves a concrete follow-through, not just the
+      // corporate blurb — point them at the real categories they can browse/order.
+      const cats = [...new Set(getBusinessItems(business.id).map((i) => getDisplayCategory(i, locale)).filter(Boolean))];
+      if (cats.length) {
+        const catLine = locale === 'ar'
+          ? `\n\nونوفّر منتجات في أقسام متعددة منها: ${cats.slice(0, 8).join('، ')}. اسألني عن أي قسم أو منتج وأساعدك فوراً.`
+          : `\n\nWe carry products across categories like: ${cats.slice(0, 8).join(', ')}. Ask me about any category or product and I'll help right away.`;
+        payload.text = about + catLine;
+        payload.suggestions = cats.slice(0, 4);
+      } else {
+        payload.text = about;
+      }
+      addMarketplaceButton();
       break;
+    }
     case 'contact':
       payload.text = [
         locale === 'ar' ? 'يمكنك التواصل معنا عبر:' : 'You can contact us through:',

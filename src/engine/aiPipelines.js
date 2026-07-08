@@ -135,7 +135,14 @@ function compareValues(a, b, order) {
 function makeListPayload({ items, lang, business, heading, intent }) {
   const locale = lang === 'ar' ? 'ar' : 'en';
   const suggestions = items.slice(0, 4).map((item) => displayTitle(item, locale));
-  const context_update = items[0] ? { last_item: items[0].id, last_category: displayCategory(items[0], locale) || null } : {};
+  // last_shown_ids = the list in DISPLAY order (up to 8, matching the slice
+  // below) so an ordinal follow-up ("order the first / second one") can index
+  // into exactly what the customer sees. Distinct from recent_item_ids, which is
+  // a reordered rolling recency list unfit for positional reference.
+  const shownIds = items.slice(0, 8).map((item) => item.id).filter((id) => Number.isFinite(id));
+  const context_update = items[0]
+    ? { last_item: items[0].id, last_category: displayCategory(items[0], locale) || null, last_shown_ids: shownIds }
+    : {};
 
   if (!items.length) {
     return {

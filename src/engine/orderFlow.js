@@ -120,8 +120,15 @@ const ADD_MORE_PATTERNS = {
 };
 
 const ORDER_INTENT_PATTERNS = {
-  en: [/\b(order|place order|make order|i want to order|i wanna order|can i order|delivery order|take my order|checkout)\b/i],
-  ar: [/(اطلب|أطلب|عايز اطلب|عاوز اطلب|عايز أطلب|عاوز أطلب|حابب اطلب|بدي اطلب|بدي طلب|عايز عمل طلب|عاوز عمل طلب|طلب دليفري|توصيل|ابغى اطلب|ابغي اطلب|اوردر|أوردر|الاوردر|الأوردر)/],
+  en: [/\b(order|place order|make order|i want to order|i wanna order|can i order|delivery order|take my order|checkout|add (it|this|that|them|another|more|to (the |my )?(order|cart)))\b/i],
+  // Add "add/increase" verbs ("زود كمان X", "ضيفه", "اضف") — a bare add phrase
+  // with a product is an order/add intent too, not just the ones spelling "اوردر".
+  // Leading (?<![؀-ۿ]) so "زود" doesn't match inside "مزود" (supplier) nor "ضيفه"
+  // inside "مضيفه" (hostess).
+  ar: [
+    /(اطلب|أطلب|عايز اطلب|عاوز اطلب|عايز أطلب|عاوز أطلب|حابب اطلب|بدي اطلب|بدي طلب|عايز عمل طلب|عاوز عمل طلب|طلب دليفري|توصيل|ابغى اطلب|ابغي اطلب|اوردر|أوردر|الاوردر|الأوردر)/,
+    /(?<![؀-ۿ])(زود|زودني|زودها|زوده|ضيفه|ضيفها|ضيفهم|اضف|أضف|اضيف|أضيف)(?![؀-ۿ])/,
+  ],
 };
 
 function isOrderingEnabled(business) {
@@ -664,7 +671,20 @@ function getExistingPhoneStatus(businessId, phone, sessionId) {
 
 function startOrderFlow({ business, session, context, lang, seedItems = [], seedAll = false }) {
   const nextContext = normalizeOrderContext(context);
-  const existingOrder = getLatestActiveOrderByPhone.get(business.id, session.guest_phone);
+  // Prefer the order already open IN THIS SESSION (context.order_flow.order_id).
+  // A fresh visitor has guest_phone = NULL, so the phone lookup below can't find
+  // their just-opened order (stored with guest_phone = '') and would wrongly
+  // create a NEW order on every "add another item" — dropping the items already
+  // in the cart. The context order_id is the reliable per-session handle.
+  let existingOrder = null;
+  const ctxOrderId = nextContext.order_flow && nextContext.order_flow.order_id;
+  if (ctxOrderId) {
+    const o = getOrderById.get(ctxOrderId);
+    if (o && ACTIVE_ORDER_STATUSES.includes(o.status)) existingOrder = o;
+  }
+  if (!existingOrder && session.guest_phone) {
+    existingOrder = getLatestActiveOrderByPhone.get(business.id, session.guest_phone);
+  }
 
   // If the customer named an item in the same breath as the order intent
   // ("عايز اطلب ماية"), auto-add it so the order opens with the item already
@@ -677,7 +697,14 @@ function startOrderFlow({ business, session, context, lang, seedItems = [], seed
   const hasSeed = seedsToAdd.length > 0;
 
   if (existingOrder) {
-    attachOrderToSession.run(session.id, session.guest_name || existingOrder.guest_name, session.guest_phone, existingOrder.id);
+    // guest_phone stays '' (NOT NULL) for a phone-less guest until checkout —
+    // never write NULL back or the UPDATE trips the NOT NULL constraint.
+    attachOrderToSession.run(
+      session.id,
+      session.guest_name || existingOrder.guest_name || '',
+      session.guest_phone || existingOrder.guest_phone || '',
+      existingOrder.id
+    );
     if (hasSeed) {
       addItemsToOrder(existingOrder.id, seedsToAdd);
     }
@@ -710,7 +737,12 @@ function startOrderFlow({ business, session, context, lang, seedItems = [], seed
   }
 
   const orderId = createOrderId();
-  createOrder.run(orderId, business.id, session.id, session.guest_name || '', session.guest_phone);
+  // guest_phone is NOT NULL in the schema, but a fresh visitor has no phone yet —
+  // it's collected later in the checkout wizard (submit_details). Insert '' as a
+  // placeholder (same as guest_name) so opening an order for a phone-less guest
+  // doesn't crash with a NOT NULL constraint. The phone lookup above uses the
+  // session's (NULL) phone, so this '' row never cross-matches another guest.
+  createOrder.run(orderId, business.id, session.id, session.guest_name || '', session.guest_phone || '');
   const order = getOrderById.get(orderId);
 
   // Fresh order with a named item ("عايز اطلب ماية") or a resolved back-reference
