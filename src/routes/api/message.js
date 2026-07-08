@@ -247,6 +247,30 @@ const ALWAYS_LOCAL_INTENTS = new Set([
   'ecommerce_per_country',
 ]);
 
+// Attach a "Contact us" button (+ a short invite line) to a can't-help reply so
+// the customer can always reach a human to sort out whatever we couldn't parse
+// (gibberish, not-found, generic bounce). Contact target: owner contact_link ->
+// wa.me from phone -> mailto from email. No-op when no channel is configured.
+function attachContactCta(payload, business, lang) {
+  const link = String(business.contact_link || '').trim();
+  const phone = String(business.phone || '').replace(/[^\d+]/g, '').replace(/^\+/, '');
+  const url = link || (phone ? `https://wa.me/${phone}` : (business.email ? `mailto:${business.email}` : ''));
+  if (!url) return payload;
+  const buttons = Array.isArray(payload.buttons) ? payload.buttons.slice() : [];
+  if (!buttons.some((b) => b && /contact|تواصل/i.test(String(b.label || '')))) {
+    buttons.push({ label: lang === 'ar' ? 'تواصل معنا' : 'Contact us', url, target: '_blank' });
+  }
+  let text = String(payload.text || '');
+  const mentionsContact = /تواصل|اتصل|واتساب|wa\.me|contact|reach us|reach out/i.test(text)
+    || (business.phone && text.includes(business.phone));
+  if (!mentionsContact) {
+    text += lang === 'ar'
+      ? '\n\nلو حابب، تواصل معنا من الزر بالأسفل ونظبطهالك.'
+      : "\n\nIf you'd like, contact us via the button below and we'll sort it out with you.";
+  }
+  return { ...payload, text, buttons };
+}
+
 // The classifier's [11] direct-answer sometimes bottoms out on a completely
 // open, content-free bounce ("I'm here to help! What do you need?", "Just
 // let me know what you're looking for", "just tell me which product(s)
@@ -764,6 +788,10 @@ router.post('/', tokenValidator, async (req, res) => {
             last_suggestions: normalizeSuggestions(payload.suggestions),
           };
         }
+        // Whatever the outcome (a generic/bounce reply OR the standing canned
+        // not-found), this turn couldn't resolve the customer's message — attach
+        // a Contact button + invite so they can reach a human to fix it.
+        payload = attachContactCta(payload, business, lang);
       }
 
       updateSession.run(
