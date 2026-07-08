@@ -137,6 +137,9 @@
         bottom: 24px;
         z-index: 2147483000;
         font-family: "Segoe UI", Tahoma, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
       }
       .cb-bubble {
         width: 68px;
@@ -528,9 +531,16 @@
         font-size: 18px;
       }
       @media (max-width: 640px) {
-        .cb-root { right: 12px; bottom: 12px; left: 12px; }
-        .cb-panel { width: 100%; height: min(80vh, 540px); }
+        .cb-root { right: 8px; bottom: 8px; left: 8px; }
+        .cb-bubble { width: 56px; height: 56px; }
+        .cb-panel { width: 100%; _height: min(90vh, 640px); bottom: 66px; border-radius: 18px; }
+        .cb-header { padding: 14px 14px 10px; }
+        .cb-messages { padding: 14px; }
         .cb-bubble-tip { display: none; }
+      }
+      @media (max-width: 380px) {
+        .cb-root { right: 4px; bottom: 4px; left: 4px; }
+        .cb-panel { height: min(92vh, 640px); bottom: 2px; border-radius: 14px; }
       }
       
       .cb-panel.order-dashboard-mode .cb-messages,
