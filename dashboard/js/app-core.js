@@ -573,6 +573,9 @@ function fillEditor() {
   // Franco recovery defaults ON: treat a missing/undefined flag as enabled.
   document.getElementById('business-franco-enabled').checked = c.franco_enabled === undefined || Number(c.franco_enabled) === 1;
   document.getElementById('business-sourcing-mode').checked = Number(c.sourcing_mode) === 1;
+  // Price/qty disclosure default ON: a missing/undefined flag is treated as enabled.
+  document.getElementById('business-price-enabled').checked = c.price_enabled === undefined || Number(c.price_enabled) === 1;
+  document.getElementById('business-qty-enabled').checked = c.qty_enabled === undefined || Number(c.qty_enabled) === 1;
   document.getElementById('cafe-name').value = c.name || '';
   document.getElementById('cafe-name-ar').value = c.name_ar || '';
   document.getElementById('cafe-phone').value = c.phone || '';
@@ -608,6 +611,8 @@ function collectCafePayload() {
     ai_enabled: document.getElementById('business-ai-enabled').checked ? 1 : 0,
     franco_enabled: document.getElementById('business-franco-enabled').checked ? 1 : 0,
     sourcing_mode: document.getElementById('business-sourcing-mode').checked ? 1 : 0,
+    price_enabled: document.getElementById('business-price-enabled').checked ? 1 : 0,
+    qty_enabled: document.getElementById('business-qty-enabled').checked ? 1 : 0,
     name_ar: document.getElementById('cafe-name-ar').value.trim(),
     phone: document.getElementById('cafe-phone').value.trim(),
     email: document.getElementById('cafe-email').value.trim(),

@@ -144,9 +144,11 @@ function makeListPayload({ items, lang, business, heading, intent }) {
     };
   }
 
+  // Prices OFF for this store -> never append a price to a list line either.
+  const priceEnabled = Number(business && business.price_enabled) !== 0;
   const sliced = items.slice(0, 8);
   const itemLine = (item) => {
-    const price = item.price !== null && item.price !== undefined ? ` - ${item.price} ${item.currency}` : '';
+    const price = priceEnabled && item.price !== null && item.price !== undefined ? ` - ${item.price} ${item.currency}` : '';
     return `- ${displayTitle(item, locale)}${price}`;
   };
 

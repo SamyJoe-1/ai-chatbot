@@ -69,6 +69,12 @@ function migrateLegacyCafeData() {
   // unavailable product is answered as "we'll source it" instead of "out of
   // stock". Off by default so a normal store keeps showing prices/stock.
   ensureColumn('businesses', 'sourcing_mode', 'sourcing_mode INTEGER NOT NULL DEFAULT 0');
+  // Price / quantity disclosure toggles. When a flag is 0, the bot NEVER quotes
+  // or fishes for a price/quantity — a price/qty question is answered with a
+  // hard "we don't disclose that here" (availability only). Default 1 so
+  // existing stores keep their current behavior until an owner turns it off.
+  ensureColumn('businesses', 'price_enabled', 'price_enabled INTEGER NOT NULL DEFAULT 1');
+  ensureColumn('businesses', 'qty_enabled', 'qty_enabled INTEGER NOT NULL DEFAULT 1');
   // E-commerce checkout collects contact + country + note instead of a delivery
   // address; these hold that captured info on the order for dashboard tracking.
   ensureColumn('orders', 'email', 'email TEXT');

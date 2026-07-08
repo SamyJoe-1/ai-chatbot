@@ -23,15 +23,15 @@ const createBusiness = db.prepare(`
     token, service_type, name, name_ar, primary_color, secondary_color, logo_url,
     about_en, about_ar, phone, email, address_en, address_ar,
     working_hours_en, working_hours_ar, catalog_link, contact_link, drive_folder_id, sheet_id, sheet_name,
-    welcome_en, welcome_ar, suggestions_en, suggestions_ar, faq_en, faq_ar, ai_enabled, franco_enabled, sourcing_mode, active
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    welcome_en, welcome_ar, suggestions_en, suggestions_ar, faq_en, faq_ar, ai_enabled, franco_enabled, sourcing_mode, price_enabled, qty_enabled, active
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 const updateBusiness = db.prepare(`
   UPDATE businesses SET
     service_type = ?, name = ?, name_ar = ?, primary_color = ?, secondary_color = ?, logo_url = ?,
     about_en = ?, about_ar = ?, phone = ?, email = ?, address_en = ?, address_ar = ?,
     working_hours_en = ?, working_hours_ar = ?, catalog_link = ?, contact_link = ?, drive_folder_id = ?, sheet_id = ?, sheet_name = ?,
-    welcome_en = ?, welcome_ar = ?, suggestions_en = ?, suggestions_ar = ?, faq_en = ?, faq_ar = ?, ai_enabled = ?, franco_enabled = ?, sourcing_mode = ?, active = ?
+    welcome_en = ?, welcome_ar = ?, suggestions_en = ?, suggestions_ar = ?, faq_en = ?, faq_ar = ?, ai_enabled = ?, franco_enabled = ?, sourcing_mode = ?, price_enabled = ?, qty_enabled = ?, active = ?
   WHERE id = ?
 `);
 const deleteBusiness = db.prepare('DELETE FROM businesses WHERE id = ?');
@@ -294,6 +294,8 @@ router.post('/', adminOnly, (req, res) => {
     body.ai_enabled === 1 || body.ai_enabled === true ? 1 : 0,
     body.franco_enabled === 0 || body.franco_enabled === false ? 0 : 1,
     body.sourcing_mode === 1 || body.sourcing_mode === true ? 1 : 0,
+    body.price_enabled === 0 || body.price_enabled === false ? 0 : 1,
+    body.qty_enabled === 0 || body.qty_enabled === false ? 0 : 1,
     body.active === 0 ? 0 : 1
   );
 
@@ -341,6 +343,8 @@ router.put('/:id', (req, res) => {
     body.ai_enabled !== undefined ? Number(body.ai_enabled) : business.ai_enabled,
     body.franco_enabled !== undefined ? Number(body.franco_enabled) : business.franco_enabled,
     body.sourcing_mode !== undefined ? Number(body.sourcing_mode) : business.sourcing_mode,
+    body.price_enabled !== undefined ? Number(body.price_enabled) : business.price_enabled,
+    body.qty_enabled !== undefined ? Number(body.qty_enabled) : business.qty_enabled,
     body.active !== undefined ? Number(body.active) : business.active,
     business.id
   );

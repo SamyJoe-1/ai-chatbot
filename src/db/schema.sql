@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS businesses (
   ai_enabled INTEGER NOT NULL DEFAULT 0,
   franco_enabled INTEGER NOT NULL DEFAULT 1,
   sourcing_mode INTEGER NOT NULL DEFAULT 0,
+  price_enabled INTEGER NOT NULL DEFAULT 1,
+  qty_enabled INTEGER NOT NULL DEFAULT 1,
   active INTEGER DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now'))
 );

@@ -24,9 +24,29 @@ function toNormalizedList(values, lang) {
     .filter(Boolean);
 }
 
+// Function/desire/filler words that carry NO product meaning. They must not
+// count against a match: "عايز نسكافيه" has to score like "نسكافيه", otherwise a
+// single filler word ("عايز"/"want") drops a clear product hit below threshold
+// and the customer is wrongly told the product isn't in the catalog.
+const MATCH_FILLER_TOKENS = new Set([
+  // Arabic desire / request / filler
+  'عايز', 'عاوز', 'عايزه', 'عاوزه', 'عايزين', 'عاوزين', 'محتاج', 'محتاجه',
+  'بدي', 'بدك', 'ابغى', 'ابغي', 'ابي', 'اريد', 'اريده', 'ودي', 'نفسي',
+  'عندكم', 'عندك', 'عندكو', 'فيه', 'فيها', 'ممكن', 'لو', 'سمحت', 'فضلك',
+  'من', 'في', 'على', 'هل', 'طب', 'يعني', 'بس', 'كمان', 'وش', 'شو', 'هات',
+  'هاتلي', 'جيبلي', 'اعرض', 'وريني', 'ابحث', 'دور', 'دورلي', 'محتاجين',
+  // English
+  'want', 'wanna', 'need', 'have', 'get', 'got', 'please', 'pls', 'the', 'a',
+  'an', 'some', 'any', 'do', 'you', 'me', 'i', 'give', 'show', 'looking', 'for',
+  'find', 'searching', 'search', 'got', 'gimme',
+]);
+
 function findScoredItems({ text, lang, items, context = {}, getItemVariants, getCategoryVariants, getExtraVariants }) {
   const normalizedText = normalize(text, lang);
   const messageTokens = tokenize(normalizedText);
+  // Content tokens = message minus pure filler, so the "all words matched"
+  // bonus below judges only the words that actually name a product.
+  const contentTokens = messageTokens.filter((token) => !MATCH_FILLER_TOKENS.has(token));
   const boostedCategory = context.last_category ? normalize(String(context.last_category), lang) : '';
   const scored = [];
 
@@ -50,9 +70,14 @@ function findScoredItems({ text, lang, items, context = {}, getItemVariants, get
       const itemTokens = tokenize(variant).filter((token) => token.length > 2);
 
       const matches = messageTokens.filter((token) => itemTokens.includes(token));
+      const contentMatches = contentTokens.filter((token) => itemTokens.includes(token));
       if (matches.length > 0) {
-        if (matches.length === messageTokens.length) {
-          score += 12; // All user words match item words
+        // "All the meaningful words match" — judged on CONTENT tokens so a
+        // leading "عايز"/"want" doesn't sink the bonus. Falls back to the raw
+        // all-tokens rule when there are no content tokens (query is all filler).
+        const allContentMatched = contentTokens.length > 0 && contentMatches.length === contentTokens.length;
+        if (allContentMatched || matches.length === messageTokens.length) {
+          score += 12; // All meaningful user words match item words
         } else {
           score += matches.length * 3; // Partial match
         }

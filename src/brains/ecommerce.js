@@ -124,6 +124,14 @@ const PATTERNS = {
       /\bwhat (else|more) (can you tell|about it)\b/i,
     ],
     ecommerce_check_availability: [/\bavailability\b/i, /\bavailable\b/i, /\bin stock\b/i],
+    // "what product were we talking about?" / "check the chat" — asks the bot to
+    // RECALL the conversation subject. Answered from the item already in context.
+    recall_topic: [
+      /\bwhat (product|item|one)\b[^?]*\bwe(re| are| just)?\b[^?]*\b(talk|discuss|say|about|mention)/i,
+      /\bwhich (product|item|one) (were|are|was) we\b/i,
+      /\b(check|read|scroll up|look at|re-?read) (the|our) (chat|conversation|messages|history)\b/i,
+      /\bthe (product|item|one) (we|i) (were|was|just)\b/i,
+    ],
     // "which countries do you serve / do you ship to X / where do you operate" —
     // a SERVICE-AREA question (not opening hours, not a product filter). Kept
     // ahead of working_hours in detectIntent so "do you work in Morocco" never
@@ -187,6 +195,14 @@ const PATTERNS = {
     working_hours: [/(ساعات\s*(العمل|عمل|الدوام|عملكم|الفتح|التشغيل|الرسميه|الرسمية)|مواعيد|الدوام|شغالين|تفتح|تقفل|تفتحون|تغلقون|امتى|امتا|الساعة كام|الساعه كام)/],
     location: [/(العنوان|الموقع|وين|فين|أين|اتجاهات|خريطة|مكان|فروعكم|فرعكم)/],
     brand_info: [/(من انتم|مين انتم|نبذه عنكم|نبذة عنكم|من انتو|ماذا تقدمون|عن المتجر|عن المعرض|مين انت)/],
+    // "احنا كنا بنتكلم علي منتج ايه" / "راجع الشات وهتعرف احنا بنتكلم علي انهي
+    // منتج" — recall the product under discussion from context instead of asking
+    // the customer which product (which loops infuriatingly).
+    recall_topic: [
+      /(كنا بنتكلم|احنا بنتكلم|بنتكلم عن اي|بنتكلم علي اي|بنتكلم علي منتج|بنتكلم عن منتج|بنحكي عن)/,
+      /(انهي منتج|اي منتج كنا|اي منتج احنا|المنتج اللي كنا|المنتج اللي فات|المنتج اللي قبل)/,
+      /(راجع الشات|راجع المحادثه|راجع المحادثة|شوف الشات|اقرا الشات|اقرأ الشات|ارجع للرسائل|فوق الرسائل|اللي فوق)/,
+    ],
     catalog_general: [/(كتالوج|ايش عندكم|شو عندكم|عندكم ايه|عندك ايه|الكتالوج|وش عندكم)/],
     catalog_general_generic: [/(المنتجات|السوق|الماركت|المتجر)/],
     list_categories: [/(كل الاقسام|كل الأقسام|جميع الاقسام|جميع الأقسام|الاقسام الموجودة|الأقسام الموجودة|ايه الاقسام|إيه الأقسام|ايش الاقسام|شو الاقسام|عندكم اقسام ايه|عندكم أقسام ايه|الفئات المتاحة|كل الفئات|جميع الفئات|انواع المنتجات|أنواع المنتجات|التصنيفات)/],
@@ -312,6 +328,17 @@ function isSourcing(business) {
   return Number(business && business.sourcing_mode) === 1;
 }
 
+// Price / quantity disclosure. Default ENABLED — a missing/undefined flag (older
+// business row) keeps the old behavior. When disabled, the bot must NEVER quote
+// or fish for a price/qty; a price/qty question gets a hard "we don't disclose
+// that here" (availability only), and product cards drop the price/quote line.
+function isPriceEnabled(business) {
+  return Number(business && business.price_enabled) !== 0;
+}
+function isQtyEnabled(business) {
+  return Number(business && business.qty_enabled) !== 0;
+}
+
 // Pulls a "<number> <unit>" quantity out of a message ("100 حبة", "50 pieces").
 // حبة/حبه = unit/piece (colloquial "بكم 100 حبة" = price for 100 units). Returns
 // { qty, unit } or null. Used so a price reply can acknowledge the exact
@@ -366,6 +393,32 @@ function sourcingPriceText(locale) {
   return locale === 'ar'
     ? 'يختلف سعر الجملة حسب الكمية المطلوبة. أرسل لنا الكمية التي تحتاجها وسنقدّم لك أفضل عرض سعر متاح.'
     : 'Wholesale pricing depends on the quantity you need. Send us the quantity you want and we’ll get you the best available quote.';
+}
+
+// Hard "prices aren't disclosed here" line — used when price display is turned
+// OFF. Focuses on availability, never invites a quote or asks which product.
+function priceDisabledText(locale, name) {
+  if (locale === 'ar') {
+    return name
+      ? `**${name}** متوفر ✅. لكن لا نعرض الأسعار عبر الشات — للاستفسار عن السعر تواصل معنا مباشرة.`
+      : 'لا نعرض الأسعار عبر الشات — تواصل معنا مباشرة وسنساعدك.';
+  }
+  return name
+    ? `**${name}** is available ✅. We don't display prices in chat — please contact us directly for pricing.`
+    : "We don't display prices in chat — please contact us directly and we'll help.";
+}
+
+// Hard "stock quantities aren't disclosed here" line — used when quantity
+// display is turned OFF. Availability only, no invitation to state a quantity.
+function qtyDisabledText(locale, name) {
+  if (locale === 'ar') {
+    return name
+      ? `**${name}** متوفر ✅. لكن لا نعرض الكميات المتاحة عبر الشات — للاستفسار تواصل معنا مباشرة.`
+      : 'لا نعرض الكميات المتاحة عبر الشات — تواصل معنا مباشرة وسنساعدك.';
+  }
+  return name
+    ? `**${name}** is available ✅. We don't share stock quantities in chat — please contact us directly.`
+    : "We don't share stock quantities in chat — please contact us directly.";
 }
 
 // Build a clean, compact feature block for a product, in the customer's language
@@ -627,6 +680,38 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     return { intent: 'order_howto' };
   }
 
+  // "What product were we talking about?" / "راجع الشات" — recall the subject
+  // from context. Resolve the item from last_item (or the most recent tracked
+  // item) and NAME it, instead of looping "which product did you mean?".
+  if (matchesAny(normalizedText, patterns.recall_topic)) {
+    const recallId = Number.isFinite(context.last_item)
+      ? context.last_item
+      : (Array.isArray(context.recent_item_ids) && context.recent_item_ids.length
+        ? context.recent_item_ids[context.recent_item_ids.length - 1]
+        : null);
+    const recalled = recallId ? items.find((i) => i.id === recallId) : null;
+    return { intent: 'recall_topic', item: recalled || null };
+  }
+
+  // "Do you speak Gulf/Egyptian dialect?" — a LANGUAGE meta question. Must be
+  // caught BEFORE any country/region logic: the dialect adjective ("خليجي")
+  // contains the region word خليج, so without this guard it substring-matches
+  // the Gulf region group and dumps that region's products — a language
+  // question answered with a product list. Gated on a dialect/speak signal so
+  // ordinary product messages never land here.
+  const LANG_NOUN_RE = /(لهجه|اللهجه|dialect)/;
+  const SPEAK_VERB_RE = /(تتكلم|بتتكلم|تحكي|بتحكي|اتكلم|تكلمني|كلمني|do you speak|speak)/;
+  const DIALECT_NAME_RE = /(خليجي|خليجيه|مصري|مصريه|شامي|شاميه|لبناني|سوري|اردني|بدوي|عربي فصيح|فصحى|انجليزي|انقلش|english|arabic|egyptian|gulf|levantine)/;
+  if (!foundItem && (LANG_NOUN_RE.test(normalizedText)
+    || (SPEAK_VERB_RE.test(normalizedText) && DIALECT_NAME_RE.test(normalizedText)))) {
+    const named = normalizedText.match(/(خليجي|خليجيه|gulf)/) ? 'gulf'
+      : normalizedText.match(/(مصري|مصريه|egyptian)/) ? 'egyptian'
+      : normalizedText.match(/(شامي|شاميه|لبناني|سوري|اردني|levantine)/) ? 'levantine'
+      : normalizedText.match(/(انجليزي|انقلش|english)/) ? 'english'
+      : null;
+    return { intent: 'language_meta', namedDialect: named };
+  }
+
   // "Do you do dropshipping / wholesale / reselling?" — a business-model
   // question. Checked before working_hours (its "بتعمله" used to hit hours) and
   // before service_area so a dropshipping ask isn't answered as a country query.
@@ -699,6 +784,18 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     // card for the item we're already discussing (resolved locally, in-language).
     if (matchesAny(normalizedText, patterns.more_details)) {
       return { intent: 'item_found', item: itemInContext, fromContext: true };
+    }
+    // Pronoun PRICE question ("سعرها كام", "طب سعره في حدود كام") with NO product
+    // named this turn -> the price is about the item already on the table. Bind
+    // it to that item instead of falling through to a product-less quote or a
+    // stray fuzzy match on an unrelated product. Gated on a context-pronoun so a
+    // fresh generic price ask ("بكام الشحن") is NOT hijacked onto a stale item.
+    const CONTEXT_PRONOUN_RE = /(عنها|عنه|عنهم|منها|منه|ليها|لها|بتاعها|بتاعه|حقها|حقه|(?:سعر|تفاصيل|مواصفات|مميزات|لون|حجم|وزن|مقاس|بلد|صور)(?:ها|هم|هن|ه)(?![؀-ۿ]))/;
+    if (!foundItem && matchesAny(normalizedText, patterns.item_price) && CONTEXT_PRONOUN_RE.test(normalizedText)) {
+      // Distinct intent name (rendered identically to item_price) so it is
+      // recognized as ALWAYS-LOCAL and the AI classifier can't override it with
+      // a wrong item ("سعره" -> generic "coffee" -> first coffee in catalog).
+      return { intent: 'recall_item_price', item: itemInContext, quantity: extractQuantity(text) };
     }
   }
 
@@ -929,6 +1026,8 @@ function tokensCount(text) {
 function buildResponse(intentResult, lang, business) {
   const locale = lang === 'ar' ? 'ar' : 'en';
   const sourcing = isSourcing(business);
+  const priceEnabled = isPriceEnabled(business);
+  const qtyEnabled = isQtyEnabled(business);
   const parseSuggestions = () => {
     try {
       const parsed = JSON.parse(business[`suggestions_${locale}`] || '[]');
@@ -1055,13 +1154,16 @@ function buildResponse(intentResult, lang, business) {
     case 'stock_quantity': {
       const item = intentResult.item;
       const name = item ? getDisplayTitle(item, locale) : '';
-      payload.text = locale === 'ar'
-        ? (name
-          ? `لا نعرض عدد القطع المتوفرة من **${name}** بشكل محدد، لكنه متوفر ويمكننا توفير الكمية التي تحتاجها — تواصل معنا وأخبرنا بالكمية المطلوبة.`
-          : `لا نعرض أعداد المخزون بشكل محدد، لكن يمكننا توفير الكمية التي تحتاجها — تواصل معنا وأخبرنا بالمنتج والكمية.`)
-        : (name
-          ? `We don't publish exact stock counts for **${name}**, but it's available and we can supply the quantity you need — contact us with your required quantity.`
-          : `We don't publish exact stock counts, but we can supply the quantity you need — contact us with the product and quantity.`);
+      payload.text = !qtyEnabled
+        // Quantities OFF: hard cut — availability only, no invitation to state a qty.
+        ? qtyDisabledText(locale, name)
+        : (locale === 'ar'
+          ? (name
+            ? `لا نعرض عدد القطع المتوفرة من **${name}** بشكل محدد، لكنه متوفر ويمكننا توفير الكمية التي تحتاجها — تواصل معنا وأخبرنا بالكمية المطلوبة.`
+            : `لا نعرض أعداد المخزون بشكل محدد، لكن يمكننا توفير الكمية التي تحتاجها — تواصل معنا وأخبرنا بالمنتج والكمية.`)
+          : (name
+            ? `We don't publish exact stock counts for **${name}**, but it's available and we can supply the quantity you need — contact us with your required quantity.`
+            : `We don't publish exact stock counts, but we can supply the quantity you need — contact us with the product and quantity.`));
       if (item) {
         const thumb = getItemThumbnail(item);
         if (thumb) payload.thumbnail = thumb;
@@ -1072,6 +1174,14 @@ function buildResponse(intentResult, lang, business) {
       break;
     }
     case 'ecommerce_price_quote': {
+      if (!priceEnabled) {
+        // Prices OFF: cut the road immediately — no "which product?" fishing,
+        // no quote invitation. This is the whole point of the toggle.
+        payload.text = priceDisabledText(locale, '');
+        addContactButton();
+        payload.suggestions = suggestions.slice(0, 3);
+        break;
+      }
       const q = intentResult.quantity;
       const qtyLine = q
         ? (locale === 'ar'
@@ -1230,7 +1340,11 @@ function buildResponse(intentResult, lang, business) {
         lines.push(`\n${description}`);
       }
 
-      if (sourcing) {
+      // Price line — skipped entirely when price display is OFF (card shows the
+      // ✅ availability above and nothing about price or a quote).
+      if (!priceEnabled) {
+        // no price/quote line at all
+      } else if (sourcing) {
         lines.push('\n' + sourcingPriceText(locale));
       } else if (item.price !== null && item.price !== undefined) {
         lines.push('\n' + (locale === 'ar' ? `**السعر:** ${item.price} ${item.currency}` : `**Price:** ${item.price} ${item.currency}`));
@@ -1273,8 +1387,23 @@ function buildResponse(intentResult, lang, business) {
       }
       break;
     }
+    case 'recall_item_price':
+      // Pronoun price ("سعره كام") bound to the item already in context. Same
+      // rendering as item_price — just a distinct intent so the router treats it
+      // as always-local and the AI can't swap in the wrong product.
+      return buildResponse({ ...intentResult, intent: 'item_price' }, lang, business);
     case 'item_price': {
       const item = intentResult.item;
+      if (!priceEnabled) {
+        // Prices OFF: this product IS available, but we don't quote here.
+        payload.text = priceDisabledText(locale, getDisplayTitle(item, locale));
+        addContactButton();
+        const thumbP = getItemThumbnail(item);
+        if (thumbP) payload.thumbnail = thumbP;
+        payload.suggestions = locale === 'ar' ? [`اطلب ${getDisplayTitle(item, locale)}`] : [`Order ${getDisplayTitle(item, locale)}`];
+        payload.context_update.last_item = item.id;
+        break;
+      }
       const q = intentResult.quantity;
       const qtyLine = q
         ? (locale === 'ar' ? `\nللكمية ${q.qty} ${q.unit}: ` : `\nFor ${q.qty} ${q.unit}: `)
@@ -1393,6 +1522,40 @@ function buildResponse(intentResult, lang, business) {
       payload.suggestions = suggestions.slice(0, 3);
       payload.context_update.last_faq = intentResult.question;
       break;
+    case 'recall_topic': {
+      const item = intentResult.item;
+      if (item) {
+        const title = getDisplayTitle(item, locale);
+        payload.text = locale === 'ar'
+          ? `كنا بنتكلم عن **${title}**. تحب تعرف تفاصيل أكتر عنه؟`
+          : `We were talking about **${title}**. Want more details on it?`;
+        const thumb = getItemThumbnail(item);
+        if (thumb) payload.thumbnail = thumb;
+        payload.suggestions = locale === 'ar' ? [`تفاصيل ${title}`, `اطلب ${title}`] : [`Details on ${title}`, `Order ${title}`];
+        payload.context_update.last_item = item.id;
+      } else {
+        payload.text = locale === 'ar'
+          ? 'ما اتكلمنا عن منتج محدد لسه. قولي على اللي يهمك وأنا هساعدك فوراً.'
+          : "We haven't landed on a specific product yet. Tell me what you're after and I'll help right away.";
+        payload.suggestions = suggestions.slice(0, 3);
+      }
+      break;
+    }
+    case 'language_meta': {
+      // Answer IN the dialect they asked about — the answer itself is the proof.
+      const byDialect = {
+        gulf: 'ايه أكيد! أقدر أكلمك خليجي عادي 😄 — وش تبي تعرف عن منتجاتنا؟',
+        egyptian: 'أكيد طبعاً! بتكلم مصري عادي 😄 — عايز تعرف ايه عن منتجاتنا؟',
+        levantine: 'أكيد! بحكي معك شامي عادي 😄 — شو بدك تعرف عن منتجاتنا؟',
+        english: "Of course! I can chat in English — what would you like to know about our products?",
+      };
+      payload.text = byDialect[intentResult.namedDialect]
+        || (locale === 'ar'
+          ? 'أكيد! بكلمك بأي لهجة تريحك — اسألني عن أي منتج وأنا معاك.'
+          : "Of course! I'll match whatever language and dialect you're comfortable with — ask me anything about our products.");
+      payload.suggestions = suggestions.slice(0, 3);
+      break;
+    }
     case 'business_model':
       payload.text = locale === 'ar'
         ? `نعم ✅ منتجاتنا مناسبة للدروبشيبنج والبيع بالجملة وإعادة البيع. أسعار الجملة تختلف حسب الكمية — تواصل معنا ونرتّبلك التفاصيل والتوريد.`

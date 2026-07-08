@@ -742,7 +742,20 @@ async function callAiClassifier({ text, business, session, history }) {
 // this DOES receive item rows — but only the small candidate set the caller
 // already narrowed down (e.g. one category), kept compact to stay cheap. The
 // model returns a short reply (the best pick + reason) shown verbatim.
-async function callAiAnswer({ prompt, business, lang, history, candidates, mode = 'recommend' }) {
+// The language directive handed to the AI answer service. For Arabic we append
+// the detected dialect so the reply comes back in the SAME dialect the customer
+// used (Egyptian ↔ Egyptian, Gulf ↔ Gulf) instead of generic MSA.
+function aiLanguageLabel(lang, dialect) {
+  if (lang !== 'ar') return 'English';
+  switch (dialect) {
+    case 'egyptian': return 'Egyptian Arabic dialect (اللهجة المصرية)';
+    case 'gulf': return 'Gulf Arabic dialect (اللهجة الخليجية)';
+    case 'levantine': return 'Levantine Arabic dialect (اللهجة الشامية)';
+    default: return 'Arabic';
+  }
+}
+
+async function callAiAnswer({ prompt, business, lang, dialect, history, candidates, mode = 'recommend' }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
   const startedAt = Date.now();
@@ -760,7 +773,7 @@ async function callAiAnswer({ prompt, business, lang, history, candidates, mode 
         history: history || '',
         service_type: business.service_type || 'cafe',
         brand_name: business.name || business.name_ar || '',
-        language: lang === 'ar' ? 'Arabic' : 'English',
+        language: aiLanguageLabel(lang, dialect),
         stream: false,
         ...(process.env.AI_MODEL ? { model: process.env.AI_MODEL } : {}),
         temperature: Number(process.env.AI_ANSWER_TEMPERATURE || 0.4),

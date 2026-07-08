@@ -4,7 +4,7 @@ const express = require('express');
 
 const db = require('../../db/db');
 const { tokenValidator } = require('../../middleware/tokenValidator');
-const { detectLanguage, normalizeArabicDigits } = require('../../engine/detector');
+const { detectLanguage, detectDialect, normalizeArabicDigits } = require('../../engine/detector');
 const { validatePhone } = require('../../engine/phoneValidator');
 const { recoverUserQuery } = require('../../engine/queryRecovery');
 const { isSessionExpired, resetSessionState } = require('../../engine/sessionLifecycle');
@@ -189,7 +189,8 @@ const ALWAYS_LOCAL_INTENTS = new Set([
   'greeting_hello', 'greeting_how_are_you', 'greeting_yasta', 'thanks',
   'help', 'guided_discovery', 'list_categories', 'contact', 'working_hours',
   'location', 'brand_info', 'order_howto', 'logistics_inquiry', 'logistics_average',
-  'service_area', 'business_model', 'stock_quantity', 'faq',
+  'service_area', 'business_model', 'stock_quantity', 'faq', 'language_meta', 'recall_topic',
+  'recall_item_price',
 ]);
 
 // The classifier's [11] direct-answer sometimes bottoms out on a completely
@@ -214,6 +215,23 @@ const AI_FILLER_RE = [
 function isFillerAiReply(text) {
   const t = String(text || '').trim();
   return !t || AI_FILLER_RE.some((re) => re.test(t));
+}
+
+// HARD language guarantee: an AI free-text reply MUST be in the same language
+// the customer asked in. The external answer model occasionally ignores the
+// language directive and replies in English to an Arabic question — this catches
+// that so the caller can discard it and fall back to a localized reply instead
+// of shipping the wrong language. Detection tolerates embedded brand/product
+// names (detectLanguage keys off the overall Arabic-char ratio, so an Arabic
+// reply peppered with English product names still reads as Arabic).
+function aiReplyLanguageMatches(reply, lang) {
+  const t = String(reply || '').trim();
+  if (!t) return false;
+  // Ignore replies that are essentially just a latin brand/number/emoji with no
+  // real prose either way — nothing to mismatch on.
+  const hasLetters = /[A-Za-z؀-ۿ]/.test(t);
+  if (!hasLetters) return true;
+  return detectLanguage(t) === lang;
 }
 
 function hasUsablePayload(payload) {
@@ -288,6 +306,15 @@ router.post('/', tokenValidator, async (req, res) => {
       lang = session.language === 'ar' ? 'ar' : 'en';
     }
 
+    // Arabic dialect (Egyptian / Gulf / Levantine) so AI free-text replies come
+    // back in the SAME dialect the customer speaks. Detect from THIS message;
+    // when it carries no confident dialect marker (short/neutral message), keep
+    // the last one established on the session so the voice stays consistent.
+    const sessionContextEarly = parseContext(session.context);
+    const dialect = (lang === 'ar'
+      ? (detectDialect(text) || sessionContextEarly.dialect || null)
+      : null);
+
     // Per-IP + per-device identifiers for AI rate limiting.
     const clientIp = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '')
       .split(',')[0]
@@ -352,10 +379,17 @@ router.post('/', tokenValidator, async (req, res) => {
     // Saudi Arabia") gets treated as self-contained and sent with NO history,
     // leaving the classifier to guess the category blind.
     const ANAPHOR_RE = /\b(it|its|it's|this|that|that's|thats|these|those|them|they|they're|theyre|same)\b/i;
-    const ANAPHOR_AR_RE = /(ده|دى|دي|دا|هذا|هذه|نفس|فيها|فيه)/;
+    const ANAPHOR_AR_RE = /(ده|دى|دي|دا|هذا|هذه|نفس|فيها|فيه|عنها|عنه|عنهم|منها|منه|ليها|لها|بتاعها|بتاعه|حقها|حقه)/;
+    // Pronominal SUFFIX on an inquiry noun — "سعرها"/"سعره" (ITS price),
+    // "تفاصيلها" (ITS details), "لونه" (ITS colour). These are pure context
+    // references (no product named), and missing them was sending the AI
+    // classifier the question with NO history — so it guessed a random product.
+    // Anchored on the inquiry noun + a trailing pronoun (ها/ه/هم/هن) at word end
+    // (Arabic-aware lookahead, since \b doesn't work on Arabic letters).
+    const ANAPHOR_AR_SUFFIX_RE = /(سعر|تفاصيل|مواصفات|مميزات|فوايد|فوائد|لون|الوان|حجم|وزن|مقاس|مقاسات|ابعاد|بلد|منشا|صور|كميه|كمية)(ها|هم|هن|ه)(?![؀-ۿ])/;
     function isContextReferencing(message) {
       const m = String(message || '');
-      return ANAPHOR_RE.test(m) || ANAPHOR_AR_RE.test(m);
+      return ANAPHOR_RE.test(m) || ANAPHOR_AR_RE.test(m) || ANAPHOR_AR_SUFFIX_RE.test(m);
     }
     // Cache the classifier verdict for identical, context-free questions only.
     const classifyCacheable = !isContextReferencing(text);
@@ -429,11 +463,18 @@ router.post('/', tokenValidator, async (req, res) => {
           prompt: text,
           business,
           lang,
+          dialect,
           history: isContextReferencing(text) ? aiHistory : '',
           candidates,
         });
         recordAiCall({ businessId: business.id, sessionId: session.id, message: text, mode: 'recommend', result: answer });
         if (!answer.ok || !answer.reply) return { handled: false, raw: aiResult.raw };
+        // Wrong-language reply (e.g. English answer to an Arabic ask) -> discard
+        // and let the deterministic rules answer in the right language.
+        if (!aiReplyLanguageMatches(answer.reply, lang)) {
+          console.warn('[ai-routing] recommend reply language mismatch, discarding', { lang });
+          return { handled: false, raw: aiResult.raw };
+        }
         // Track which catalog items the recommendation actually named so a
         // follow-up ("make an order with them") can seed the cart from this
         // turn. The reply is free text but contains the item titles, which
@@ -602,6 +643,7 @@ router.post('/', tokenValidator, async (req, res) => {
           prompt: text,
           business,
           lang,
+          dialect,
           history: isContextReferencing(text) ? aiHistory : '',
           candidates: buildGenericAnswerSource(business),
           mode: 'answer',
@@ -609,6 +651,12 @@ router.post('/', tokenValidator, async (req, res) => {
         recordAiCall({ businessId: business.id, sessionId: session.id, message: text, mode: 'answer', result: answer });
         const reply = answer.ok ? String(answer.reply || '').trim() : '';
         if (!reply) return null;
+        // Wrong-language reply -> reject (and don't cache it) so the canned
+        // localized fallback runs instead of shipping English to an Arabic ask.
+        if (!aiReplyLanguageMatches(reply, lang)) {
+          console.warn('[ai-routing] generic answer language mismatch, discarding', { lang });
+          return null;
+        }
         if (classifyCacheable) setCachedClassification(business.id, genericKey, reply);
         return reply;
       } catch (error) {
@@ -618,6 +666,9 @@ router.post('/', tokenValidator, async (req, res) => {
     }
 
     async function sendPayloadResult({ payload, intent, nextContext, phase = session.phase }) {
+      // Persist the customer's dialect so short/neutral follow-ups keep speaking
+      // the same one (detectDialect returns null on a message with no marker).
+      if (dialect) nextContext = { ...nextContext, dialect };
       const faq = applyFaqFallback({ payload, intent });
       payload = faq.payload;
       intent = faq.intent;

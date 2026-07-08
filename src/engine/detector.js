@@ -22,6 +22,69 @@ function detectLanguage(text) {
   return arabicCount / compact.length >= 0.2 ? 'ar' : 'en';
 }
 
+// Distinctive per-dialect marker WORDS. Biased toward words that strongly signal
+// ONE dialect and are rare in the others ("ازاي"/"دلوقتي" Egyptian; "وش"/"شلون"/
+// "وايد" Gulf; "شو"/"ليش"/"هلق" Levantine). Written in their NORMALIZED spelling
+// (ة→ه, أإآ→ا, ى→ي) since matching runs on normalized text. Standalone-word
+// matching uses Arabic-aware boundaries (below), NOT \b — Arabic letters aren't
+// \w, so \b silently never fires around them.
+const DIALECT_MARKER_WORDS = {
+  egyptian: [
+    'ازاي', 'ازايك', 'دلوقتي', 'دلوقت', 'عايز', 'عاوز', 'عايزه', 'عاوزه',
+    'علشان', 'عشان', 'كده', 'كدا', 'اوي', 'ايه', 'فين', 'بتاع', 'بتاعت',
+    'خالص', 'معلش', 'ده', 'دي', 'دا', 'اهو', 'حاجه', 'النهارده', 'امبارح',
+    'عاوزين', 'عايزين', 'ماشي',
+  ],
+  gulf: [
+    'وش', 'شلون', 'شنو', 'وين', 'ابغى', 'ابي', 'يبغى', 'وايد', 'زين', 'زينه',
+    'مب', 'چذي', 'جذي', 'عندج', 'عليج', 'فيج', 'هني', 'هسه', 'يبا', 'تبا',
+    'اشوف', 'شفيك', 'چم', 'ترى', 'تري', 'خوش', 'ابغي', 'شخبارك', 'مشكوره',
+  ],
+  levantine: [
+    'شو', 'ليش', 'هلق', 'هيك', 'منيح', 'كتير', 'بدي', 'بدك', 'بدو', 'بدها',
+    'هون', 'لهون', 'هلأ', 'مشان', 'كرمال', 'شقد', 'قديش', 'عنجد', 'مبلا',
+    'لسه', 'عنجاد', 'كيفك', 'شلونك',
+  ],
+};
+
+// Compile each marker as a standalone Arabic word: not preceded or followed by
+// another Arabic letter, so "عم" doesn't fire inside "عمليه" and "زي" not inside
+// "زيت". Markers are normalized so their spelling lines up with normalized text.
+function compileDialectMarkers(words) {
+  return words.map((word) => {
+    const key = normalize(word, 'ar').trim();
+    return new RegExp(`(?<![؀-ۿ])${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![؀-ۿ])`);
+  });
+}
+const DIALECT_MARKERS = {
+  egyptian: compileDialectMarkers(DIALECT_MARKER_WORDS.egyptian),
+  gulf: compileDialectMarkers(DIALECT_MARKER_WORDS.gulf),
+  levantine: compileDialectMarkers(DIALECT_MARKER_WORDS.levantine),
+};
+
+// Returns 'egyptian' | 'gulf' | 'levantine' when one dialect clearly dominates
+// the message, else null (generic/MSA Arabic — no confident dialect). Only fires
+// for Arabic text; caller should persist the last confident result on the
+// session so short follow-ups keep the established dialect.
+function detectDialect(text) {
+  if (!text || detectLanguage(text) !== 'ar') return null;
+  const value = normalize(String(text), 'ar');
+  const scores = { egyptian: 0, gulf: 0, levantine: 0 };
+  for (const [dialect, markers] of Object.entries(DIALECT_MARKERS)) {
+    for (const re of markers) {
+      if (re.test(value)) scores[dialect] += 1;
+    }
+  }
+  let best = null;
+  let bestScore = 0;
+  let tie = false;
+  for (const [dialect, score] of Object.entries(scores)) {
+    if (score > bestScore) { best = dialect; bestScore = score; tie = false; }
+    else if (score === bestScore && score > 0) { tie = true; }
+  }
+  return bestScore > 0 && !tie ? best : null;
+}
+
 function normalizeArabicDigits(text) {
   return String(text || '').replace(/[٠-٩]/g, (digit) => ARABIC_DIGITS[digit] || digit);
 }
@@ -66,6 +129,7 @@ function tokenize(text) {
 
 module.exports = {
   detectLanguage,
+  detectDialect,
   normalize,
   normalizeArabicDigits,
   tokenize,
