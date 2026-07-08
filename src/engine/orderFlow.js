@@ -91,8 +91,22 @@ const hasPreviousPhoneActivity = db.prepare(`
 `);
 
 const YES_PATTERNS = {
-  en: [/^(yes|yeah|yep|sure|ok|okay|confirm|confirmed|confirm order|confirm address|go ahead|sounds good|do it)$/i, /^confirm (order|address)$/i],
-  ar: [/^(نعم|ايوه|أيوه|اه|آه|أكيد|اكيد|تمام|موافق|ماشي|اوكي|أوكي|تم|تأكيد الطلب|تأكيد العنوان)$/i, /^تأكيد (الطلب|العنوان)$/i],
+  en: [
+    /^(yes|yeah|yep|sure|ok|okay|confirm|confirmed|confirm order|confirm address|go ahead|sounds good|do it)$/i,
+    /^confirm (order|address)$/i,
+    // Affirmative chips WE offer in the order-confirm prompt ("Yes, start the
+    // order") plus their bare-verb form, so tapping our own button confirms.
+    /^yes[,!.\s]+(start|place|open|make|do)\b/i,
+    /^(start|place|open) the order$/i,
+  ],
+  ar: [
+    /^(نعم|ايوه|أيوه|اه|آه|أكيد|اكيد|تمام|موافق|ماشي|اوكي|أوكي|تم|تأكيد الطلب|تأكيد العنوان)$/i,
+    /^تأكيد (الطلب|العنوان)$/i,
+    // Same for the Arabic chip "نعم، ابدأ الطلب" (yes, start the order) and the
+    // bare "ابدأ/ابدا الطلب/الاوردر" a user types to confirm.
+    /^نعم[،,]?\s*(ابدأ|ابدا|إبدأ|ابدأي|ابدئي)\s*(الطلب|الاوردر|الأوردر)$/,
+    /^(ابدأ|ابدا|إبدأ|ابدأي|ابدئي)\s*(الطلب|الاوردر|الأوردر)$/,
+  ],
 };
 
 const CANCEL_PATTERNS = {

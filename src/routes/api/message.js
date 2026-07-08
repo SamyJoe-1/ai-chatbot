@@ -191,6 +191,10 @@ const ALWAYS_LOCAL_INTENTS = new Set([
   'location', 'brand_info', 'order_howto', 'logistics_inquiry', 'logistics_average',
   'service_area', 'business_model', 'stock_quantity', 'faq', 'language_meta', 'recall_topic',
   'recall_item_price',
+  // "best selling" / "hot" products: answer from the real hot_selling flag
+  // locally (honest — shows what's actually flagged, or says none is) instead of
+  // letting the AI recommend fabricate a "best seller" it has no sales data for.
+  'ecommerce_search_hot',
 ]);
 
 // The classifier's [11] direct-answer sometimes bottoms out on a completely
@@ -531,6 +535,15 @@ router.post('/', tokenValidator, async (req, res) => {
       // "does this item have butter?"). Show it verbatim — no second AI call.
       if (pipeline.code === 11) {
         const direct = (pipeline.direct || '').trim();
+        // Wrong-language reply (e.g. an Arabic answer to an English question) ->
+        // discard entirely, don't even keep it as the bounce fallback. Let the
+        // generic-answer call downstream reply in the RIGHT language (it has the
+        // same guard), else the canned localized fallback runs. Mirrors the same
+        // guard already on the [12] recommend and generic-answer paths.
+        if (!aiReplyLanguageMatches(direct, lang)) {
+          console.warn('[ai-routing] [11] direct reply language mismatch, discarding', { lang });
+          return { handled: false, raw: aiResult.raw };
+        }
         // Content-free bounce -> let local rules answer instead (e.g. the
         // brain's 'help' intent, which offers real, actionable next steps)
         // rather than parroting the same dead-end question back. Keep the
@@ -955,6 +968,26 @@ router.post('/', tokenValidator, async (req, res) => {
             last_suggestions: normalizeSuggestions(howtoPayload.suggestions),
           };
           return await sendPayloadResult({ payload: howtoPayload, intent: 'order_howto', nextContext });
+        }
+      }
+    }
+
+    // Explicit order request ("اعملي بيها اوردر", "i want to order it") with a
+    // product ALREADY established in the conversation must open the order
+    // deterministically, BEFORE the AI answer block below can grab it and reply
+    // "which product?" — the product is obvious from the immediately preceding
+    // turn (last_item / last recommendation). Only fires when we can actually
+    // seed a product from THIS message or recent context; a bare "how do I
+    // order?" with nothing in context still flows to the howto ask above, and a
+    // bare order word with no context still falls through to the normal block
+    // (which opens an empty order / asks). This also saves an AI call.
+    if (session.phase === 'active' && isOrderingEnabled(business) && !isInternalOrderCommand(text)) {
+      const earlyOrderIntent = looksLikeOrderIntent(text, lang)
+        || (lang === 'ar' && looksLikeOrderIntent(require('../../engine/translation').translateArabicToEnglish(text), 'en'));
+      if (earlyOrderIntent) {
+        const earlySeed = resolveOrderSeedItems({ text, lang, businessId: business.id, context });
+        if (earlySeed.items.length) {
+          return startOrderResponse(earlySeed.items, earlySeed.seedAll);
         }
       }
     }

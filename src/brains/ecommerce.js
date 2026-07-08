@@ -111,7 +111,7 @@ const PATTERNS = {
       /\bcategories (do you have|are there|are available)\b/i,
     ],
     order_howto: [/\bhow (do|can|could|would|to)\b[\w\s]{0,20}\border\b/i, /\bhow does ordering work\b/i, /\bhow to (place|make) an order\b/i],
-    ecommerce_search_hot: [/\bhot\b/i, /\bbest selling\b/i, /\bbest-selling\b/i, /\bbestseller\b/i, /\bpopular\b/i, /\btop selling\b/i],
+    ecommerce_search_hot: [/\bhot\b/i, /\bbest[\s-]?sell(ing|er)s?\b/i, /\bbestsellers?\b/i, /\bpopular\b/i, /\btop[\s-]?sell(ing|er)s?\b/i, /\btop[\s-]?rated\b/i],
     ecommerce_category_info: [/\bcategory\b/i, /\bmore about\b/i, /\bdetails on\b/i],
     ecommerce_product_advantages: [/\badvantages\b/i, /\bbenefits\b/i, /\bwhy choose\b/i, /\bfeatures\b/i],
     // Context follow-up: "tell me more about it", "more details", "more info".
@@ -137,17 +137,22 @@ const PATTERNS = {
     // ahead of working_hours in detectIntent so "do you work in Morocco" never
     // gets answered with business hours.
     service_area: [
-      /\b(which|what) countr(y|ies)\b/i,
+      // "what/which ... countries" — tolerate filler words in between so
+      // "what fuckin countries", "what about countries", "which exact countries"
+      // all still read as a service-area question, not fall through to unknown.
+      /\b(which|what)\b(?:\s+\w+){0,4}\s+countr(y|ies)\b/i,
+      /\bcountr(y|ies)\b(?:\s+\w+){0,4}\s+(do|are|you|ur|u|working|work|operate|ship|serve|cover|deliver|source)\b/i,
       /\bcountries (do|are) you\b/i,
       /\bdo you (work|operate|sell|ship|deliver|serve|source|export|cover|reach|have anything)\s+(in|to|from|out)\b/i,
       /\bdo you (ship|deliver|export)\s+(to|internationally|abroad|worldwide)\b/i,
       /\bwhere (do|are) you (operate|operating|based|located|ship|shipping|work|working|source|sourcing)\b/i,
       /\b(work|operate|available|present|sell|ship)\s+in\s+(which|what)\s+countr/i,
     ],
-    // Verb of presence/operation — combined with a recognized country name to
-    // catch "do you work in <specific country>" even when the generic patterns
-    // above don't fire.
-    service_area_verb: [/\b(work|operate|sell|ship|deliver|serve|source|export|present|available|based|located|reach)\b/i],
+    // Verb of presence/operation — combined with a recognized country name (or a
+    // bare "countries" topic word, see detectIntent) to catch "do you work in
+    // <country>" / "what countries ur working at". Stems (no trailing \b) so
+    // inflections match: work/working/works, operate/operating, ship/ships/shipping.
+    service_area_verb: [/\b(work|operat|sell|ship|deliver|serv|sourc|export|present|availab|based|locat|reach|cover)/i],
     business_model: [/\b(drop\s?shipping|drop\s?ship|wholesale|reseller|reselling|bulk (order|supply|supplier)|affiliate|distributor|distribution|do you supply)\b/i],
     ecommerce_country_info: [/\bmarketplace in\b/i, /\babout country\b/i, /\bcountry\b/i],
     ecommerce_country_products: [/\bproducts in\b/i, /\bfrom country\b/i, /\bmarketplace in\b/i, /\bin the country\b/i],
@@ -731,8 +736,23 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   // honestly ("we don't cover X"). Otherwise the AI hallucinated a "yes", and the
   // product path showed a wrong-country item as if it were from there.
   const namedUnservedCountry = Boolean(namedCountry) && !namedServed;
+  // A bare "countries" / "دول" topic word plus an operation verb ("countries ur
+  // working at", "دول بتشتغلوا فيها") is a service-area question even when no
+  // specific country is named and the fixed patterns above don't fire. Excluded
+  // when the message is a product-country FILTER ("products available in my
+  // country") so that path still shows items rather than the served list.
+  const mentionsCountryTopic = /\bcountr(y|ies)\b/i.test(normalizedText)
+    || /(^|\s)(دول|دوله|دولة|بلد|بلاد|بلدان)(\s|$|كم|ان)/.test(normalizedText);
+  const isProductCountryFilter = /\b(products?|items?)\b/i.test(normalizedText)
+    || /(منتج|منتجات|سلعه|سلعة|سلع|صنف|اصناف|أصناف)/.test(normalizedText);
+  // "best seller / best selling / top seller in <country>" is a HOT-PRODUCT query,
+  // not a coverage question — but "seller"/"selling" hit the "sell" service-area
+  // verb. Exclude it so it flows to the ecommerce_search_hot handler below.
+  const looksLikeHotQuery = matchesAny(normalizedText, patterns.ecommerce_search_hot);
+  const verbGate = !isProductCountryFilter && !looksLikeHotQuery;
   const serviceAreaAsked = matchesAny(normalizedText, patterns.service_area)
-    || (namedCountry && matchesAny(normalizedText, patterns.service_area_verb));
+    || (verbGate && namedCountry && matchesAny(normalizedText, patterns.service_area_verb))
+    || (verbGate && mentionsCountryTopic && matchesAny(normalizedText, patterns.service_area_verb));
   if (serviceAreaAsked || namedUnservedCountry) {
     const servedList = getServedCountries(items, lang);
     return {
@@ -822,7 +842,11 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   // two constraints combine instead of the category being silently dropped.
   // Detection can resolve to SEVERAL countries when a region is named ("دول
   // الخليج" -> every Gulf country stocked). Filtering matches ANY of them.
-  const detectedCountries = detectCountries(normalizedText, lang, items);
+  // Pass RAW text (not normalizedText): 2-letter country codes ("SA", "UA") only
+  // match when written UPPERCASE, and normalizedText is lowercased — so "in SA"
+  // would silently fail to resolve Saudi Arabia. detectCountries normalizes
+  // internally for its own substring checks.
+  const detectedCountries = detectCountries(text, lang, items);
   // last_country may be stored as a single string (older turns) or an array
   // (a region) — normalize either into a list for the carry-over case.
   const priorCountries = Array.isArray(context.last_country)
