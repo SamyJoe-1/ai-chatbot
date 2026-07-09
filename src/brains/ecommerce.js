@@ -630,6 +630,12 @@ const STATUS_YESNO_GROUPS = [
     re: [/\bhot[\s_-]?sell/i, /\bbest[\s_-]?sell/i, /\bbest[\s_-]?seller/i, /\bbestsell/i, /\btop[\s_-]?sell/i, /\btop[\s_-]?seller/i],
     reAr: [/الاكثر مبيعا|اكثر مبيعا|الاكثر طلبا|اكثر طلبا|بيست سيلر|بيست سلر|الافضل مبيعا/],
     test: (item) => isHotSelling(item),
+    // "what's top selling in <country>/<category>?" is a SEARCH request, not a
+    // yes/no fact-check about whatever item happens to be in context — without
+    // this, "whats top selling beauty in saudi" answered "no, <some random
+    // contextual item> isn't a best-seller" instead of running the search.
+    skipWhenCountry: true,
+    skipWhenCategory: true,
   },
   {
     key: 'available',
@@ -660,12 +666,13 @@ function looksLikeYesNoQuestion(normalizedText, rawText) {
 
 // Yes/no about ONE resolved product's boolean status. Returns an intent the
 // handler renders as a terse "Yes ✅ …" / "No — …", or null.
-function detectStatusYesNo(normalizedText, rawText, lang, item) {
+function detectStatusYesNo(normalizedText, rawText, lang, item, categoryNamed) {
   if (!item) return null;
   if (!looksLikeYesNoQuestion(normalizedText, rawText)) return null;
   const countryNamed = Boolean(detectAnyKnownCountry(rawText, lang));
   for (const g of STATUS_YESNO_GROUPS) {
     if (g.skipWhenCountry && countryNamed) continue;
+    if (g.skipWhenCategory && categoryNamed) continue;
     // Latin keys are allowed in either chat language (users type "best seller"
     // in Latin even mid-Arabic); Arabic keys only when the chat is Arabic.
     const hit = g.re.some((re) => re.test(normalizedText))
@@ -990,7 +997,7 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     // available?") — resolved on THIS product, answered "Yes/No", never the
     // hot-selling list or a raw "hot_selling: false" field dump. Checked first so
     // "is X hot selling?" about a named item doesn't fall through to the LIST.
-    const statusYesNo = detectStatusYesNo(normalizedText, text, lang, itemInContext);
+    const statusYesNo = detectStatusYesNo(normalizedText, text, lang, itemInContext, categoryMatches.length > 0);
     if (statusYesNo) return statusYesNo;
     const featureInquiry = detectFeatureInquiry(normalizedText, lang, itemInContext);
     if (featureInquiry) return featureInquiry;
@@ -1569,7 +1576,15 @@ function buildResponse(intentResult, lang, business) {
         applyItemList(intentResult.items.slice(0, 6), headline);
         payload.suggestions = intentResult.items.slice(0, 3).map(item => getDisplayTitle(item, locale));
       } else {
-        payload.text = locale === 'ar' ? 'لم نحدد منتجات كأكثر مبيعاً حالياً، لكن يمكنك تصفّح السوق لأحدث ما لدينا.' : 'No best-sellers are flagged right now, but you can browse the Marketplace for our latest products.';
+        // Name exactly which filters came up empty (category and/or country)
+        // instead of a generic "no best-sellers" line — an empty result after
+        // narrowing by category+country is a real, honest answer, not a
+        // catch-all failure, and should read that way.
+        payload.text = intentResult.category || intentResult.country
+          ? (locale === 'ar'
+            ? `لا يوجد حالياً منتجات أكثر مبيعاً ${intentResult.category ? `في قسم ${intentResult.category}` : ''}${intentResult.country ? ` من ${intentResult.country}` : ''}، لكن يمكنك تصفّح السوق لأحدث ما لدينا.`
+            : `No hot-selling products right now${intentResult.category ? ` in ${intentResult.category}` : ''}${intentResult.country ? ` from ${intentResult.country}` : ''}, but you can browse the Marketplace for our latest products.`)
+          : (locale === 'ar' ? 'لم نحدد منتجات كأكثر مبيعاً حالياً، لكن يمكنك تصفّح السوق لأحدث ما لدينا.' : 'No best-sellers are flagged right now, but you can browse the Marketplace for our latest products.');
         addMarketplaceButton();
       }
       if (intentResult.country) payload.context_update.last_country = intentResult.countries || intentResult.country;

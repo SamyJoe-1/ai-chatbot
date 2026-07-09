@@ -135,6 +135,26 @@ function findScoredItems({ text, lang, items, context = {}, getItemVariants, get
   return scored.filter((entry) => entry.score >= 4);
 }
 
+// Category match, tolerant of a same-first-letter typo/spelling variant
+// ("Parfums" vs the catalog's "Perfumes") AND of a multi-word category name
+// ("Beauty & Personal Care") where the customer only ever says ONE of its
+// words ("beauty"). A ratio-of-the-category's-own-word-count threshold (the
+// previous approach, and the generic overlapScore used for scoring specific
+// PRODUCT titles) can never be satisfied here: "beauty" is 1 of 4 category
+// tokens (including the connector "&"), so a 50%-overlap bar is mathematically
+// out of reach from a short query. A category list is small and closed (a
+// business has a handful of them), so a single strong content-word hit (>=4
+// chars, so connectors/short filler can't false-trigger) is enough signal —
+// unlike open-ended product-title matching, which needs the stricter ratio to
+// avoid over-broad hits across hundreds of items.
+function categoryOverlapScore(messageTokens, targetTokens) {
+  const contentTokens = targetTokens.filter((token) => token.length >= 4);
+  if (!contentTokens.length) return 0;
+  const hasHit = contentTokens.some((token) =>
+    messageTokens.includes(token) || messageTokens.some((mt) => fuzzyTokenScore(mt, token) > 0));
+  return hasHit ? 1 : 0;
+}
+
 function findMatchingCategories({ text, lang, items, getCategoryVariants, getCategoryDisplay }) {
   const normalizedText = normalize(text, lang);
   const tokens = tokenize(normalizedText).map(stripArabicArticle);
@@ -147,7 +167,7 @@ function findMatchingCategories({ text, lang, items, getCategoryVariants, getCat
       const variantTokens = tokenize(variant).map(stripArabicArticle);
       const strippedVariant = variantTokens.join(' ');
 
-      if (normalizedText.includes(variant) || normalizedText.includes(strippedVariant) || overlapScore(tokens, variantTokens) >= 0.5) {
+      if (normalizedText.includes(variant) || normalizedText.includes(strippedVariant) || categoryOverlapScore(tokens, variantTokens) >= 0.5) {
         const existing = categoryMap.get(variant) || {
           key: variant,
           display: getCategoryDisplay(item, lang),
