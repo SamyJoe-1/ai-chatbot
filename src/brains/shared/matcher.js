@@ -8,6 +8,16 @@ function overlapScore(messageTokens, targetTokens) {
   return matches.length / targetTokens.length;
 }
 
+// Strip the Arabic definite article "ال" from the front of a token so a
+// customer's "عطور" (no article) still matches a catalog category stored as
+// "العطور" (with it) — and vice versa. Catalog category names commonly carry
+// the article while spoken/typed queries often drop it. Only strip when
+// enough stem remains to stay meaningful (mirrors findItemsByText's same
+// guard in aiPipelines.js).
+function stripArabicArticle(token) {
+  return (token.length > 4 && token.startsWith('ال')) ? token.slice(2) : token;
+}
+
 function uniqueById(items) {
   const seen = new Set();
   return items.filter((item) => {
@@ -127,15 +137,17 @@ function findScoredItems({ text, lang, items, context = {}, getItemVariants, get
 
 function findMatchingCategories({ text, lang, items, getCategoryVariants, getCategoryDisplay }) {
   const normalizedText = normalize(text, lang);
-  const tokens = tokenize(normalizedText);
+  const tokens = tokenize(normalizedText).map(stripArabicArticle);
   const categoryMap = new Map();
 
   for (const item of items) {
     const variants = toNormalizedList(getCategoryVariants(item), lang);
     for (const variant of variants) {
       if (!variant) continue;
+      const variantTokens = tokenize(variant).map(stripArabicArticle);
+      const strippedVariant = variantTokens.join(' ');
 
-      if (normalizedText.includes(variant) || overlapScore(tokens, tokenize(variant)) >= 0.5) {
+      if (normalizedText.includes(variant) || normalizedText.includes(strippedVariant) || overlapScore(tokens, variantTokens) >= 0.5) {
         const existing = categoryMap.get(variant) || {
           key: variant,
           display: getCategoryDisplay(item, lang),
