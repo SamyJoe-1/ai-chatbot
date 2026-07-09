@@ -127,10 +127,29 @@ function tokenize(text) {
     .filter(Boolean);
 }
 
+// "Thanks/شكرا" is a courtesy word that can appear ANYWHERE in a message,
+// including tacked onto the end of a real question ("...ايه وشكرا"). Every
+// brain's `thanks` intent used to be a bare substring match, so a closing
+// "and thanks" on a real question silently swallowed the whole message into a
+// generic "you're welcome" reply and the actual question was never answered.
+// Only treat the message as a pure closing thank-you when it carries no
+// question signal of its own AND barely anything is left once the matched
+// thanks phrase(s) are stripped out.
+const QUESTION_SIGNAL_RE = /[?؟]|\b(what|why|how|where|which|when|who)\b|(ايه|إيه|ليه|فين|كام|إزاي|ازاي|هل|وش|شو|ليش|امتى|متى|قديش|انهي|إنهي)/i;
+function isPureThanksMessage(text, thanksPatterns) {
+  const value = String(text || '');
+  if (QUESTION_SIGNAL_RE.test(value)) return false;
+  let remainder = value;
+  for (const re of thanksPatterns) remainder = remainder.replace(re, ' ');
+  const meaningfulLeft = tokenize(remainder).filter((token) => token.length > 1).length;
+  return meaningfulLeft <= 2;
+}
+
 module.exports = {
   detectLanguage,
   detectDialect,
   normalize,
   normalizeArabicDigits,
   tokenize,
+  isPureThanksMessage,
 };

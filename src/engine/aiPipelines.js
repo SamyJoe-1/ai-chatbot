@@ -5,6 +5,7 @@ const { getBrandProfile, conceptMatchItems } = require('../brains/shared/brandPr
 const { normalize, tokenize } = require('./detector');
 const { fuzzyTokenScore, detectCountry, detectCountries, countryMatchesItem } = require('../brains/shared/matcher');
 const { getItemThumbnail, buildThumbnailMessages } = require('../brains/shared/thumbnailMessages');
+const { FEATURE_LABELS } = require('../brains/ecommerce');
 
 function displayTitle(item, lang) {
   return lang === 'ar' ? item.title_ar || item.title_en : item.title_en || item.title_ar;
@@ -187,6 +188,72 @@ function buildNotFoundPayload(lang, business) {
   };
 }
 
+// A [7]/[8] item slot that names no real product — a bare pronoun/placeholder
+// ("it", "that", "بتاعه", "المنتج") rather than an actual (possibly unmatched)
+// product name. Only THESE should fall back to context.last_item below; a
+// specific name that simply failed to match must NOT be silently swapped for a
+// different product — that would answer about the wrong thing.
+const GENERIC_ITEM_REF_RE = /^(it|that|this|the item|the product|itself|this one|that one|same one|this product|that product)$/i;
+const GENERIC_ITEM_REF_AR_RE = /^(ده|دي|دا|هو|هي|المنتج|الحاجه|الحاجة|الغرض|نفسه|نفسها|هذا|هذه|ذلك|تلك|بتاعه|بتاعها)$/;
+
+function isGenericItemRef(text) {
+  const value = String(text || '').trim();
+  if (!value) return true;
+  return GENERIC_ITEM_REF_RE.test(value) || GENERIC_ITEM_REF_AR_RE.test(value);
+}
+
+// A bare Arabic "attribute + possessive pronoun" fragment ("مكوناته" = its
+// ingredients, "لونها" = its color, "خامته" = its material) is a SINGLE token
+// with no product-name shape — real catalog titles here are multi-word
+// phrases. findItemsByText's typo tolerance (shared-prefix + short edit
+// distance) can still false-match a fragment like this against an unrelated
+// product that merely starts the same way ("مكوناته" ~ "مكواة تجعيد شعر..." —
+// a hair curler, nothing to do with "ingredients"). Recognize the shape and
+// route straight to context instead of risking the fuzzy catalog search.
+const POSSESSIVE_FRAGMENT_RE = /^[؀-ۿ]{2,12}(ه|ها|هم|هن|ك|كم|نا)$/;
+function looksLikePossessiveFragment(text, lang) {
+  const value = normalize(text, lang || 'ar').trim();
+  if (!value || /\s/.test(value)) return false;
+  return POSSESSIVE_FRAGMENT_RE.test(value);
+}
+
+// Resolve "the product we were just discussing" from the session's background
+// context — never shown to the customer, only used to keep a multi-turn detail
+// conversation ("price? / code? / country?") anchored to the right item without
+// requiring the AI to keep re-naming it every single turn (its own history
+// window is short and can scroll past the message that first named the item).
+// last_item wins when set; otherwise the most recently tracked id.
+function resolveContextItem(items, context) {
+  if (!context) return null;
+  const byId = (id) => items.find((item) => item.id === id) || null;
+  if (Number.isFinite(context.last_item)) {
+    const found = byId(context.last_item);
+    if (found) return found;
+  }
+  if (Array.isArray(context.recent_item_ids)) {
+    for (let i = context.recent_item_ids.length - 1; i >= 0; i -= 1) {
+      const found = byId(context.recent_item_ids[i]);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+// Neither the message nor the background context named a resolvable product —
+// ask plainly instead of dead-ending on the generic "not found" copy, which
+// reads oddly for a detail/price/etc. follow-up that has no subject at all.
+function buildClarifyItemPayload(lang) {
+  return {
+    text: lang === 'ar'
+      ? 'تقصد أي منتج بالظبط؟ ابعتلي اسمه وهساعدك فوراً.'
+      : "Which product do you mean? Send me the name and I'll help right away.",
+    type: 'text',
+    buttons: [],
+    suggestions: [],
+    context_update: {},
+  };
+}
+
 // A [7] detail slot may name more than one item ("Creamy Pesto Chicken, Tomato
 // Soup" or "latte | espresso"). Split on explicit separators only — NOT the word
 // "and", which appears inside real item names ("Fish and Chips") — so each part
@@ -287,11 +354,17 @@ function buildMultiDetailFieldPayload({ items, detail, lang, business }) {
     if (isAvailabilityDetail(detail)) {
       return `- ${displayTitle(item, lang)}: ${formatAvailabilityLine(item, lang)}`;
     }
+    const title = displayTitle(item, lang);
     const resolved = resolveDetail(item, detail, lang);
-    const value = resolved
-      ? stringifySearch(resolved.value)
-      : (lang === 'ar' ? 'غير محدد' : 'not specified');
-    return `- ${displayTitle(item, lang)}: ${value}`;
+    if (!resolved) {
+      const missing = lang === 'ar' ? 'غير محدد' : 'not specified';
+      return `- ${title}: ${missing}`;
+    }
+    const value = stringifySearch(resolved.value);
+    if (resolved.key === 'country') {
+      return lang === 'ar' ? `- ${title}: موجود في ${value}` : `- ${title}: available in ${value}`;
+    }
+    return `- ${title} (${resolved.label}): ${value}`;
   });
   const heading = lang === 'ar' ? 'إليك التفاصيل المطلوبة لكل عنصر:' : 'Here is that detail for each item:';
   const last = items[items.length - 1];
@@ -311,6 +384,39 @@ function buildMultiDetailFieldPayload({ items, detail, lang, business }) {
   };
 }
 
+// Turn a raw field/metadata key ("country_en", "material_ar", "shipping") into
+// a canonical, language-agnostic key ("country", "material", "shipping") plus a
+// human-friendly label — reusing ecommerce.js's FEATURE_LABELS dictionary so a
+// field never surfaces to the customer as a bare JSON key like "country_en".
+function friendlyDetail(rawKey, lang) {
+  const canon = String(rawKey || '').toLowerCase().replace(/_(en|ar)$/, '').replace(/s$/, '');
+  const label = (FEATURE_LABELS[lang] || {})[canon]
+    || (FEATURE_LABELS.en[canon] ? FEATURE_LABELS.en[canon] : canon.charAt(0).toUpperCase() + canon.slice(1).replace(/_/g, ' '));
+  return { key: canon, label };
+}
+
+// Bookkeeping/composite fields that are never a real "answer" to a customer's
+// detail question on their own — "details_en"/"details_ar" hold the item's
+// whole free-text advantages blob (rendered elsewhere as bullet points, often
+// empty), and id/slug/thumbnail/etc. are internal plumbing. Matching one of
+// these via the fuzzy fallback below used to produce nonsense like "Detail
+// لـ **X** هو: " with a blank value and a raw English fallback label.
+const EXCLUDED_DETAIL_KEYS = new Set([
+  'id', 'slug', 'thumbnail', 'hot_selling', 'badge', 'availability', 'available',
+  'detail', 'details', 'feature', 'features',
+]);
+function isExcludedDetailKey(rawKey) {
+  const canon = String(rawKey || '').toLowerCase().replace(/_(en|ar)$/, '').replace(/s$/, '');
+  return EXCLUDED_DETAIL_KEYS.has(canon);
+}
+
+function hasMeaningfulValue(value) {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'string') return value.trim() !== '';
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
 function resolveDetail(item, detail, lang) {
   const key = normalize(detail, 'en').replace(/\s+/g, '_');
   const candidates = [
@@ -321,17 +427,32 @@ function resolveDetail(item, detail, lang) {
   ].filter(Boolean);
 
   for (const candidate of candidates) {
+    if (isExcludedDetailKey(candidate)) continue;
     const value = getValueByDynamicKey(item, candidate);
-    if (value !== undefined && value !== null && value !== '') return { label: candidate, value };
+    if (hasMeaningfulValue(value)) {
+      return { ...friendlyDetail(candidate, lang), value };
+    }
   }
 
   const normalizedDetail = normalize(detail, lang);
-  const metadataEntry = Object.entries(item.metadata || {}).find(([metadataKey]) => {
+  const metadataEntry = Object.entries(item.metadata || {}).find(([metadataKey, metadataValue]) => {
+    if (isExcludedDetailKey(metadataKey) || !hasMeaningfulValue(metadataValue)) return false;
     return normalize(metadataKey, lang).includes(normalizedDetail)
       || normalizedDetail.includes(normalize(metadataKey, lang));
   });
-  if (metadataEntry) return { label: metadataEntry[0], value: metadataEntry[1] };
+  if (metadataEntry) return { ...friendlyDetail(metadataEntry[0], lang), value: metadataEntry[1] };
   return null;
+}
+
+// Compose a natural sentence fragment for a resolved detail instead of a bare
+// "label: value" dump. "country" reads far more naturally as "is available in
+// X" than "Country of Origin: X" for a short inline answer.
+function formatDetailSentence({ title, key, label, value, lang }) {
+  const text = stringifySearch(value);
+  if (key === 'country') {
+    return lang === 'ar' ? `**${title}** موجود في ${text}.` : `**${title}** is available in ${text}.`;
+  }
+  return lang === 'ar' ? `${label} لـ **${title}** هو: ${text}` : `The ${label} of **${title}** is: ${text}`;
 }
 
 // Shared "we don't have that from country X" honest reply — used whenever a
@@ -497,6 +618,16 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context, text }) {
       }
     }
     if (!resolved.length) {
+      // No item named at all (a bare "tell me more" / "الوصف العام" follow-up
+      // with nothing to search on) -> use the product already on the table
+      // instead of dead-ending, exactly like the single-item [8] path below.
+      if (isGenericItemRef(pipeline.item) || looksLikePossessiveFragment(pipeline.item, locale)) {
+        const contextItem = resolveContextItem(items, context);
+        if (contextItem) {
+          return { intent: 'item_found', payload: brain.buildResponse({ intent: 'item_found', item: contextItem }, locale, business) };
+        }
+        return { intent: 'ai_ask_which_item', payload: buildClarifyItemPayload(locale) };
+      }
       return { intent: 'ai_not_found', payload: buildNotFoundPayload(locale, business) };
     }
     if (resolved.length === 1) {
@@ -527,9 +658,27 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context, text }) {
       // Only one name actually resolved — fall through to the normal
       // single-item path below using the original slot text.
     }
-    const matches = findItemsByText(items, pipeline.itemForDetail, locale);
-    const item = matches[0];
-    if (!item) return { intent: 'ai_not_found', payload: buildNotFoundPayload(locale, business) };
+    // A bare pronoun ("it") OR a single attribute+possessive fragment
+    // ("مكوناته") is not a real product name — skip the fuzzy catalog search
+    // entirely for these, since typo-tolerant matching can confidently latch
+    // onto a completely unrelated product that merely shares a prefix
+    // ("مكوناته" ~ "مكواة تجعيد شعر..."). Resolve from context instead.
+    const itemSlotIsWeak = isGenericItemRef(pipeline.itemForDetail) || looksLikePossessiveFragment(pipeline.itemForDetail, locale);
+    const matches = itemSlotIsWeak ? [] : findItemsByText(items, pipeline.itemForDetail, locale);
+    let item = matches[0];
+    // No product named this turn ("price?", "and the code?", "الوصف ايه؟") —
+    // the classifier's own history window is short and can scroll past the
+    // message that first named the item, so don't rely on it alone. Bind the
+    // question to whatever product is already tracked in the background.
+    if (!item && itemSlotIsWeak) {
+      item = resolveContextItem(items, context);
+    }
+    if (!item) {
+      if (itemSlotIsWeak) {
+        return { intent: 'ai_ask_which_item', payload: buildClarifyItemPayload(locale) };
+      }
+      return { intent: 'ai_not_found', payload: buildNotFoundPayload(locale, business) };
+    }
     const normalizedDetail = normalize(pipeline.detail, 'en');
     if (/(price|cost|how much)/i.test(normalizedDetail)) {
       return { intent: 'item_price', payload: brain.buildResponse({ intent: 'item_price', item }, locale, business) };
@@ -543,7 +692,7 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context, text }) {
       return {
         intent: 'ai_specific_detail',
         payload: {
-          text: `${title}\n${detail.label}: ${stringifySearch(detail.value)}`,
+          text: formatDetailSentence({ title, key: detail.key, label: detail.label, value: detail.value, lang: locale }),
           type: 'text',
           buttons: [],
           suggestions: [],

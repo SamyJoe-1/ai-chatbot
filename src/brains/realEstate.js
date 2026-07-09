@@ -1,6 +1,6 @@
 'use strict';
 
-const { tokenize, normalize } = require('../engine/detector');
+const { tokenize, normalize, isPureThanksMessage } = require('../engine/detector');
 const { getBusinessItems } = require('./shared/catalogStore');
 const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle } = require('./shared/matcher');
 const { getItemThumbnail } = require('./shared/thumbnailMessages');
@@ -175,7 +175,7 @@ function detectIntent({ text, lang, business, context = {} }) {
   if (matchesAny(normalizedText, patterns.greeting_hello)) return { intent: 'greeting_hello' };
   if (matchesAny(normalizedText, patterns.greeting_how_are_you)) return { intent: 'greeting_how_are_you' };
   if (matchesAny(normalizedText, patterns.greeting_yasta)) return { intent: 'greeting_yasta' };
-  if (matchesAny(normalizedText, patterns.thanks)) return { intent: 'thanks' };
+  if (matchesAny(normalizedText, patterns.thanks) && isPureThanksMessage(normalizedText, patterns.thanks)) return { intent: 'thanks' };
   if (matchesAny(normalizedText, patterns.help)) return { intent: 'help' };
   if (matchesAny(normalizedText, patterns.appointment)) return { intent: 'appointment', item: foundItem || lastItem || null };
   if (matchesAny(normalizedText, patterns.catalog_general)) return { intent: 'catalog_general' };

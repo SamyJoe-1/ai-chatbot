@@ -2,7 +2,7 @@
 
 const db = require('../db/db');
 const { PATTERNS } = require('./patterns');
-const { normalize, tokenize } = require('./detector');
+const { normalize, tokenize, isPureThanksMessage } = require('./detector');
 
 const menuCache = new Map();
 const CACHE_TTL = 5 * 60 * 1000;
@@ -174,7 +174,7 @@ function detectIntent(text, lang, cafeId, context = {}) {
   if (matchesAny(normalizedText, patterns.greeting_hello)) return { intent: 'greeting_hello', confidence: 1 };
   if (matchesAny(normalizedText, patterns.greeting_how_are_you)) return { intent: 'greeting_how_are_you', confidence: 1 };
   if (matchesAny(normalizedText, patterns.greeting_yasta)) return { intent: 'greeting_yasta', confidence: 1 };
-  if (matchesAny(normalizedText, patterns.thanks)) return { intent: 'thanks', confidence: 1 };
+  if (matchesAny(normalizedText, patterns.thanks) && isPureThanksMessage(normalizedText, patterns.thanks)) return { intent: 'thanks', confidence: 1 };
   if (matchesAny(normalizedText, patterns.help)) return { intent: 'help', confidence: 1 };
   if (matchesAny(normalizedText, patterns.reservation)) return { intent: 'reservation', confidence: 1 };
 

@@ -1,6 +1,6 @@
 'use strict';
 
-const { tokenize, normalize } = require('../engine/detector');
+const { tokenize, normalize, isPureThanksMessage } = require('../engine/detector');
 const { getBusinessItems, getAllBusinessItems } = require('./shared/catalogStore');
 const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle, detectCountry, detectCountries, detectAnyKnownCountry, countryCanonicalId, countryMatchesItem } = require('./shared/matcher');
 const { getItemThumbnail, buildThumbnailMessages } = require('./shared/thumbnailMessages');
@@ -111,7 +111,24 @@ const PATTERNS = {
       /\bcategories (do you have|are there|are available)\b/i,
     ],
     order_howto: [/\bhow (do|can|could|would|to)\b[\w\s]{0,20}\border\b/i, /\bhow does ordering work\b/i, /\bhow to (place|make) an order\b/i],
-    ecommerce_search_hot: [/\bhot\b/i, /\bbest[\s-]?sell(ing|er)s?\b/i, /\bbestsellers?\b/i, /\bpopular\b/i, /\btop[\s-]?sell(ing|er)s?\b/i, /\btop[\s-]?rated\b/i],
+    ecommerce_search_hot: [
+      /\bhot\b/i,
+      /\bbest[\s-]?sell(ing|ers?)\b/i,
+      /\bbestsellers?\b/i,
+      /\bpopular\b/i,
+      /\btop[\s-]?sell(ing|ers?)\b/i,
+      /\btop[\s-]?rated\b/i,
+      /\bmost[\s-]?sold\b/i,
+      /\bmost[\s-]?(popular|wanted|ordered|bought|demanded)\b/i,
+      /\b(in[\s-]?)?high[\s-]?demand\b/i,
+      /\bhighest[\s-]?(sell(ing|ers?)|demand)\b/i,
+      /\bnumber\s*one\b/i,
+      /\btop\s*(pick|choice)\b/i,
+      /\bfan\s*favorite\b/i,
+      /\bcustomers?('s)?\s*favorite\b/i,
+      /#\s*1\b/,
+      /\bmost\s+sought[\s-]?after\b/i,
+    ],
     ecommerce_category_info: [/\bcategory\b/i, /\bmore about\b/i, /\bdetails on\b/i],
     ecommerce_product_advantages: [/\badvantages\b/i, /\bbenefits\b/i, /\bwhy choose\b/i, /\bfeatures\b/i],
     // Context follow-up: "tell me more about it", "more details", "more info".
@@ -224,7 +241,14 @@ const PATTERNS = {
     // "most/more selling/demanded" in any colloquial spelling: اكتر/اكثر/اعلى
     // (also inside الاكثر/الاعلى) + بيع/مبيع/مبيعا/مبيعات/طلب/طلبا, so "اكتر بيع"
     // (Gulf/Egyptian "more selling") lands the same as formal "الأكثر مبيعاً".
-    ecommerce_search_hot: [/(اكتر|اكثر|اعلي)\s*(بيع|مبيع|مبيعا|مبيعات|طلب|طلبا)/, /(بيست\s*سيلر|ساخن|مشهور|مطلوب|الاكثر رواجا)/],
+    // Up to 3 words are allowed BETWEEN the two (e.g. "اكثر منتج مبيعا" = "most
+    // PRODUCT sold") — the noun in between must not defeat the match.
+    ecommerce_search_hot: [
+      /(اكتر|اكثر|اعلي)(?:\s+\S+){0,3}?\s+(بيع|مبيع|مبيعا|مبيعات|طلب|طلبا)/,
+      /(بيست\s*سيلر|بست\s*سيلر|ساخن|مشهور|مطلوب|الاكثر رواجا|الاكثر انتشارا|رايج|رايجه)/,
+      /(الافضل مبيعا|الافضل بيعا|احسن حاجه بتتباع|احسن منتج بيع|اشهر منتج|اشهر حاجه|الاكثر شعبيه)/,
+      /(منتج رقم واحد|رقم واحد في المبيعات)/,
+    ],
     ecommerce_category_info: [/(عن القسم|القسم|قسم|صنف|تصنيف|تفاصيل القسم)/],
     ecommerce_product_advantages: [/(مميزات|مزايا|فوائد|ليه اشتري|مواصفات)/],
     // Context follow-up in Arabic: "قلي تفاصيل اكتر عنه"، "اعرف اكتر"، "تفاصيل عنه".
@@ -257,13 +281,46 @@ const PATTERNS = {
     // Stock-COUNT question: "فيه منه كام حبة"، "كام قطعة متوفرة"، "العدد المتاح".
     // We hold no per-item stock count — only an availability flag — so naming the
     // product changes nothing. Answered upfront instead of asking "which product?".
-    stock_quantity: [/(منه كام|منها كام|فيه منه|فيه منها|في منه|كام حبة|كم حبة|كام حبه|كم حبه|كام قطعة|كم قطعة|كام قطعه|كام واحد|كم العدد|العدد المتاح|الكميه المتاحه|الكمية المتاحة|كميه متوفره|كمية متوفرة|كام متوفر|متوفر كام|متوفر منه كام|المخزون|بالمخزون|عندكم كام|كام عندكم|الاستوك|ستوك)/],
+    // Bare "كمية"/"الكمية" (no ال/متوفرة needed) must ALSO resolve here — a
+    // one-word follow-up like "كمية" after discussing an item used to match
+    // NOTHING (neither this nor the FAQ's longer "ما الكمية المتوفرة" phrasing)
+    // and fell through to a generic unrelated AI reply instead of answering.
+    stock_quantity: [/(منه كام|منها كام|فيه منه|فيه منها|في منه|كام حبة|كم حبة|كام حبه|كم حبه|كام قطعة|كم قطعة|كام قطعه|كام واحد|كم العدد|العدد المتاح|الكميه المتاحه|الكمية المتاحة|كميه متوفره|كمية متوفرة|كام متوفر|متوفر كام|متوفر منه كام|المخزون|بالمخزون|عندكم كام|كام عندكم|الاستوك|ستوك)/, /^(كميه|الكميه)[?؟!.\s]*$/],
     logistics_inquiry: [/(كم يوم|كم يومًا|كم يوماً|امتى|متى يوصل|كم مدة|وقت التوصيل|وقت الشحن|وقت التوريد|المخزن|المستودع|مدة التوريد|مدة الشحن|التسليم|فترة التوريد|هيوصل امتى|يوصل امتى|تاريخ التسليم)/],
   }
 };
 
 function matchesAny(text, patterns) {
   return patterns.some((pattern) => pattern.test(text));
+}
+
+// "Hot/best selling" must fire regardless of which single language
+// detectLanguage() picked for the WHOLE message. A mixed message like "best
+// selling في السعودية" is classified 'ar' overall (Arabic-char ratio wins),
+// so only patterns.ar would normally be tested and the English phrase would be
+// silently dropped -> the query falls through to an unfiltered country list
+// (hot AND non-hot mixed together). Test both language pattern sets, always.
+function matchesHotSelling(normalizedText) {
+  return matchesAny(normalizedText, PATTERNS.en.ecommerce_search_hot)
+    || matchesAny(normalizedText, PATTERNS.ar.ecommerce_search_hot);
+}
+
+// A superlative ("the MOST/TOP/best-selling X") paired with a SINGULAR noun
+// ("منتج"/"product", not "منتجات"/"products") asks for exactly the #1 item —
+// the same as an explicit "one"/"واحد" request, just phrased implicitly. Kept
+// separate from single_item_request (which only fires on the literal word
+// "one"/"واحد") so "اكثر منتج مبيعا" caps to 1 result without needing "واحد" too.
+function wantsSingleFromSuperlative(text) {
+  const value = String(text || '');
+  if (/\b(top|best[\s-]?sell(?:ing|er)|most[\s-]?sold|number\s*one|#\s*1)\b[\w\s]{0,20}\bproduct\b(?!s)/i.test(value)) return true;
+  if (/\bproduct\b(?!s)[\w\s]{0,20}\b(top|best[\s-]?sell(?:ing|er)|most[\s-]?sold)\b/i.test(value)) return true;
+  // No \b here — Arabic letters aren't \w, so \b silently never fires around
+  // them (same trap detector.js's dialect matchers already work around).
+  // (?!ات) alone is enough to exclude the plural "منتجات".
+  const norm = normalize(value, 'ar');
+  if (/(اكتر|اكثر|اعلي)(?:\s+\S+){0,2}?\s*منتج(?!ات)[\s\S]{0,20}(بيع|مبيع|مبيعا|طلب|طلبا)/.test(norm)) return true;
+  if (/منتج(?!ات)[\s\S]{0,20}(اكتر|اكثر|اعلي)[\s\S]{0,20}(بيع|مبيع|مبيعا|طلب|طلبا)/.test(norm)) return true;
+  return false;
 }
 
 function getDisplayTitle(item, lang) {
@@ -714,7 +771,7 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   if (matchesAny(normalizedText, patterns.greeting_hello)) return { intent: 'greeting_hello' };
   if (matchesAny(normalizedText, patterns.greeting_how_are_you)) return { intent: 'greeting_how_are_you' };
   if (matchesAny(normalizedText, patterns.greeting_yasta)) return { intent: 'greeting_yasta' };
-  if (matchesAny(normalizedText, patterns.thanks)) return { intent: 'thanks' };
+  if (matchesAny(normalizedText, patterns.thanks) && isPureThanksMessage(normalizedText, patterns.thanks)) return { intent: 'thanks' };
 
   // "X in every country" ("عطر في كل بلد", "a perfume in each country") -> ONE X
   // per served country, NOT a single item's origin. Must run before the item /
@@ -864,7 +921,7 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   // "best seller / best selling / top seller in <country>" is a HOT-PRODUCT query,
   // not a coverage question — but "seller"/"selling" hit the "sell" service-area
   // verb. Exclude it so it flows to the ecommerce_search_hot handler below.
-  const looksLikeHotQuery = matchesAny(normalizedText, patterns.ecommerce_search_hot);
+  const looksLikeHotQuery = matchesHotSelling(normalizedText);
   const verbGate = !isProductCountryFilter && !looksLikeHotQuery;
 
   // Item ORIGIN ("where is it from?", "what country is X from?", "made in?") ->
@@ -877,7 +934,7 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     || (Array.isArray(context.recent_item_ids) && context.recent_item_ids.length
       ? items.find((i) => i.id === context.recent_item_ids[context.recent_item_ids.length - 1]) : null);
   const asksOrigin = lang === 'ar'
-    ? /(منين|من وين|من اي بلد|من أي بلد|من اي دوله|من أي دولة|بلد المنشا|بلد المنشأ|المنشا|المنشأ|صنع فين|مصنوع فين|جايه منين|بيجي منين|بتيجي منين)/.test(normalizedText)
+    ? /(منين|من وين|من اي بلد|من أي بلد|من اي دوله|من أي دولة|بلد المنشا|بلد المنشأ|المنشا|المنشأ|صنع فين|مصنوع فين|جايه منين|بيجي منين|بتيجي منين|انهي دوله|انهي دولة|إنهي دوله|إنهي دولة|اي دوله اصلا|أي دولة اصلا|دولته|دولتها|بلده اي|بلدها اي|بلده ايه|بلدها ايه|اصله منين|أصله منين|فين بلده|فين دولته)/.test(normalizedText)
     : /\bwhere\b[^?]*\b(from|made|come|comes)\b/i.test(normalizedText)
       || /\b(what|which)\s+countr(y|ies)\b[^?]*\bfrom\b/i.test(normalizedText)
       || /\bcountry of origin\b/i.test(normalizedText)
@@ -948,12 +1005,14 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     if (matchesAny(normalizedText, patterns.more_details)) {
       return { intent: 'item_found', item: itemInContext, fromContext: true };
     }
-    // Pronoun PRICE question ("سعرها كام", "طب سعره في حدود كام") with NO product
-    // named this turn -> the price is about the item already on the table. Bind
-    // it to that item instead of falling through to a product-less quote or a
-    // stray fuzzy match on an unrelated product. Gated on a context-pronoun so a
-    // fresh generic price ask ("بكام الشحن") is NOT hijacked onto a stale item.
-    const CONTEXT_PRONOUN_RE = /(عنها|عنه|عنهم|منها|منه|ليها|لها|بتاعها|بتاعه|حقها|حقه|(?:سعر|تفاصيل|مواصفات|مميزات|لون|حجم|وزن|مقاس|بلد|صور)(?:ها|هم|هن|ه)(?![؀-ۿ]))/;
+    // Pronoun PRICE question ("سعرها كام", "طب سعره في حدود كام", "how much is
+    // it") with NO product named this turn -> the price is about the item
+    // already on the table. Bind it to that item instead of falling through to
+    // a product-less quote or a stray fuzzy match on an unrelated product.
+    // Gated on a context-pronoun so a fresh generic price ask ("بكام الشحن") is
+    // NOT hijacked onto a stale item. Covers both languages so an English
+    // follow-up resolves locally too, instead of only the Arabic phrasing.
+    const CONTEXT_PRONOUN_RE = /(عنها|عنه|عنهم|منها|منه|ليها|لها|بتاعها|بتاعه|حقها|حقه|(?:سعر|تفاصيل|مواصفات|مميزات|لون|حجم|وزن|مقاس|بلد|صور)(?:ها|هم|هن|ه)(?![؀-ۿ])|\b(it|its|that one|this one)\b)/i;
     if (!foundItem && matchesAny(normalizedText, patterns.item_price) && CONTEXT_PRONOUN_RE.test(normalizedText)) {
       // Distinct intent name (rendered identically to item_price) so it is
       // recognized as ALWAYS-LOCAL and the AI classifier can't override it with
@@ -977,8 +1036,10 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   const askedQuantity = extractQuantity(text);
   // "send me one product", "one fuckin product" — a hard cap to a SINGLE
   // result. Checked everywhere a list would otherwise be returned so a
-  // quantity-limited ask never gets dumped the full matching set.
-  const wantsOne = matchesAny(normalizedText, patterns.single_item_request);
+  // quantity-limited ask never gets dumped the full matching set. A superlative
+  // paired with a singular noun ("اكثر منتج مبيعا", "the best-selling product")
+  // implies the same "just the #1 one" intent without needing "one"/"واحد" too.
+  const wantsOne = matchesAny(normalizedText, patterns.single_item_request) || wantsSingleFromSuperlative(text);
 
   // Country checking. A category named in the SAME message ("electronics in
   // saudi arabia") narrows the pool before the country filter runs, so the
@@ -1042,7 +1103,7 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     const categoryMatch = categoryMatches.length === 1 ? categoryMatches[0] : null;
     const basePool = categoryMatch ? categoryMatch.items : items;
 
-    if (matchesAny(normalizedText, patterns.ecommerce_search_hot)) {
+    if (matchesHotSelling(normalizedText)) {
       const filtered = basePool.filter(isHotSelling).filter(filterCountry);
       if (wantsOne && filtered.length) {
         return { intent: 'item_found', item: filtered[0], country: activeCountry, countries: activeCountries };
@@ -1075,7 +1136,7 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   }
 
   // Hot / best selling (hot_selling boolean), optionally inside one category.
-  if (matchesAny(normalizedText, patterns.ecommerce_search_hot)) {
+  if (matchesHotSelling(normalizedText)) {
     const hotItems = items.filter(isHotSelling);
     if (categoryMatches.length === 1) {
       return { intent: 'ecommerce_search_hot', items: hotItems.filter(i => getDisplayCategory(i, lang) === categoryMatches[0].display) };
@@ -1225,6 +1286,14 @@ function buildResponse(intentResult, lang, business) {
   // Shared builder for the multi-item cases below. Collapses to a single image
   // bubble when every item shares one thumbnail, splits to one bubble per item
   // when the URLs differ, and returns null (plain text) when none have one.
+  // Shared by EVERY multi-item list reply (hot-selling, country products,
+  // badges, ...) — whatever actually gets shown here becomes "the product(s)
+  // on the table" for follow-ups. Previously only single-item cases
+  // (item_found, etc.) updated last_item/last_shown_ids; a list reply left
+  // them untouched, so "تفاصيل اكتر عنه" after a list resolved against
+  // whatever item happened to be in context BEFORE this list — sometimes a
+  // completely different, much older product. Set it here once so every
+  // caller gets it for free instead of each case having to remember to.
   const applyItemList = (items, heading) => {
     const itemLine = (item) => {
       const title = getDisplayTitle(item, locale);
@@ -1240,6 +1309,11 @@ function buildResponse(intentResult, lang, business) {
       payload.text = thumbMsgs.map((m) => m.text).filter(Boolean).join('\n\n');
     } else {
       payload.text = [heading, ...items.map(itemLine)].join('\n\n');
+    }
+    const shownIds = items.map((item) => item.id).filter((id) => Number.isFinite(id));
+    if (shownIds.length) {
+      payload.context_update.last_item = shownIds[0];
+      payload.context_update.last_shown_ids = shownIds;
     }
   };
 
@@ -1539,8 +1613,14 @@ function buildResponse(intentResult, lang, business) {
         ? `قسم ${intentResult.category} يحتوي على العديد من المنتجات الرائعة. هل تبحث عن شيء محدد؟`
         : `The ${intentResult.category} category has many great products. Are you looking for anything specific?`;
       if (intentResult.items && intentResult.items.length > 0) {
-        payload.text += '\n\n' + intentResult.items.slice(0, 4).map(i => `- ${getDisplayTitle(i, locale)}`).join('\n');
-        payload.suggestions = intentResult.items.slice(0, 3).map(item => getDisplayTitle(item, locale));
+        const shownHere = intentResult.items.slice(0, 4);
+        payload.text += '\n\n' + shownHere.map(i => `- ${getDisplayTitle(i, locale)}`).join('\n');
+        payload.suggestions = shownHere.map(item => getDisplayTitle(item, locale));
+        const shownIds = shownHere.map((item) => item.id).filter((id) => Number.isFinite(id));
+        if (shownIds.length) {
+          payload.context_update.last_item = shownIds[0];
+          payload.context_update.last_shown_ids = shownIds;
+        }
       }
       break;
     case 'ecommerce_product_advantages': {
@@ -1935,6 +2015,7 @@ module.exports = {
   serviceType: 'ecommerce',
   defaultSheetName: 'Products',
   defaultBusinessName: 'New E-Commerce Store',
+  FEATURE_LABELS,
   detectIntent,
   buildResponse,
   getWelcomeMessage(business, lang) {
