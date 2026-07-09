@@ -226,7 +226,7 @@ const PATTERNS = {
       /(راجع الشات|راجع المحادثه|راجع المحادثة|شوف الشات|اقرا الشات|اقرأ الشات|ارجع للرسائل|فوق الرسائل|اللي فوق)/,
     ],
     catalog_general: [/(كتالوج|ايش عندكم|شو عندكم|عندكم ايه|عندك ايه|الكتالوج|وش عندكم)/],
-    catalog_general_generic: [/(المنتجات|السوق|الماركت|المتجر)/],
+    catalog_general_generic: [/(المنتجات|السوق|الماركت|المتجر|منتجاتكم|كل منتجاتكم|جميع منتجاتكم|منتجاتكو)/],
     list_categories: [/(كل الاقسام|كل الأقسام|جميع الاقسام|جميع الأقسام|الاقسام الموجودة|الأقسام الموجودة|ايه الاقسام|إيه الأقسام|ايش الاقسام|شو الاقسام|عندكم اقسام ايه|عندكم أقسام ايه|الفئات المتاحة|كل الفئات|جميع الفئات|انواع المنتجات|أنواع المنتجات|التصنيفات)/],
     order_howto: [
       /كيف[؀-ۿ\s]{0,15}(اطلب|أطلب|الطلب|اعمل طلب|اعمل اوردر|اوردر)/,
@@ -321,6 +321,38 @@ function wantsSingleFromSuperlative(text) {
   if (/(اكتر|اكثر|اعلي)(?:\s+\S+){0,2}?\s*منتج(?!ات)[\s\S]{0,20}(بيع|مبيع|مبيعا|طلب|طلبا)/.test(norm)) return true;
   if (/منتج(?!ات)[\s\S]{0,20}(اكتر|اكثر|اعلي)[\s\S]{0,20}(بيع|مبيع|مبيعا|طلب|طلبا)/.test(norm)) return true;
   return false;
+}
+
+// "give me 3 products" / "3 منتجات بس" — an EXPLICIT sample size, distinct
+// from single_item_request (always exactly 1) and from a plain list request
+// (no count named, default display cap applies). Without this, "قلي 3
+// منتجات بس من اللي عندكم" matches NO local pattern at all (no item, no
+// category, no "المنتجات" — just a bare count + "منتجات") and falls through to
+// the AI classifier, which has no rule for it either and can land on a
+// random unrelated item's detail instead of a product list.
+function extractRequestedProductCount(normalizedText) {
+  const value = String(normalizedText || '');
+  const capValid = (n) => (Number.isFinite(n) && n > 0 && n <= 20 ? n : null);
+  // Digit + a generic "product" noun always counts ("3 منتجات", "3 products").
+  const genericMatch = value.match(/(\d{1,3})\s*(منتج|منتجات|قطعة|قطعه|قطع|حاجة|حاجه|حاجات|صنف|اصناف|أصناف|products?|items?)/i);
+  if (genericMatch) {
+    const n = capValid(Number(genericMatch[1]));
+    if (n) return n;
+  }
+  // Digit + a CATEGORY-shaped word ("3 عطور") only counts when paired with a
+  // restrictive "only/just" word — that confirms it's a count request and not
+  // a stray number elsewhere in the message (a wholesale unit count, a price,
+  // a phone digit, ...).
+  // No \b around the Arabic alternatives — Arabic letters aren't \w, so \b
+  // silently never fires around them (same recurring trap as elsewhere here).
+  if (/(بس|فقط)|\b(only|just)\b/i.test(value)) {
+    const restrictiveMatch = value.match(/(\d{1,3})\s*[؀-ۿa-zA-Z]+/);
+    if (restrictiveMatch) {
+      const n = capValid(Number(restrictiveMatch[1]));
+      if (n) return n;
+    }
+  }
+  return null;
 }
 
 function getDisplayTitle(item, lang) {
@@ -1047,6 +1079,9 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   // paired with a singular noun ("اكثر منتج مبيعا", "the best-selling product")
   // implies the same "just the #1 one" intent without needing "one"/"واحد" too.
   const wantsOne = matchesAny(normalizedText, patterns.single_item_request) || wantsSingleFromSuperlative(text);
+  // Generalizes wantsOne to any explicit N ("3 منتجات بس") — composes with
+  // country/category/hot-selling exactly like wantsOne already did for N=1.
+  const requestedCount = extractRequestedProductCount(normalizedText) || (wantsOne ? 1 : null);
 
   // Country checking. A category named in the SAME message ("electronics in
   // saudi arabia") narrows the pool before the country filter runs, so the
@@ -1112,8 +1147,12 @@ function runDetectIntent({ text, lang, business, context = {} }) {
 
     if (matchesHotSelling(normalizedText)) {
       const filtered = basePool.filter(isHotSelling).filter(filterCountry);
-      if (wantsOne && filtered.length) {
-        return { intent: 'item_found', item: filtered[0], country: activeCountry, countries: activeCountries };
+      if (requestedCount && filtered.length) {
+        const capped = filtered.slice(0, requestedCount);
+        if (capped.length === 1) {
+          return { intent: 'item_found', item: capped[0], country: activeCountry, countries: activeCountries };
+        }
+        return { intent: 'ecommerce_search_hot', items: capped, country: activeCountry, countries: activeCountries, category: categoryMatch?.display };
       }
       return { intent: 'ecommerce_search_hot', items: filtered, country: activeCountry, countries: activeCountries, category: categoryMatch?.display };
     }
@@ -1122,10 +1161,14 @@ function runDetectIntent({ text, lang, business, context = {} }) {
       || matchesAny(normalizedText, patterns.ecommerce_country_products)
       || tokensCount(normalizedText) <= 3
       || categoryMatch
-      || wantsOne) {
+      || requestedCount) {
       const filtered = basePool.filter(filterCountry);
-      if (wantsOne && filtered.length) {
-        return { intent: 'item_found', item: filtered[0], country: activeCountry, countries: activeCountries };
+      if (requestedCount && filtered.length) {
+        const capped = filtered.slice(0, requestedCount);
+        if (capped.length === 1) {
+          return { intent: 'item_found', item: capped[0], country: activeCountry, countries: activeCountries };
+        }
+        return { intent: 'ecommerce_country_products', items: capped, country: activeCountry, countries: activeCountries, category: categoryMatch?.display };
       }
       return { intent: 'ecommerce_country_products', items: filtered, country: activeCountry, countries: activeCountries, category: categoryMatch?.display };
     }
@@ -1140,6 +1183,18 @@ function runDetectIntent({ text, lang, business, context = {} }) {
       const pick = items.find((i) => i.id === recentIds[recentIds.length - 1]);
       if (pick) return { intent: 'item_found', item: pick, fromContext: true };
     }
+  }
+
+  // "give me N products" ("قلي 3 منتجات بس من اللي عندكم") with NO item,
+  // category, or country named this turn — a plain sample-size request over
+  // the whole catalog. No local rule covered this shape at all (it names no
+  // item/category/"المنتجات"), so it used to fall through to the AI classifier,
+  // which has no dedicated rule for it either and could land on a random
+  // unrelated item's detail instead of a product list. Hot-sellers first (a
+  // representative, honest sample), padded with the rest of the catalog.
+  if (requestedCount && requestedCount > 1 && !foundItem && !categoryMatches.length) {
+    const hotFirst = [...items.filter(isHotSelling), ...items.filter((i) => !isHotSelling(i))];
+    return { intent: 'ecommerce_sample_products', items: hotFirst.slice(0, requestedCount) };
   }
 
   // Hot / best selling (hot_selling boolean), optionally inside one category.
@@ -1218,9 +1273,16 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     if (matchesAny(normalizedText, patterns.ecommerce_category_info)) {
       return { intent: 'ecommerce_category_info', category: categoryMatch.display, items: categoryMatch.items };
     }
-    if (categoryMatch.items.length === 1 || wantsOne) {
+    if (categoryMatch.items.length === 1 || (requestedCount === 1)) {
       if (asksPriceBase) return { intent: 'item_price', item: categoryMatch.items[0], quantity: askedQuantity };
       return { intent: 'item_found', item: categoryMatch.items[0] };
+    }
+    if (requestedCount && requestedCount > 1) {
+      return {
+        intent: 'category_items',
+        category: categoryMatch.display,
+        items: categoryMatch.items.slice(0, requestedCount),
+      };
     }
     return {
       intent: 'category_items',
@@ -1301,7 +1363,12 @@ function buildResponse(intentResult, lang, business) {
   // whatever item happened to be in context BEFORE this list — sometimes a
   // completely different, much older product. Set it here once so every
   // caller gets it for free instead of each case having to remember to.
-  const applyItemList = (items, heading) => {
+  // totalCount lets a caller that pre-sliced its items (most do, ".slice(0,
+  // 6)") tell us how many actually matched BEFORE the cut — so a "show me
+  // everything" style request that matches far more than the display cap says
+  // so explicitly instead of silently presenting a handful as if it were the
+  // whole result, and points at both ways to see the rest.
+  const applyItemList = (items, heading, totalCount) => {
     const itemLine = (item) => {
       const title = getDisplayTitle(item, locale);
       const desc = getDisplayDescription(item, locale);
@@ -1310,12 +1377,22 @@ function buildResponse(intentResult, lang, business) {
         : '';
       return `**${title}**\n${desc}${priceText}`;
     };
+    const truncated = Number.isFinite(totalCount) && totalCount > items.length;
+    const truncationNote = truncated
+      ? (locale === 'ar'
+        ? `\n\nدي عينة من أصل ${totalCount} منتج — تواصل معنا أو تصفّح السوق لعرض الباقي.`
+        : `\n\nThis is a sample of ${totalCount} matching products — contact us or browse the Marketplace to see the rest.`)
+      : '';
+    if (truncated) {
+      addContactButton();
+      addMarketplaceButton();
+    }
     const thumbMsgs = buildThumbnailMessages(items, heading, itemLine);
     if (thumbMsgs) {
       payload.messages = thumbMsgs;
-      payload.text = thumbMsgs.map((m) => m.text).filter(Boolean).join('\n\n');
+      payload.text = thumbMsgs.map((m) => m.text).filter(Boolean).join('\n\n') + truncationNote;
     } else {
-      payload.text = [heading, ...items.map(itemLine)].join('\n\n');
+      payload.text = [heading, ...items.map(itemLine)].join('\n\n') + truncationNote;
     }
     const shownIds = items.map((item) => item.id).filter((id) => Number.isFinite(id));
     if (shownIds.length) {
@@ -1373,10 +1450,25 @@ function buildResponse(intentResult, lang, business) {
         ? 'تفضّل، يمكنك تصفّح السوق كاملاً من الزر بالأسفل — أو قولي بتدور على إيه وأنا أساعدك تلاقيه.'
         : "Sure — you can browse our full Marketplace from the button below, or tell me what you're looking for and I'll help you find it.";
       addMarketplaceButton();
+      addContactButton();
       // "lets discover the marketplace together" ... "so lets start" -> walk
       // them into guided discovery instead of dead-ending.
       payload.context_update.awaiting_discovery = true;
       break;
+
+    // "give me N products" ("3 منتجات بس") — an explicit small sample from the
+    // whole catalog, no other filter. Neutral heading (not "hot selling" —
+    // padding items past the real hot-sellers would make that claim false).
+    case 'ecommerce_sample_products': {
+      // No truncation note here — the customer asked for exactly this many,
+      // so showing exactly that many (already capped upstream) is correct,
+      // not a cut-off; the "sample of N, contact us for more" framing would
+      // be confusing when N is precisely what was requested.
+      const heading = locale === 'ar' ? 'إليك بعض منتجاتنا:' : 'Here are some of our products:';
+      applyItemList(intentResult.items, heading);
+      payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
+      break;
+    }
 
     case 'logistics_inquiry':
       payload.text = locale === 'ar'
@@ -1552,7 +1644,7 @@ function buildResponse(intentResult, lang, business) {
           : (locale === 'ar'
             ? `إليك المنتجات المتوفرة في ${intentResult.country}:`
             : `Here are the products available in ${intentResult.country}:`);
-        applyItemList(intentResult.items.slice(0, 6), heading);
+        applyItemList(intentResult.items.slice(0, 6), heading, intentResult.items.length);
         payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       } else {
         payload.text = intentResult.category
@@ -1573,7 +1665,7 @@ function buildResponse(intentResult, lang, business) {
         const headline = intentResult.country
           ? (locale === 'ar' ? `إليك المنتجات الأكثر طلباً في ${intentResult.country}:` : `Here are the hot selling products in ${intentResult.country}:`)
           : (locale === 'ar' ? 'إليك المنتجات الأكثر طلباً ومبيعاً لدينا:' : 'Here are our hot selling products:');
-        applyItemList(intentResult.items.slice(0, 6), headline);
+        applyItemList(intentResult.items.slice(0, 6), headline, intentResult.items.length);
         payload.suggestions = intentResult.items.slice(0, 3).map(item => getDisplayTitle(item, locale));
       } else {
         // Name exactly which filters came up empty (category and/or country)
@@ -1601,7 +1693,7 @@ function buildResponse(intentResult, lang, business) {
         const heading = locale === 'ar'
           ? `إليك المنتجات ${badgeLabel} لدينا:`
           : `Here are our ${badgeLabel} products:`;
-        applyItemList(intentResult.items.slice(0, 6), heading);
+        applyItemList(intentResult.items.slice(0, 6), heading, intentResult.items.length);
         payload.suggestions = intentResult.items.slice(0, 3).map(item => getDisplayTitle(item, locale));
       } else {
         // Nothing carries that badge — don't dead-end; suggest hot items instead
@@ -1770,7 +1862,7 @@ function buildResponse(intentResult, lang, business) {
     case 'category_items':
       if (intentResult.items && intentResult.items.length > 0) {
         const heading = locale === 'ar' ? `إليك المنتجات في قسم ${intentResult.category}:` : `Here are the products in ${intentResult.category}:`;
-        applyItemList(intentResult.items.slice(0, 6), heading);
+        applyItemList(intentResult.items.slice(0, 6), heading, intentResult.items.length);
         payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       } else {
         payload.text = locale === 'ar' ? `لا توجد منتجات في قسم ${intentResult.category} حالياً.` : `No products found in ${intentResult.category} category.`;
@@ -1820,7 +1912,7 @@ function buildResponse(intentResult, lang, business) {
     case 'item_disambiguation':
       if (intentResult.items && intentResult.items.length > 0) {
         const heading = locale === 'ar' ? 'وجدت أكثر من منتج مطابق. أي واحد تقصد؟' : 'I found more than one matching product. Which one did you mean?';
-        applyItemList(intentResult.items.slice(0, 6), heading);
+        applyItemList(intentResult.items.slice(0, 6), heading, intentResult.items.length);
         payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       } else {
         payload.text = locale === 'ar' ? 'وجدت مطابقات متعددة ولكن لم نتمكن من عرض التفاصيل.' : 'Multiple matches found but details could not be loaded.';
@@ -2031,6 +2123,8 @@ module.exports = {
   defaultSheetName: 'Products',
   defaultBusinessName: 'New E-Commerce Store',
   FEATURE_LABELS,
+  contactButton,
+  marketplaceButton,
   detectIntent,
   buildResponse,
   getWelcomeMessage(business, lang) {

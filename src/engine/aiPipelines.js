@@ -5,7 +5,7 @@ const { getBrandProfile, conceptMatchItems } = require('../brains/shared/brandPr
 const { normalize, tokenize } = require('./detector');
 const { fuzzyTokenScore, detectCountry, detectCountries, countryMatchesItem } = require('../brains/shared/matcher');
 const { getItemThumbnail, buildThumbnailMessages } = require('../brains/shared/thumbnailMessages');
-const { FEATURE_LABELS } = require('../brains/ecommerce');
+const { FEATURE_LABELS, contactButton, marketplaceButton } = require('../brains/ecommerce');
 
 function displayTitle(item, lang) {
   return lang === 'ar' ? item.title_ar || item.title_en : item.title_en || item.title_ar;
@@ -160,19 +160,37 @@ function makeListPayload({ items, lang, business, heading, intent }) {
     return `- ${displayTitle(item, locale)}${price}`;
   };
 
+  // A "show me everything" style request can match FAR more than the 8-item
+  // display cap (e.g. the whole catalog). Silently truncating reads as if
+  // that handful IS the full catalog. Say so explicitly and point at both
+  // ways to see more, instead of just cutting the list off mid-air.
+  const truncated = items.length > sliced.length;
+  const buttons = [];
+  if (truncated) {
+    const contactBtn = contactButton(business, locale);
+    const marketplaceBtn = marketplaceButton(business, locale);
+    if (contactBtn) buttons.push(contactBtn);
+    if (marketplaceBtn) buttons.push(marketplaceBtn);
+  }
+  const truncationNote = truncated
+    ? (locale === 'ar'
+      ? `\n\nدي عينة من أصل ${items.length} منتج — تواصل معنا أو تصفّح السوق لعرض الباقي.`
+      : `\n\nThis is a sample of ${items.length} matching products — contact us or browse the Marketplace to see the rest.`)
+    : '';
+
   const thumbMsgs = buildThumbnailMessages(sliced, heading, itemLine);
   if (thumbMsgs) {
-    const text = thumbMsgs.map((m) => m.text).filter(Boolean).join('\n');
+    const text = thumbMsgs.map((m) => m.text).filter(Boolean).join('\n') + truncationNote;
     return {
       intent,
-      payload: { text, type: 'text', buttons: [], suggestions, messages: thumbMsgs, context_update },
+      payload: { text, type: 'text', buttons, suggestions, messages: thumbMsgs, context_update },
     };
   }
 
-  const text = [heading, ...sliced.map(itemLine)].join('\n');
+  const text = [heading, ...sliced.map(itemLine)].join('\n') + truncationNote;
   return {
     intent,
-    payload: { text, type: 'text', buttons: [], suggestions, context_update },
+    payload: { text, type: 'text', buttons, suggestions, context_update },
   };
 }
 
@@ -536,6 +554,14 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context, text }) {
     const categoryNeedle = normalize(pipeline.item, locale);
     let matches = items.filter((item) =>
       normalize(`${item.category_en || ''} ${item.category_ar || ''}`, locale).includes(categoryNeedle));
+    // Nothing filed under that category -> pipeline.item is likely a generic
+    // placeholder the classifier wrote for a "show me everything" request
+    // ("Products", "all", ...), not a real category name. Echoing it back
+    // verbatim used to produce a broken heading like "...found in Products:".
+    // Fall back to the fuzzy title search (in case it's a genuine, if
+    // unmatched, category-ish word) but use a neutral heading either way —
+    // never interpolate unvalidated classifier text into customer-facing copy.
+    const realCategoryMatched = matches.length > 0;
     if (!matches.length) matches = findItemsByText(items, pipeline.item, locale);
     matches = narrowByCountry(matches);
     if (countryMiss) return countryMissPayload();
@@ -546,7 +572,9 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context, text }) {
       items: matches,
       lang: locale,
       business,
-      heading: locale === 'ar' ? `هذه الأصناف الموجودة في ${pipeline.item}:` : `Here are the items in ${pipeline.item}:`,
+      heading: realCategoryMatched
+        ? (locale === 'ar' ? `هذه الأصناف الموجودة في ${pipeline.item}:` : `Here are the items in ${pipeline.item}:`)
+        : (locale === 'ar' ? 'هذه بعض منتجاتنا:' : 'Here are some of our products:'),
       intent: matches.length ? 'category_items' : 'ai_not_found',
     });
   }
