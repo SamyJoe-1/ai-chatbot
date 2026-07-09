@@ -191,6 +191,12 @@ const PATTERNS = {
     // publish exact counts, so this gets a clear canned answer, not a "which
     // product?" runaround. A price word present means it's a price question.
     stock_quantity: [/\bhow many\b[^?]*\b(in stock|available|left|do you have|units?|pieces?|pcs)\b/i, /\b(in stock|stock (level|count|quantity)|units? available|pieces? available|quantity available|qty available)\b/i],
+    // MINIMUM order quantity (MOQ) — a POLICY question ("what's the least I
+    // can order"), a different concept from stock_quantity ("how many do you
+    // HAVE"). No product name required; answered upfront and deterministically
+    // (never sent to the AI) so it can't get hijacked into an order-flow
+    // "which product?" prompt.
+    moq: [/\b(minimum|min\.?|least|smallest|lowest)\b[\w\s]{0,20}\b(order|quantity|qty|amount|purchase)\b/i, /\bmoq\b/i, /\bhow (many|much)\b[\w\s]{0,15}\b(minimum|at least|to order|can i order)\b/i],
     logistics_inquiry: [
       /\bhow (many days?|long|much time|soon)\b/i,
       /\bwhen (will|would|can|could)\b/i,
@@ -286,6 +292,10 @@ const PATTERNS = {
     // NOTHING (neither this nor the FAQ's longer "ما الكمية المتوفرة" phrasing)
     // and fell through to a generic unrelated AI reply instead of answering.
     stock_quantity: [/(منه كام|منها كام|فيه منه|فيه منها|في منه|كام حبة|كم حبة|كام حبه|كم حبه|كام قطعة|كم قطعة|كام قطعه|كام واحد|كم العدد|العدد المتاح|الكميه المتاحه|الكمية المتاحة|كميه متوفره|كمية متوفرة|كام متوفر|متوفر كام|متوفر منه كام|المخزون|بالمخزون|عندكم كام|كام عندكم|الاستوك|ستوك)/, /^(كميه|الكميه)[?؟!.\s]*$/],
+    // MINIMUM order quantity (MOQ) — "اقل كمية يمكنني طلبها؟" is a POLICY
+    // question, not a stock-count question (stock_quantity above). No \b
+    // around the Arabic words — Arabic letters aren't \w, \b never fires there.
+    moq: [/(اقل كميه|أقل كمية|اقل كميه|اقل عدد|أقل عدد|الحد الادنى|الحد الأدنى|حد ادنى|حد أدنى|من كم قطعه يبدا|من كام قطعه يبدا|أقل طلبيه|اقل طلبية|اصغر طلبيه|اصغر طلبية)/],
     logistics_inquiry: [/(كم يوم|كم يومًا|كم يوماً|امتى|متى يوصل|كم مدة|وقت التوصيل|وقت الشحن|وقت التوريد|المخزن|المستودع|مدة التوريد|مدة الشحن|التسليم|فترة التوريد|هيوصل امتى|يوصل امتى|تاريخ التسليم)/],
   }
 };
@@ -303,6 +313,15 @@ function matchesAny(text, patterns) {
 function matchesHotSelling(normalizedText) {
   return matchesAny(normalizedText, PATTERNS.en.ecommerce_search_hot)
     || matchesAny(normalizedText, PATTERNS.ar.ecommerce_search_hot);
+}
+
+// Same bilingual gap as matchesHotSelling — "MOQ" is commonly typed in Latin
+// even inside an otherwise-Arabic message ("كام ال MOQ بتاعكم"), which
+// detectLanguage() still classifies as 'ar' overall, so only patterns.ar
+// would normally be tested and the English/acronym form silently missed.
+function matchesMoq(normalizedText) {
+  return matchesAny(normalizedText, PATTERNS.en.moq)
+    || matchesAny(normalizedText, PATTERNS.ar.moq);
 }
 
 // A superlative ("the MOST/TOP/best-selling X") paired with a SINGULAR noun
@@ -1070,6 +1089,16 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     return { intent: 'stock_quantity', item: itemInContext || foundItem || null };
   }
 
+  // Minimum order quantity (MOQ) — a policy question, no product name needed.
+  // Checked as a LOCAL, deterministic rule (never sent to the AI classifier)
+  // so it can't get hijacked into an order-flow "which product?" prompt —
+  // which is exactly what happened when this had no local rule at all and
+  // fell through to the AI, which composed its own order-nudge instead of
+  // answering the quantity question.
+  if (matchesMoq(normalizedText)) {
+    return { intent: 'moq', item: itemInContext || foundItem || null };
+  }
+
   const asksPriceBase = matchesAny(normalizedText, patterns.item_price);
   // Quantity the customer stated ("بكم 100 حبة") — echoed back in price replies.
   const askedQuantity = extractQuantity(text);
@@ -1513,6 +1542,25 @@ function buildResponse(intentResult, lang, business) {
       payload.suggestions = suggestions.slice(0, 3);
       break;
     }
+
+    case 'moq': {
+      // Same "we don't disclose quantities in chat" cut as stock_quantity
+      // when qty display is off — a minimum-order question is still a
+      // quantity question, and per the owner's setting it gets the SAME
+      // straight answer, never an invitation to name a product first.
+      const item = intentResult.item;
+      const name = item ? getDisplayTitle(item, locale) : '';
+      payload.text = !qtyEnabled
+        ? qtyDisabledText(locale, name)
+        : (locale === 'ar'
+          ? 'يختلف الحد الأدنى للطلب حسب نوع المنتج وسياسة المورد — تواصل معنا وسنوضحه لك حسب المنتج الذي تحتاجه.'
+          : 'The minimum order quantity varies by product and supplier policy — contact us and we\'ll confirm it for the product you need.');
+      if (item) payload.context_update.last_item = item.id;
+      addContactButton();
+      payload.suggestions = suggestions.slice(0, 3);
+      break;
+    }
+
     case 'ecommerce_price_quote': {
       if (!priceEnabled) {
         // Prices OFF: cut the road immediately — no "which product?" fishing,

@@ -232,6 +232,10 @@ const ALWAYS_LOCAL_INTENTS = new Set([
   'location', 'brand_info', 'order_howto', 'logistics_inquiry', 'logistics_average',
   'service_area', 'business_model', 'stock_quantity', 'faq', 'language_meta', 'recall_topic',
   'recall_item_price',
+  // Minimum order quantity — a policy question, no product needed. Answered
+  // deterministically from the qty_enabled setting; never let the AI turn it
+  // into an order-flow "which product?" prompt.
+  'moq',
   // "best selling" / "hot" products: answer from the real hot_selling flag
   // locally (honest — shows what's actually flagged, or says none is) instead of
   // letting the AI recommend fabricate a "best seller" it has no sales data for.
