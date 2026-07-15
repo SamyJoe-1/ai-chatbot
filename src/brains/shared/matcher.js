@@ -542,9 +542,10 @@ function detectRegionMemberIds(rawText, normalizedLatin, normalizedArabic) {
 }
 
 // Plural detection: a region term expands to EVERY catalog country in that
-// group; otherwise falls back to the single best country. Returns an array of
-// the catalog's own country strings (deduped, active-language name preferred),
-// suitable for filtering with countryMatchesItem and for display.
+// group; an explicit enumeration ("في السعودية والامارات والعراق") returns
+// EVERY country actually named. Returns an array of the catalog's own country
+// strings (deduped by canonical id, active-language name preferred), suitable
+// for filtering with countryMatchesItem and for display.
 function detectCountries(text, lang, items) {
   const rawText = String(text || '');
   const normalizedLatin = normalize(rawText, 'en');
@@ -566,8 +567,38 @@ function detectCountries(text, lang, items) {
     if (matched.length) return matched;
   }
 
-  const single = detectCountry(text, lang, items);
-  return single ? [single] : [];
+  // Collect EVERY named country, not just the first. Two tiers, mirroring
+  // detectCountry's precision order: full names/aliases/codes first; the
+  // looser single-word hints ("Saudi") only run when tier 1 found nothing,
+  // so they can't pad a precise match with fuzzy extras.
+  const collect = (matchFn) => {
+    const seen = new Set();
+    const matched = [];
+    for (const country of allCountries) {
+      const id = countryCanonicalId(country);
+      if (seen.has(id)) continue;
+      if (matchFn(country)) {
+        seen.add(id);
+        matched.push(country);
+      }
+    }
+    return matched;
+  };
+
+  const tier1 = collect((country) => {
+    for (const key of countryForms(country)) {
+      if (keyMatchesText(key, rawText, normalizedLatin, normalizedArabic)) return true;
+    }
+    return false;
+  });
+  if (tier1.length) return tier1;
+
+  return collect((country) => {
+    for (const hint of countryTokenHints(country)) {
+      if (keyMatchesText(countryKey(hint), rawText, normalizedLatin, normalizedArabic)) return true;
+    }
+    return false;
+  });
 }
 
 // English/Arabic display names per alias group, for echoing a recognized

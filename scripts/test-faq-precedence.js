@@ -84,6 +84,16 @@ check(intentOf('whats the best product you have') === 'ecommerce_search_hot', 'E
 // Capability ask with a recognizable category shows that category's products.
 check(intentOf('هل يمكنكم توفير متجات تجميل') === 'ecommerce_capability_category', 'capability + تجميل -> category products');
 check(intentOf('can you provide cosmetics products') === 'ecommerce_capability_category', 'EN capability + cosmetics -> category products');
+// A "recommend" verb with CONCRETE criteria is a filter query, not discovery.
+check(intentOf('طيب رشحلى الافضل مبيعا ف السعوديه والامارات والعراقر') === 'ecommerce_search_hot', 'رشحلي + hot + countries -> hot filter, not discovery');
+check(intentOf('مش عارف اختار') === 'guided_discovery', 'genuine confusion still -> guided discovery');
+// Multi-country enumeration filters by ALL named countries (typos tolerated).
+{
+  const { detectCountries } = require('../src/brains/shared/matcher');
+  const { getBusinessItems } = require('../src/brains/shared/catalogStore');
+  const list = detectCountries('الافضل مبيعا في السعوديه والامارات والعراقر', 'ar', getBusinessItems(3));
+  check(list.length === 3, `multi-country enumeration detects all 3 (got ${list.length}: ${list.join('،')})`);
+}
 
 console.log(fails ? `\n${fails} FAILURE(S)` : '\nALL PASS');
 process.exit(fails ? 1 : 0);

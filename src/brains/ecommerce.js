@@ -950,9 +950,21 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   // contain "help" too) so a customer with no idea what to buy gets walked
   // through a real choice instead of a capabilities blurb or an AI freeform
   // reply that just asks them to restate what they already said they don't know.
+  // GATED on the message being genuinely open-ended: "رشحلي الأفضل مبيعاً في
+  // السعودية" contains a discovery verb (رشحلي) but names CONCRETE criteria
+  // (best-selling + countries) — that's a filter query, not confusion, and the
+  // step-by-step walkthrough is exactly the over-complication the owner hates.
+  // Any concrete signal (hot-selling words, a country, a category, a product)
+  // sends it down the normal resolution pipeline instead.
   if (matchesAny(normalizedText, patterns.guided_discovery)) {
-    const categories = [...new Set(items.map((item) => getDisplayCategory(item, lang)).filter(Boolean))];
-    return { intent: 'guided_discovery', categories };
+    const concreteAsk = matchesHotSelling(normalizedText)
+      || Boolean(foundItem)
+      || detectCountries(text, lang, items).length > 0
+      || categoryMatches.length === 1;
+    if (!concreteAsk) {
+      const categories = [...new Set(items.map((item) => getDisplayCategory(item, lang)).filter(Boolean))];
+      return { intent: 'guided_discovery', categories };
+    }
   }
 
   if (matchesAny(normalizedText, patterns.help)) return { intent: 'help' };
@@ -1556,7 +1568,7 @@ function buildResponse(intentResult, lang, business) {
 
     case 'catalog_general':
       payload.text = locale === 'ar'
-        ? 'تفضّل، يمكنك تصفّح السوق كاملاً من الزر بالأسفل — أو قولي بتدور على إيه وأنا أساعدك تلاقيه.'
+        ? 'تفضّل، يمكنك تصفّح السوق كاملاً من الزر بالأسفل — أو أخبرني عمّا تبحث عنه وسأساعدك في إيجاده.'
         : "Sure — you can browse our full Marketplace from the button below, or tell me what you're looking for and I'll help you find it.";
       addMarketplaceButton();
       addContactButton();
@@ -2032,20 +2044,21 @@ function buildResponse(intentResult, lang, business) {
         '3. Check price and available options (size/color) on the product card before you decide.',
         "4. Not sure between two? Ask me and I'll compare them for you.",
       ].join('\n');
+      // Brand voice: MSA فصحى, friendly and professional — never dialect.
       const tipsAr = [
-        'ولا يهمك، هنختار المنتج المناسب مع بعض خطوة بخطوة:',
-        '1. ابدأ باختيار القسم اللي المنتج منه.',
-        '2. قولي هتستخدمه لإيه أو لمين عشان أقدر أضيّق الاختيار.',
-        '3. راجع السعر والخيارات المتاحة (المقاس/اللون) في صفحة المنتج قبل ما تقرر.',
-        '4. مش قادر تختار بين اتنين؟ اسألني وهقارنلك بينهم.',
+        'لا تقلق — سنختار المنتج المناسب معاً خطوة بخطوة:',
+        '1. ابدأ باختيار القسم الذي ينتمي إليه المنتج.',
+        '2. أخبرني عن الاستخدام أو لمن هو الشراء حتى أضيّق الخيارات.',
+        '3. راجع السعر والخيارات المتاحة (المقاس/اللون) في صفحة المنتج قبل القرار.',
+        '4. محتار بين خيارين؟ اسألني وسأقارن بينهما لك.',
       ].join('\n');
       if (intentResult.categories && intentResult.categories.length > 0) {
-        const closing = locale === 'ar' ? 'بتدور على منتج في أي قسم من دول؟' : 'Which of these are you shopping for?';
+        const closing = locale === 'ar' ? 'في أي قسم من هذه الأقسام تبحث عن منتج؟' : 'Which of these are you shopping for?';
         payload.text = `${locale === 'ar' ? tipsAr : tipsEn}\n\n${closing}`;
         payload.suggestions = intentResult.categories.slice(0, 8);
       } else {
         payload.text = locale === 'ar'
-          ? 'ولا يهمك، هنساعدك. قولي بتدور على منتج لإيه أو لمين، ونضبطلك الاختيار.'
+          ? 'لا تقلق — سنساعدك. أخبرنا عن استخدام المنتج أو لمن هو، وسنضيّق الخيارات معاً.'
           : "No problem — we'll help. Tell me what the product is for or who it's for, and we'll narrow it down together.";
       }
       // Discovery has started — consume the kickoff flag so a later bare
@@ -2117,7 +2130,7 @@ function buildResponse(intentResult, lang, business) {
         payload.context_update.last_item = item.id;
       } else {
         payload.text = locale === 'ar'
-          ? 'ما اتكلمنا عن منتج محدد لسه. قولي على اللي يهمك وأنا هساعدك فوراً.'
+          ? 'لم نتحدث عن منتج محدد بعد. أخبرني بما يهمك وسأساعدك فوراً.'
           : "We haven't landed on a specific product yet. Tell me what you're after and I'll help right away.";
         payload.suggestions = suggestions.slice(0, 3);
       }
@@ -2184,7 +2197,7 @@ function buildResponse(intentResult, lang, business) {
     case 'unknown':
     default:
       payload.text = locale === 'ar'
-        ? `سؤال جميل! عشان أضمنلك إجابة دقيقة، تقدر تتواصل مع فريقنا${business.phone ? ` على ${business.phone}` : ''} في أي وقت — وفي نفس الوقت اسألني عن أي منتج أو قسم أو سعر وهجاوبك فوراً.`
+        ? `سؤال جميل! لضمان إجابة دقيقة، يمكنك التواصل مع فريقنا${business.phone ? ` على ${business.phone}` : ''} في أي وقت — وفي الوقت نفسه اسألني عن أي منتج أو قسم أو سعر وسأجيبك فوراً.`
         : `Good question! To make sure you get an accurate answer, you can reach our team${business.phone ? ` at ${business.phone}` : ''} anytime — and meanwhile, ask me about any product, category, or price and I'll answer right away.`;
       payload.suggestions = suggestions.slice(0, 3);
       break;
