@@ -154,6 +154,29 @@ function looksLikeOrderIntent(text, lang) {
   return patterns.some((pattern) => pattern.test(value));
 }
 
+// "محتاج منه 500 حبه" after viewing a product IS an order for 500 — not a
+// price question to bounce with "send us the quantity" (the customer JUST
+// sent it; that circular reply was the bug). A quantity counts as order
+// intent when it comes with a need/want verb, or bare ("500 حبه") right
+// after we invited the customer to state a quantity (context.awaiting_qty).
+// Price/stock/limit questions keep their own lanes via the exclusion guards.
+const ORDER_QTY_UNIT_RE = /(\d{1,7})\s*(حبة|حبه|قطعة|قطعه|قطع|علبة|علبه|كرتون|كرتونه|كرتونة|درزن|دستة|دسته|طن|كيلو|pcs?|pieces?|units?|dozen|cartons?|boxes?|kg)/i;
+const PRICE_QUESTION_RE = /(بكم|بكام|بقديش|سعر|اسعار|أسعار|الثمن|حقها كم|كم حقها|عرض سعر|price|how much|quote|cost)/i;
+const STOCK_LIMIT_RE = /(اقل|أقل|اقصى|أقصى|اقصي|الحد|متوفر|متاح|مخزون|ستوك|عندكم كام|كام عندكم|stock|available|in store|minimum|maximum|\bmin\b|\bmax\b|least|most)/i;
+const NEED_VERB_RE = /(محتاج|محتاجه|محتاجة|عايز|عاوز|اريد|أريد|ابغى|ابغي|ابي|بدي|هات|اطلب|أطلب|نفسي في|need|want|take|order|get me|buy|send me)/i;
+
+function looksLikeQuantityOrder(text, context) {
+  const value = String(text || '').trim();
+  const match = value.match(ORDER_QTY_UNIT_RE);
+  if (!match) return null;
+  const qty = Number(match[1]);
+  if (!Number.isFinite(qty) || qty <= 0) return null;
+  if (PRICE_QUESTION_RE.test(value) || STOCK_LIMIT_RE.test(value)) return null;
+  if (NEED_VERB_RE.test(value)) return { qty, unit: match[2] };
+  if (context && context.awaiting_qty) return { qty, unit: match[2] };
+  return null;
+}
+
 function buildCommand(action, itemId) {
   return `${ORDER_COMMAND_PREFIX}${action}${itemId ? `:${itemId}` : ''}`;
 }
@@ -509,16 +532,20 @@ function matchItemsForOrder({ text, lang, businessId, context = {} }) {
 
 function addItemsToOrder(orderId, itemsToAdd) {
   itemsToAdd.forEach((item) => {
+    // __qty rides on the seed item when the customer stated an explicit
+    // quantity in the same breath ("محتاج منه 500 حبه") — the order line
+    // opens at that count instead of 1.
+    const qty = Number(item.__qty) > 0 ? Math.floor(Number(item.__qty)) : 1;
     const existing = getOrderItemByServiceItem.get(orderId, item.id);
     if (existing) {
-      updateOrderItemQuantity.run(Number(existing.quantity || 0) + 1, existing.id);
+      updateOrderItemQuantity.run(Number(existing.quantity || 0) + qty, existing.id);
     } else {
       insertOrderItem.run(
         orderId,
         item.id,
         item.title_en || item.title_ar || 'Item',
         item.title_ar || item.title_en || '',
-        1,
+        qty,
         item.price ?? null,
         item.currency || 'EGP'
       );
@@ -1437,6 +1464,7 @@ module.exports = {
   isOrderingEnabled,
   isInternalOrderCommand,
   looksLikeOrderIntent,
+  looksLikeQuantityOrder,
   isYesText,
   isCancelText,
   getExistingPhoneStatus,

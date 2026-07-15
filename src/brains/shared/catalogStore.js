@@ -88,10 +88,25 @@ function invalidateBusinessItemsCache(businessId) {
   classifyCache.delete(Number(businessId));
 }
 
+// Full flush across every business — the admin cache-clear action. Returns
+// how many entries were dropped so the caller can report it.
+function clearAllCaches() {
+  const counts = {
+    items: itemCache.size,
+    all_items: allItemCache.size,
+    classifications: [...classifyCache.values()].reduce((n, m) => n + m.size, 0),
+  };
+  itemCache.clear();
+  allItemCache.clear();
+  classifyCache.clear();
+  return counts;
+}
+
 module.exports = {
   getBusinessItems,
   getAllBusinessItems,
   invalidateBusinessItemsCache,
+  clearAllCaches,
   getCachedClassification,
   setCachedClassification,
   parseMetadata,

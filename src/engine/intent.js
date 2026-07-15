@@ -34,6 +34,13 @@ function invalidateMenuCache(cafeId) {
   menuCache.delete(Number(cafeId));
 }
 
+// Full flush (admin cache-clear action).
+function clearMenuCache() {
+  const count = menuCache.size;
+  menuCache.clear();
+  return count;
+}
+
 function matchesAny(text, patterns) {
   return patterns.some((pattern) => pattern.test(text));
 }
@@ -242,4 +249,5 @@ module.exports = {
   findMatchingItems,
   getMenuItems,
   invalidateMenuCache,
+  clearMenuCache,
 };

@@ -89,6 +89,14 @@ function invalidateBrandProfileCache(businessId) {
   profileCache.delete(Number(businessId));
 }
 
+// Full flush (admin cache-clear action). Profiles reload from the DB on next
+// use, so this only drops the 5-minute in-memory layer.
+function clearProfileCache() {
+  const count = profileCache.size;
+  profileCache.clear();
+  return count;
+}
+
 // --- Local consumption ------------------------------------------------------
 // A concept key may bundle several synonyms with "|": "sea|seafood|ocean|بحري".
 // Split and normalize them once per language so matching is cheap.
@@ -149,5 +157,6 @@ module.exports = {
   getBrandProfileMeta,
   saveBrandProfile,
   invalidateBrandProfileCache,
+  clearProfileCache,
   conceptMatchItems,
 };

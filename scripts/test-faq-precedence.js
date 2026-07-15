@@ -72,6 +72,16 @@ function intentOf(text) {
   const r = brain.detectIntent({ text, lang, business, context: {} });
   return r ? r.intent : null;
 }
+// Explicit quantity + need verb = order at that count; price/stock stay put.
+{
+  const { looksLikeQuantityOrder } = require('../src/engine/orderFlow');
+  check(looksLikeQuantityOrder('محتاج منه 500 حبه', {})?.qty === 500, 'محتاج منه 500 حبه -> order qty 500');
+  check(looksLikeQuantityOrder('i want 50 pieces', {})?.qty === 50, 'EN want 50 pieces -> order qty 50');
+  check(looksLikeQuantityOrder('500 حبه', { awaiting_qty: true })?.qty === 500, 'bare qty after invite -> order');
+  check(looksLikeQuantityOrder('500 حبه', {}) === null, 'bare qty out of nowhere -> not an order');
+  check(looksLikeQuantityOrder('بكم 100 حبة', { awaiting_qty: true }) === null, 'price question stays price');
+  check(looksLikeQuantityOrder('فيه منه 100 حبه متوفره؟', {}) === null, 'stock question stays stock');
+}
 // A quantity-limit QUESTION is policy, never an order command.
 check(!looksLikeOrderIntent('ايه اقصي كميه ممكن اطلبها ؟', 'ar'), 'qty-limit question is not order intent');
 check(looksLikeOrderIntent('عايز اطلب ميدالية لابوبو', 'ar'), 'real order phrase still is order intent');

@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "init-db": "node -e \"require('./src/db/db'); console.log('Database initialized')\""
+    "init-db": "node -e \"require('./src/db/db'); console.log('Database initialized')\"",
+    "clear-cache": "node scripts/clear-cache.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -12,6 +12,7 @@ const {
   isOrderingEnabled,
   isInternalOrderCommand,
   looksLikeOrderIntent,
+  looksLikeQuantityOrder,
   isYesText,
   isCancelText,
   getExistingPhoneStatus,
@@ -1123,10 +1124,19 @@ router.post('/', tokenValidator, async (req, res) => {
     if (session.phase === 'active' && isOrderingEnabled(business) && !isInternalOrderCommand(text)) {
       const earlyOrderIntent = looksLikeOrderIntent(text, lang)
         || (lang === 'ar' && looksLikeOrderIntent(require('../../engine/translation').translateArabicToEnglish(text), 'en'));
-      if (earlyOrderIntent) {
+      // Explicit quantity + need verb ("محتاج منه 500 حبه"), or a bare
+      // quantity right after we asked for one (awaiting_qty) — an order for
+      // that count of the product in view, NOT a circular "send us the
+      // quantity" quote loop. Price/stock/limit questions are excluded inside
+      // looksLikeQuantityOrder and keep their normal lanes.
+      const qtyOrder = looksLikeQuantityOrder(text, context);
+      if (earlyOrderIntent || qtyOrder) {
         const earlySeed = resolveOrderSeedItems({ text, lang, businessId: business.id, context });
         if (earlySeed.items.length) {
-          return startOrderResponse(earlySeed.items, earlySeed.seedAll);
+          const seeds = qtyOrder
+            ? earlySeed.items.map((item) => ({ ...item, __qty: qtyOrder.qty }))
+            : earlySeed.items;
+          return startOrderResponse(seeds, earlySeed.seedAll);
         }
       }
     }

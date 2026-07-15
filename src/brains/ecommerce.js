@@ -1673,7 +1673,12 @@ function buildResponse(intentResult, lang, business) {
         : (locale === 'ar'
           ? 'أخبرني باسم المنتج الذي تريد معرفة سعره وسأساعدك.'
           : 'Tell me which product you’d like a price for and I’ll help.'));
-      if (sourcing) addContactButton();
+      if (sourcing) {
+        addContactButton();
+        // We just invited a quantity — a bare "500 حبه" next turn means
+        // "open the order at that count" (see looksLikeQuantityOrder).
+        payload.context_update.awaiting_qty = true;
+      }
       payload.suggestions = suggestions.slice(0, 3);
       break;
     }
@@ -1926,6 +1931,9 @@ function buildResponse(intentResult, lang, business) {
         // no price/quote line at all
       } else if (sourcing) {
         lines.push('\n' + sourcingPriceText(locale));
+        // The card just invited the customer to state a quantity — a bare
+        // "500 حبه" next turn opens the order for THIS item at that count.
+        payload.context_update.awaiting_qty = true;
       } else if (item.price !== null && item.price !== undefined) {
         lines.push('\n' + (locale === 'ar' ? `**السعر:** ${item.price} ${item.currency}` : `**Price:** ${item.price} ${item.currency}`));
       }
@@ -1991,6 +1999,9 @@ function buildResponse(intentResult, lang, business) {
       if (sourcing) {
         payload.text = `${getDisplayTitle(item, locale)}${qtyLine ? qtyLine : '\n'}${sourcingPriceText(locale)}`;
         addContactButton();
+        // Same invitation as the product-less quote: a bare quantity next
+        // turn opens the order for THIS item at that count.
+        payload.context_update.awaiting_qty = true;
       } else {
         payload.text = item.price !== null && item.price !== undefined
           ? (locale === 'ar'

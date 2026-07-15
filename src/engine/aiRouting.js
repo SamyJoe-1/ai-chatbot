@@ -895,6 +895,16 @@ function parseAiPipeline(raw) {
   };
 }
 
+// Full flush of the routing-side caches (admin cache-clear action). The
+// pipeline matchers are static per service type, but the catalog signature
+// only auto-invalidates on a COUNT change — an in-place item edit with the
+// same item count keeps serving the stale signature until this runs.
+function clearRoutingCaches() {
+  const count = catalogSignatureCache.size;
+  catalogSignatureCache.clear();
+  return count;
+}
+
 module.exports = {
   assessAiRoutingNeed,
   callAiClassifier,
@@ -902,4 +912,5 @@ module.exports = {
   recordAiCall,
   isAiEnabledForBusiness,
   parseAiPipeline,
+  clearRoutingCaches,
 };
