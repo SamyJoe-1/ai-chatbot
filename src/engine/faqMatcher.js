@@ -90,25 +90,16 @@ function isDistinctive(word) {
   return word.length >= 4 && !GENERIC_WORDS.has(word);
 }
 
-// Returns { question, answer, overlap } for the best matching FAQ, or null.
-function matchFaq({ text, lang, business }) {
-  const list = parseFaqList(lang === 'ar' ? business.faq_ar : business.faq_en)
+function cleanFaqList(value) {
+  return parseFaqList(value)
     .map((entry) => ({
       q: String(entry.q || entry.question || '').trim(),
       a: String(entry.a || entry.answer || '').trim(),
     }))
     .filter((entry) => entry.q && entry.a);
+}
 
-  if (!list.length) return null;
-
-  const messageKeywords = keywordSet(text, lang);
-  if (messageKeywords.size === 0) return null;
-
-  const messageWords = [...messageKeywords];
-  // A short focused question ("do you have wifi") may match on ONE distinctive
-  // keyword; otherwise require the full FAQ_MIN_OVERLAP count.
-  const shortFocused = messageWords.length <= 2;
-
+function matchAgainstList({ list, lang, messageWords, shortFocused }) {
   let best = null;
   for (const entry of list) {
     const questionKeywords = keywordSet(entry.q, lang);
@@ -124,10 +115,46 @@ function matchFaq({ text, lang, business }) {
     const accept = overlap >= FAQ_MIN_OVERLAP
       || (overlap >= 1 && shortFocused && distinctiveHit);
     if (accept && (!best || overlap > best.overlap)) {
-      best = { question: entry.q, answer: entry.a, overlap };
+      // coverage = how much of the CUSTOMER's message the FAQ explains. High
+      // coverage + a distinctive keyword marks a "strong" hit: the message IS
+      // this FAQ, not a longer sentence that brushes against it. Strong hits
+      // are safe to answer before spending an AI call; weak ones stay a
+      // last-resort fallback.
+      const coverage = overlap / messageWords.length;
+      const strong = overlap >= 3 || (overlap >= FAQ_MIN_OVERLAP && distinctiveHit && coverage >= 0.6);
+      best = { question: entry.q, answer: entry.a, overlap, coverage, strong };
     }
   }
   return best;
 }
 
-module.exports = { matchFaq, parseFaqList, FAQ_MIN_OVERLAP };
+// Returns { question, answer, overlap, coverage, strong } for the best
+// matching FAQ, or null. The same-language list is authoritative; the other
+// list is only consulted when the primary one has no hit at all — owners often
+// author loanword topics ("Sourcing") in just one of the two lists, and an
+// Arabic ask must still find the English-only entry (and vice versa).
+function matchFaq({ text, lang, business }) {
+  const primary = cleanFaqList(lang === 'ar' ? business.faq_ar : business.faq_en);
+  const fallback = cleanFaqList(lang === 'ar' ? business.faq_en : business.faq_ar);
+  if (!primary.length && !fallback.length) return null;
+
+  const messageKeywords = keywordSet(text, lang);
+  if (messageKeywords.size === 0) return null;
+
+  const messageWords = [...messageKeywords];
+  // A short focused question ("do you have wifi") may match on ONE distinctive
+  // keyword; otherwise require the full FAQ_MIN_OVERLAP count.
+  const shortFocused = messageWords.length <= 2;
+
+  return matchAgainstList({ list: primary, lang, messageWords, shortFocused })
+    || matchAgainstList({ list: fallback, lang, messageWords, shortFocused });
+}
+
+// Strict variant for the pre-AI gate: only a hit confident enough to preempt
+// the classifier entirely (see `strong` above).
+function matchFaqStrong({ text, lang, business }) {
+  const hit = matchFaq({ text, lang, business });
+  return hit && hit.strong ? hit : null;
+}
+
+module.exports = { matchFaq, matchFaqStrong, parseFaqList, keywordSet, FAQ_MIN_OVERLAP };

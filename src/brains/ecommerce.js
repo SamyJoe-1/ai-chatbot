@@ -125,6 +125,10 @@ const PATTERNS = {
       /\bnumber\s*one\b/i,
       /\btop\s*(pick|choice)\b/i,
       /\bfan\s*favorite\b/i,
+      // Bare superlative + product noun ("best product you have", "greatest
+      // items") — same rule as the Arabic list: "best" only ever means the
+      // owner's hot_selling flag, never an AI-invented ranking.
+      /\b(best|greatest|finest|top)\b[\w\s]{0,20}\b(product|item|thing|option)s?\b/i,
       /\bcustomers?('s)?\s*favorite\b/i,
       /#\s*1\b/,
       /\bmost\s+sought[\s-]?after\b/i,
@@ -196,7 +200,7 @@ const PATTERNS = {
     // HAVE"). No product name required; answered upfront and deterministically
     // (never sent to the AI) so it can't get hijacked into an order-flow
     // "which product?" prompt.
-    moq: [/\b(minimum|min\.?|least|smallest|lowest)\b[\w\s]{0,20}\b(order|quantity|qty|amount|purchase)\b/i, /\bmoq\b/i, /\bhow (many|much)\b[\w\s]{0,15}\b(minimum|at least|to order|can i order)\b/i],
+    moq: [/\b(minimum|min\.?|least|smallest|lowest|maximum|max\.?|most|largest|highest)\b[\w\s]{0,20}\b(order|quantity|qty|amount|purchase)\b/i, /\bmoq\b/i, /\bhow (many|much)\b[\w\s]{0,15}\b(minimum|maximum|at least|at most|up to|to order|can i order)\b/i, /\b(quantity|qty)\b[\w\s]{0,15}\b(limit|cap)\b/i],
     logistics_inquiry: [
       /\bhow (many days?|long|much time|soon)\b/i,
       /\bwhen (will|would|can|could)\b/i,
@@ -254,6 +258,11 @@ const PATTERNS = {
       /(بيست\s*سيلر|بست\s*سيلر|ساخن|مشهور|مطلوب|الاكثر رواجا|الاكثر انتشارا|رايج|رايجه)/,
       /(الافضل مبيعا|الافضل بيعا|احسن حاجه بتتباع|احسن منتج بيع|اشهر منتج|اشهر حاجه|الاكثر شعبيه)/,
       /(منتج رقم واحد|رقم واحد في المبيعات)/,
+      // Bare superlative + product noun ("افضل منتج", "احسن منتجات عندكم") —
+      // the ONLY honest source for "best" is the owner's hot_selling flag, so
+      // this must resolve locally, never let the AI invent a ranking. منت[جح]
+      // tolerates the common ج/ح typo ("منتح"); حاج[ةه] covers dialect "حاجه".
+      /(افضل|احسن|اجمد|اقوي)(?:\s+\S+){0,2}?\s*(منت[جح]|منتجات|حاج[ةه]|خيار|اختيار)/,
     ],
     ecommerce_category_info: [/(عن القسم|القسم|قسم|صنف|تصنيف|تفاصيل القسم)/],
     ecommerce_product_advantages: [/(مميزات|مزايا|فوائد|ليه اشتري|مواصفات)/],
@@ -295,7 +304,11 @@ const PATTERNS = {
     // MINIMUM order quantity (MOQ) — "اقل كمية يمكنني طلبها؟" is a POLICY
     // question, not a stock-count question (stock_quantity above). No \b
     // around the Arabic words — Arabic letters aren't \w, \b never fires there.
-    moq: [/(اقل كميه|أقل كمية|اقل كميه|اقل عدد|أقل عدد|الحد الادنى|الحد الأدنى|حد ادنى|حد أدنى|من كم قطعه يبدا|من كام قطعه يبدا|أقل طلبيه|اقل طلبية|اصغر طلبيه|اصغر طلبية)/],
+    // Covers BOTH directions: minimum ("اقل كمية") and maximum ("اقصى كمية
+    // ممكن اطلبها") — a limit question either way, answered as policy, never
+    // turned into an order. Normalized text: hamza forms collapse to ا and
+    // ى -> ي, so only the normalized spellings are needed here.
+    moq: [/(اقل كمي[ةه]|اقل عدد|الحد الادني|حد ادني|من كم قطعه يبدا|من كام قطعه يبدا|اقل طلبي[ةه]|اصغر طلبي[ةه])/, /(اقصي|اكبر|اعلي)\s*(كمي[ةه]|عدد)/, /(الحد الاقصي|حد اقصي)/, /(كمي[ةه]|عدد)[^؟?]{0,15}(ممكن|يمكن|اقدر|نقدر)[^؟?]{0,10}(اطلب|طلب)/],
     logistics_inquiry: [/(كم يوم|كم يومًا|كم يوماً|امتى|متى يوصل|كم مدة|وقت التوصيل|وقت الشحن|وقت التوريد|المخزن|المستودع|مدة التوريد|مدة الشحن|التسليم|فترة التوريد|هيوصل امتى|يوصل امتى|تاريخ التسليم)/],
   }
 };
@@ -310,6 +323,36 @@ function matchesAny(text, patterns) {
 // so only patterns.ar would normally be tested and the English phrase would be
 // silently dropped -> the query falls through to an unfiltered country list
 // (hot AND non-hot mixed together). Test both language pattern sets, always.
+// Common customer words for a category that don't literally appear in the
+// catalog's category names ("منتجات تجميل" -> "الجمال والعناية", "cosmetics" ->
+// "Beauty & Personal Care"). Each alias maps to normalized keywords tested
+// against the item's own category names, so it works across brands without
+// hardcoding any one catalog. Extend as misses show up in the logs.
+const CATEGORY_ALIASES = [
+  { re: /(تجميل|مكياج|ميكب|كوزمتك|مستحضرات)|\b(cosmetics?|make\s?up|skin\s?care)\b/i, keys: ['جمال', 'عناي', 'beauty'] },
+  { re: /(موبايل|جوال|تليفون)|\b(mobiles?|cell\s?phones?)\b/i, keys: ['هواتف', 'phone'] },
+  { re: /(ملابس|لبس|هدوم)|\b(clothes|clothing|apparel|wear)\b/i, keys: ['ازياء', 'fashion'] },
+  { re: /(عطور|عطر|برفان)|\b(perfumes?|fragrances?)\b/i, keys: ['عطور', 'perfume'] },
+  { re: /(رياض[ةه]|جيم)|\b(sports?|fitness|gym)\b/i, keys: ['رياض', 'sport'] },
+  { re: /(اطفال|بيبي)|\b(kids?|bab(y|ies)|children)\b/i, keys: ['اطفال', 'baby', 'kids'] },
+];
+
+// Resolve a category from an alias word when the literal category matcher
+// found nothing. Returns { display, items } or null.
+function findCategoryByAlias(normalizedText, items, lang) {
+  for (const alias of CATEGORY_ALIASES) {
+    if (!alias.re.test(normalizedText)) continue;
+    const hits = items.filter((item) => {
+      const names = [normalize(item.category_ar || '', 'ar'), normalize(item.category_en || '', 'en')];
+      return alias.keys.some((key) => names.some((n) => n && n.includes(normalize(key, lang === 'ar' ? 'ar' : 'en'))));
+    });
+    if (hits.length) {
+      return { display: getDisplayCategory(hits[0], lang), items: hits };
+    }
+  }
+  return null;
+}
+
 function matchesHotSelling(normalizedText) {
   return matchesAny(normalizedText, PATTERNS.en.ecommerce_search_hot)
     || matchesAny(normalizedText, PATTERNS.ar.ecommerce_search_hot);
@@ -333,12 +376,17 @@ function wantsSingleFromSuperlative(text) {
   const value = String(text || '');
   if (/\b(top|best[\s-]?sell(?:ing|er)|most[\s-]?sold|number\s*one|#\s*1)\b[\w\s]{0,20}\bproduct\b(?!s)/i.test(value)) return true;
   if (/\bproduct\b(?!s)[\w\s]{0,20}\b(top|best[\s-]?sell(?:ing|er)|most[\s-]?sold)\b/i.test(value)) return true;
+  // Bare "best product" (singular) — same implicit "just the #1" ask.
+  if (/\b(best|greatest|finest)\b[\w\s]{0,15}\b(product|item)\b(?!s)/i.test(value)) return true;
   // No \b here — Arabic letters aren't \w, so \b silently never fires around
   // them (same trap detector.js's dialect matchers already work around).
   // (?!ات) alone is enough to exclude the plural "منتجات".
   const norm = normalize(value, 'ar');
   if (/(اكتر|اكثر|اعلي)(?:\s+\S+){0,2}?\s*منتج(?!ات)[\s\S]{0,20}(بيع|مبيع|مبيعا|طلب|طلبا)/.test(norm)) return true;
   if (/منتج(?!ات)[\s\S]{0,20}(اكتر|اكثر|اعلي)[\s\S]{0,20}(بيع|مبيع|مبيعا|طلب|طلبا)/.test(norm)) return true;
+  // Bare "افضل/احسن منتج" (singular, منت[جح] tolerates the ج/ح typo) — the #1
+  // hot-selling item, one card, not a list.
+  if (/(افضل|احسن|اجمد|اقوي)(?:\s+\S+){0,2}?\s*منت[جح](?!ات)/.test(norm)) return true;
   return false;
 }
 
@@ -1169,6 +1217,25 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     }
   }
 
+  // "Can you PROVIDE/SOURCE <category>?" with NO country named ("هل يمكنكم
+  // توفير منتجات تجميل؟") — a bare "yes we can source it" answer dodges the
+  // customer: we may already STOCK that category. Resolve the category (literal
+  // name first, then the alias table for words like تجميل -> الجمال والعناية)
+  // and show its products WITH the capability line. Falls through untouched
+  // when no category is recognizable — the generic capability answer stands.
+  const PROVIDE_CAPABILITY_RE = lang === 'ar'
+    ? /(يمكنكم|يمكنك|تقدروا|تقدرو|تقدرون|ممكن|هل يمكن|بتوفروا|بتوفرو|توفرون|عندكم امكاني[ةه])[^؟?]{0,25}(توفير|توفر|تجيب|تحضر|استيراد|تدبير)/
+    : /\b(can|could|do)\s+you\s+(provide|supply|source|offer|get|import|find)\b/i;
+  if (!activeCountries.length && PROVIDE_CAPABILITY_RE.test(normalizedText)) {
+    const literalCategory = categoryMatches.length === 1 ? categoryMatches[0] : null;
+    const resolved = literalCategory
+      ? { display: literalCategory.display, items: literalCategory.items }
+      : findCategoryByAlias(normalizedText, items, lang);
+    if (resolved && resolved.items.length) {
+      return { intent: 'ecommerce_capability_category', items: resolved.items, category: resolved.display };
+    }
+  }
+
   if (activeCountries.length) {
     const filterCountry = (i) => activeCountries.some((c) => countryMatchesItem(i, c));
     const categoryMatch = categoryMatches.length === 1 ? categoryMatches[0] : null;
@@ -1177,10 +1244,11 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     if (matchesHotSelling(normalizedText)) {
       const filtered = basePool.filter(isHotSelling).filter(filterCountry);
       if (requestedCount && filtered.length) {
+        // Even a single #1 pick stays intent ecommerce_search_hot (a 1-item
+        // list), NOT item_found: search_hot is in ALWAYS_LOCAL_INTENTS, while
+        // item_found is deliberately AI-first — returning it here let the AI
+        // classifier hijack "افضل منتج في السعودية" into a wrong-country miss.
         const capped = filtered.slice(0, requestedCount);
-        if (capped.length === 1) {
-          return { intent: 'item_found', item: capped[0], country: activeCountry, countries: activeCountries };
-        }
         return { intent: 'ecommerce_search_hot', items: capped, country: activeCountry, countries: activeCountries, category: categoryMatch?.display };
       }
       return { intent: 'ecommerce_search_hot', items: filtered, country: activeCountry, countries: activeCountries, category: categoryMatch?.display };
@@ -1222,17 +1290,29 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   // unrelated item's detail instead of a product list. Hot-sellers first (a
   // representative, honest sample), padded with the rest of the catalog.
   if (requestedCount && requestedCount > 1 && !foundItem && !categoryMatches.length) {
+    // "افضل 3 منتجات" is a HOT-SELLING ask with an explicit count, not a
+    // generic sample — keep the honest best-seller framing and cap the list.
+    if (matchesHotSelling(normalizedText)) {
+      return { intent: 'ecommerce_search_hot', items: items.filter(isHotSelling).slice(0, requestedCount) };
+    }
     const hotFirst = [...items.filter(isHotSelling), ...items.filter((i) => !isHotSelling(i))];
     return { intent: 'ecommerce_sample_products', items: hotFirst.slice(0, requestedCount) };
   }
 
   // Hot / best selling (hot_selling boolean), optionally inside one category.
+  // An explicit count — including the implicit 1 from a singular superlative
+  // ("احسن منتج", "the best product") — caps the list. The intent stays
+  // ecommerce_search_hot even for a single pick (see the country branch above:
+  // item_found is AI-first and would let the classifier steal the query).
   if (matchesHotSelling(normalizedText)) {
-    const hotItems = items.filter(isHotSelling);
+    let hotItems = items.filter(isHotSelling);
     if (categoryMatches.length === 1) {
-      return { intent: 'ecommerce_search_hot', items: hotItems.filter(i => getDisplayCategory(i, lang) === categoryMatches[0].display) };
+      hotItems = hotItems.filter(i => getDisplayCategory(i, lang) === categoryMatches[0].display);
     }
-    return { intent: 'ecommerce_search_hot', items: hotItems };
+    if (requestedCount && hotItems.length) {
+      hotItems = hotItems.slice(0, requestedCount);
+    }
+    return { intent: 'ecommerce_search_hot', items: hotItems, category: categoryMatches.length === 1 ? categoryMatches[0].display : undefined };
   }
 
   // Marketing badge filter ("what's new", "trending", "limited"). Only when no
@@ -1553,8 +1633,8 @@ function buildResponse(intentResult, lang, business) {
       payload.text = !qtyEnabled
         ? qtyDisabledText(locale, name)
         : (locale === 'ar'
-          ? 'يختلف الحد الأدنى للطلب حسب نوع المنتج وسياسة المورد — تواصل معنا وسنوضحه لك حسب المنتج الذي تحتاجه.'
-          : 'The minimum order quantity varies by product and supplier policy — contact us and we\'ll confirm it for the product you need.');
+          ? 'تختلف حدود الكمية للطلب (الحد الأدنى أو الأقصى) حسب نوع المنتج وسياسة المورد — تواصل معنا وسنؤكدها لك حسب المنتج الذي تحتاجه.'
+          : 'Order quantity limits (minimum or maximum) vary by product and supplier policy — contact us and we\'ll confirm them for the product you need.');
       if (item) payload.context_update.last_item = item.id;
       addContactButton();
       payload.suggestions = suggestions.slice(0, 3);
@@ -1708,11 +1788,28 @@ function buildResponse(intentResult, lang, business) {
       if (intentResult.category) payload.context_update.last_category = intentResult.category;
       break;
 
+    case 'ecommerce_capability_category': {
+      // "Can you provide <category>?" — answer YES and prove it: the capability
+      // line plus the actual products we already carry in that category.
+      const heading = locale === 'ar'
+        ? `نعم بالتأكيد — يمكننا توفير منتجات ${intentResult.category} من شبكة موردينا وبأفضل الأسعار. وهذه بعض المنتجات المتوفرة لدينا حالياً في هذا القسم:`
+        : `Yes, absolutely — we can source ${intentResult.category} products through our supplier network at the best prices. Here are some of the products we currently carry in this category:`;
+      applyItemList(intentResult.items.slice(0, 6), heading, intentResult.items.length);
+      payload.suggestions = intentResult.items.slice(0, 3).map((item) => getDisplayTitle(item, locale));
+      payload.context_update.last_category = intentResult.category;
+      break;
+    }
+
     case 'ecommerce_search_hot':
       if (intentResult.items && intentResult.items.length > 0) {
+        const single = intentResult.items.length === 1;
         const headline = intentResult.country
-          ? (locale === 'ar' ? `إليك المنتجات الأكثر طلباً في ${intentResult.country}:` : `Here are the hot selling products in ${intentResult.country}:`)
-          : (locale === 'ar' ? 'إليك المنتجات الأكثر طلباً ومبيعاً لدينا:' : 'Here are our hot selling products:');
+          ? (locale === 'ar'
+            ? (single ? `هذا هو المنتج الأكثر طلباً لدينا في ${intentResult.country}:` : `إليك المنتجات الأكثر طلباً في ${intentResult.country}:`)
+            : (single ? `This is our top-selling product in ${intentResult.country}:` : `Here are the hot selling products in ${intentResult.country}:`))
+          : (locale === 'ar'
+            ? (single ? 'هذا هو المنتج الأكثر طلباً ومبيعاً لدينا:' : 'إليك المنتجات الأكثر طلباً ومبيعاً لدينا:')
+            : (single ? 'This is our top-selling product:' : 'Here are our hot selling products:'));
         applyItemList(intentResult.items.slice(0, 6), headline, intentResult.items.length);
         payload.suggestions = intentResult.items.slice(0, 3).map(item => getDisplayTitle(item, locale));
       } else {

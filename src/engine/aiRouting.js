@@ -703,7 +703,7 @@ async function callAiClassifier({ text, business, session, history }) {
         max_tokens: Number(process.env.AI_MAX_TOKENS || 200),
         // Classifier only needs the queryable shape, not the rows — keeps the
         // request tiny (~hundreds of tokens instead of the whole catalog).
-        source_data: buildCatalogSchema(business.id),
+        source_data: buildCatalogSchema(business),
         // Ask the AI service to echo the rendered prompt + full output so the
         // AI Usage view can show exactly what filled the token budget.
         debug: true,
@@ -742,17 +742,14 @@ async function callAiClassifier({ text, business, session, history }) {
 // this DOES receive item rows — but only the small candidate set the caller
 // already narrowed down (e.g. one category), kept compact to stay cheap. The
 // model returns a short reply (the best pick + reason) shown verbatim.
-// The language directive handed to the AI answer service. For Arabic we append
-// the detected dialect so the reply comes back in the SAME dialect the customer
-// used (Egyptian ↔ Egyptian, Gulf ↔ Gulf) instead of generic MSA.
-function aiLanguageLabel(lang, dialect) {
-  if (lang !== 'ar') return 'English';
-  switch (dialect) {
-    case 'egyptian': return 'Egyptian Arabic dialect (اللهجة المصرية)';
-    case 'gulf': return 'Gulf Arabic dialect (اللهجة الخليجية)';
-    case 'levantine': return 'Levantine Arabic dialect (اللهجة الشامية)';
-    default: return 'Arabic';
-  }
+// The language directive handed to the AI answer service. BRAND VOICE: the
+// bot always speaks friendly, professional English or Modern Standard Arabic
+// (فصحى) — it does NOT clone the customer's dialect. The `dialect` parameter
+// is kept in the signature so call sites don't change, but it no longer
+// affects the label.
+function aiLanguageLabel(lang, dialect) { // eslint-disable-line no-unused-vars
+  if (lang !== 'ar') return 'English — friendly and professional';
+  return 'Modern Standard Arabic (العربية الفصحى) — friendly and professional; never dialect';
 }
 
 async function callAiAnswer({ prompt, business, lang, dialect, history, candidates, mode = 'recommend' }) {
@@ -814,13 +811,34 @@ async function callAiAnswer({ prompt, business, lang, dialect, history, candidat
 
 // Tiny schema for the classifier: category names + sortable field keys only.
 // No item rows -> the classify request stays at a few hundred tokens, and the
-// menu itself is NEVER sent to the AI.
-function buildCatalogSchema(businessId) {
-  const items = getBusinessItems(businessId);
+// menu itself is NEVER sent to the AI. FAQ question TITLES (never answers) ride
+// along so the classifier can route a policy/service question to [10] instead
+// of improvising an [11] bounce — ~35 short questions, sits in the cached
+// prompt prefix, so the marginal cost is near zero.
+function buildCatalogSchema(business) {
+  const items = getBusinessItems(business.id);
   const categories = [...new Set(items.map((i) => i.category_en || i.category_ar).filter(Boolean))];
   const fields = new Set(['price']);
   items.forEach((i) => Object.keys(i.metadata || {}).forEach((k) => fields.add(k)));
-  return { categories, sortable_fields: [...fields] };
+  const { parseFaqList } = require('./faqMatcher');
+  // Interleave EN/AR so the cap keeps coverage of BOTH languages' topics (the
+  // two lists usually mirror each other, so 24 interleaved ≈ the top 12 topics
+  // in both tongues). Kept tight on purpose: exact FAQ asks are already
+  // answered locally by the strong-FAQ gate BEFORE any AI call — the classifier
+  // only needs enough topics to recognize the fuzzier rephrasings, and the
+  // whole classify prompt must stay inside the ~2k-token budget.
+  const en = parseFaqList(business.faq_en);
+  const ar = parseFaqList(business.faq_ar);
+  const interleaved = [];
+  for (let i = 0; i < Math.max(en.length, ar.length); i += 1) {
+    if (en[i]) interleaved.push(en[i]);
+    if (ar[i]) interleaved.push(ar[i]);
+  }
+  const faqTopics = interleaved
+    .map((entry) => String(entry.q || entry.question || '').trim())
+    .filter(Boolean)
+    .slice(0, 24);
+  return { categories, sortable_fields: [...fields], faq_topics: faqTopics };
 }
 
 function parseAiPipeline(raw) {

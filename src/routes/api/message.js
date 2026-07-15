@@ -40,7 +40,7 @@ const {
   buildCountryMissPayload,
 } = require('../../engine/aiPipelines');
 const { canUseAi, recordAiUse } = require('../../engine/aiRateLimiter');
-const { matchFaq } = require('../../engine/faqMatcher');
+const { matchFaq, matchFaqStrong, keywordSet: faqKeywordSet } = require('../../engine/faqMatcher');
 const { getCachedClassification, setCachedClassification } = require('../../brains/shared/catalogStore');
 
 const router = express.Router();
@@ -249,6 +249,9 @@ const ALWAYS_LOCAL_INTENTS = new Set([
   // "a perfume in every country" -> one item per served country (local catalog
   // grouping), not a single item's origin or an AI improvisation.
   'ecommerce_per_country',
+  // "can you provide <category>?" -> yes + the category's real products from
+  // the catalog, not a products-less AI "yes we can source anything" reply.
+  'ecommerce_capability_category',
 ]);
 
 // Attach a "Contact us" button (+ a short invite line) to a can't-help reply so
@@ -293,10 +296,35 @@ const AI_FILLER_RE = [
   /\b(tell|let)\s+me\s+know\s+(what|which)\b[^.!?]*\b(need|want|looking for)\b/i,
   /\bassist you in choosing\b/i,
   /\bwhich product\(?s?\)?\s*you'?d like to choose\b/i,
+  // Arabic bounce family — the classifier's own few-shots teach these shapes
+  // ("أنا هنا لمساعدتك! بس قولي أي منتج..."), so they leak verbatim into [11]
+  // replies to questions the FAQ already answers.
+  /هنا لمساعدتك/,
+  /كيف\s+(?:أ|ا)قدر\s+(?:أ|ا)ساعدك/,
+  /قول[يى]?(?:\s+لي)?\s+(?:أ|ا)ي\s+منتج/,
+  /(?:أ|ا)نا معاك[!؟\s]*محتاج تعرف/,
 ];
-function isFillerAiReply(text) {
+// A reply is filler when it hits a known bounce phrasing, OR — structurally —
+// when it just asks a question back without adding a single content word
+// beyond the customer's own message + generic assist vocabulary. The regex
+// list loses the arms race against new phrasings; the structural check
+// doesn't care how the bounce is worded.
+const ASSIST_WORD_RE = /^(?:.*(مساعد|اساعد|أساعد|ساعدك|هنا|معاك|قول|اخبر|أخبر|تحتاج|محتاج|تبي|تبغى|عايز|حاب|تبحث|منتج|عملي[هة]|يسعد|سعيد|خدمت|help|assist|here|tell|need|want|which|what|product|know|looking|sure|course|happy|glad).*|الذي|التي|اللي|عنه|عنها|منه|منها|ايه|ليش|شنو|وش|كيف|ماذا|that|this|about|for|from|else|would|like)$/;
+function isFillerAiReply(text, customerText = '', lang = 'en') {
   const t = String(text || '').trim();
-  return !t || AI_FILLER_RE.some((re) => re.test(t));
+  if (!t) return true;
+  if (AI_FILLER_RE.some((re) => re.test(t))) return true;
+  if (customerText && /[?؟]\s*$/.test(t)) {
+    const replyWords = faqKeywordSet(t, lang);
+    const msgWords = faqKeywordSet(customerText, lang);
+    let novel = 0;
+    for (const w of replyWords) {
+      if (msgWords.has(w) || ASSIST_WORD_RE.test(w)) continue;
+      novel += 1;
+    }
+    if (novel === 0) return true;
+  }
+  return false;
 }
 
 // HARD language guarantee: an AI free-text reply MUST be in the same language
@@ -484,6 +512,15 @@ router.post('/', tokenValidator, async (req, res) => {
     async function tryAiPipeline(reason) {
       if (aiUnavailable || !isAiEnabledForBusiness(business)) return { handled: false };
 
+      // Regression tripwire: a strong FAQ hit should have been answered by the
+      // pre-AI gate for zero tokens. If we're about to spend a classify call
+      // anyway, log it — each line is money burned + owner content at risk of
+      // being talked over by an AI bounce.
+      const shadowFaq = matchFaqStrong({ text, lang, business });
+      if (shadowFaq) {
+        console.warn('[faq-shadow] classify spent while strong FAQ exists', { reason, question: shadowFaq.question });
+      }
+
       // Identical question already classified? Reuse it — no rate-limit hit, no
       // network call, no tokens billed.
       let aiResult;
@@ -613,6 +650,26 @@ router.post('/', tokenValidator, async (req, res) => {
       // "does this item have butter?"). Show it verbatim — no second AI call.
       if (pipeline.code === 11) {
         const direct = (pipeline.direct || '').trim();
+        // Owner-authored FAQ outranks the AI's inline guess: [11] is a last
+        // resort for questions no rule can answer, but when the owner already
+        // wrote THE answer, serve it (and log that the classify call was
+        // wasted — the pre-AI FAQ gate should have caught this earlier).
+        const faqOverAi = resolveFaqWithContext();
+        if (faqOverAi) {
+          console.warn('[faq-shadow] [11] preempted by owner FAQ', { question: faqOverAi.question, overlap: faqOverAi.overlap });
+          return {
+            handled: true,
+            intent: 'faq',
+            payload: {
+              text: faqOverAi.answer,
+              type: 'text',
+              buttons: [],
+              suggestions: parseSuggestions(business, lang),
+              context_update: { last_faq: faqOverAi.question },
+            },
+            raw: aiResult.raw,
+          };
+        }
         // Wrong-language reply (e.g. an Arabic answer to an English question) ->
         // discard entirely, don't even keep it as the bounce fallback. Let the
         // generic-answer call downstream reply in the RIGHT language (it has the
@@ -626,7 +683,7 @@ router.post('/', tokenValidator, async (req, res) => {
         // brain's 'help' intent, which offers real, actionable next steps)
         // rather than parroting the same dead-end question back. Keep the
         // text though — if the rules ALSO dead-end, it's still a real reply.
-        if (isFillerAiReply(direct)) {
+        if (isFillerAiReply(direct, text, lang)) {
           aiDirectBounceText = direct;
           return { handled: false, raw: aiResult.raw };
         }
@@ -1091,11 +1148,45 @@ router.post('/', tokenValidator, async (req, res) => {
     const orderInfoEscape = phaseStr.startsWith('order_')
       && phaseStr !== 'order_address'
       && !isInternalOrderCommand(text);
-    // Check local rules BEFORE spending an AI call: if a deterministic intent
-    // already has the right answer, showing it beats an AI freeform reply
-    // that might bounce with a generic non-answer (and costs money either way).
+    // Check local rules BEFORE the FAQ gate and before spending an AI call: if
+    // a deterministic intent already has the right answer, showing it beats
+    // both an AI freeform reply AND a merely-adjacent FAQ (a max-quantity
+    // question must get the moq policy answer, not a nearby "how to order"
+    // FAQ; a capability-with-category ask must show the category's products).
     const localFirstProbe = brain.detectIntent({ text, lang, business, context });
     const localFirstHasAnswer = Boolean(localFirstProbe && ALWAYS_LOCAL_INTENTS.has(localFirstProbe.intent));
+    // Owner-authored FAQ gate, BEFORE any AI spend. A strong hit (high overlap
+    // + coverage: the message IS this FAQ, not a sentence brushing against it)
+    // answers immediately for zero tokens — "كيف تتم عملية الـ Sourcing؟" must
+    // never reach the classifier, which bounces it with a content-free [11].
+    // Order intent still wins (the early-order block above already ran; a bare
+    // order phrase with no seed must keep flowing to the order pipeline), a
+    // deterministic local answer wins too, and weak/ambiguous hits keep their
+    // old place as the not-found fallback.
+    if ((session.phase === 'active' || orderInfoEscape)
+      && !localFirstHasAnswer
+      && !isInternalOrderCommand(text)
+      && !looksLikeOrderIntent(text, lang)) {
+      const strongFaq = matchFaqStrong({ text, lang, business });
+      if (strongFaq) {
+        const faqSuggestions = parseSuggestions(business, lang);
+        return await sendPayloadResult({
+          payload: {
+            text: strongFaq.answer,
+            type: 'text',
+            buttons: [],
+            suggestions: faqSuggestions,
+            context_update: { last_faq: strongFaq.question },
+          },
+          intent: 'faq',
+          nextContext: {
+            ...context,
+            last_faq: strongFaq.question,
+            last_suggestions: normalizeSuggestions(faqSuggestions),
+          },
+        });
+      }
+    }
     if ((session.phase === 'active' || orderInfoEscape) && aiAssessment.route === 'ai' && !localFirstHasAnswer) {
       const aiPipeline = await tryAiPipeline('threshold');
       aiClassifyAttempted = true;
@@ -1385,3 +1476,5 @@ router.post('/', tokenValidator, async (req, res) => {
 });
 
 module.exports = router;
+// Exposed for tests only — the route itself is the module's public surface.
+module.exports.isFillerAiReply = isFillerAiReply;

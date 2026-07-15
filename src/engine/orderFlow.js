@@ -135,9 +135,23 @@ function isOrderingEnabled(business) {
   return ['cafe', 'ecommerce'].includes(String(business?.service_type || ''));
 }
 
+// A quantity-LIMIT question ("ايه اقصى كمية ممكن اطلبها؟", "what's the max I
+// can order?") contains an order verb ("اطلبها" matches اطلب) but is a POLICY
+// question, never an order command. Without this guard the early-order gate
+// hijacked it and opened a real order seeded from context. Both ى/ي and ة/ه
+// spellings covered — this tests RAW text, not the normalized form.
+const QTY_LIMIT_QUESTION_RE = new RegExp([
+  '(اقل|أقل|اقصى|أقصى|اقصي|أقصي|اكبر|أكبر|اعلى|أعلى|اعلي)\\s*(كمي[ةه]|عدد|حد)',
+  '(الحد|حد)\\s*(الاقصى|الأقصى|الادنى|الأدنى|اقصى|أقصى|ادنى|أدنى)',
+  '\\b(min(imum)?|max(imum)?|least|most|largest|smallest|highest|lowest)\\b[\\w\\s]{0,20}\\b(order|quantity|qty|amount)\\b',
+  '\\b(quantity|qty)\\b[\\w\\s]{0,15}\\b(limit|cap|min(imum)?|max(imum)?)\\b',
+].join('|'));
+
 function looksLikeOrderIntent(text, lang) {
+  const value = String(text || '').trim();
+  if (QTY_LIMIT_QUESTION_RE.test(value)) return false;
   const patterns = ORDER_INTENT_PATTERNS[lang] || ORDER_INTENT_PATTERNS.en;
-  return patterns.some((pattern) => pattern.test(String(text || '').trim()));
+  return patterns.some((pattern) => pattern.test(value));
 }
 
 function buildCommand(action, itemId) {
