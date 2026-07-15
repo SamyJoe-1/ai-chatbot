@@ -163,7 +163,16 @@ function looksLikeOrderIntent(text, lang) {
 const ORDER_QTY_UNIT_RE = /(\d{1,7})\s*(حبة|حبه|قطعة|قطعه|قطع|علبة|علبه|كرتون|كرتونه|كرتونة|درزن|دستة|دسته|طن|كيلو|pcs?|pieces?|units?|dozen|cartons?|boxes?|kg)/i;
 const PRICE_QUESTION_RE = /(بكم|بكام|بقديش|سعر|اسعار|أسعار|الثمن|حقها كم|كم حقها|عرض سعر|price|how much|quote|cost)/i;
 const STOCK_LIMIT_RE = /(اقل|أقل|اقصى|أقصى|اقصي|الحد|متوفر|متاح|مخزون|ستوك|عندكم كام|كام عندكم|stock|available|in store|minimum|maximum|\bmin\b|\bmax\b|least|most)/i;
-const NEED_VERB_RE = /(محتاج|محتاجه|محتاجة|عايز|عاوز|اريد|أريد|ابغى|ابغي|ابي|بدي|هات|اطلب|أطلب|نفسي في|need|want|take|order|get me|buy|send me)/i;
+const NEED_VERB_RE = /(محتاج|محتاجه|محتاجة|احتاج|أحتاج|نحتاج|يحتاج|عايز|عاوز|اريد|أريد|ابغى|ابغي|ابي|بدي|هات|اطلب|أطلب|نفسي في|need|want|take|order|get me|buy|send me)/i;
+
+// Vocabulary that carries no product meaning in a quantity-order message —
+// stripped (with the qty phrase and need verb) to decide whether the customer
+// actually NAMED a product ("عايز 20 قطعه من قلم جيفو") or only stated a
+// count ("احتاج كميه 1000 حبه"). A count-only message must seed from the
+// product already in view (context.last_item), NEVER from fuzzy-matching the
+// leftovers — that's how "احتاج كميه 1000 حبه" once phonetic-matched a random
+// unrelated pen into the order.
+const QTY_FILLER_RE = /(كمي[ةه]|عدد|منه|منها|منهم|من فضلك|لو سمحت|من|ده|دي|دا|هذا|هذه|بس|فقط|كمان|please|pls|of|this|that|these|those|it|them|the|a|an|i|me|my|for|now)/gi;
 
 function looksLikeQuantityOrder(text, context) {
   const value = String(text || '').trim();
@@ -172,9 +181,17 @@ function looksLikeQuantityOrder(text, context) {
   const qty = Number(match[1]);
   if (!Number.isFinite(qty) || qty <= 0) return null;
   if (PRICE_QUESTION_RE.test(value) || STOCK_LIMIT_RE.test(value)) return null;
-  if (NEED_VERB_RE.test(value)) return { qty, unit: match[2] };
-  if (context && context.awaiting_qty) return { qty, unit: match[2] };
-  return null;
+  const armed = NEED_VERB_RE.test(value) || (context && context.awaiting_qty);
+  if (!armed) return null;
+  // bare = nothing product-like left once the qty phrase, need verbs, and
+  // filler are stripped. Callers use it to bypass fuzzy item matching.
+  const residual = value
+    .replace(ORDER_QTY_UNIT_RE, ' ')
+    .replace(new RegExp(NEED_VERB_RE.source, 'gi'), ' ')
+    .replace(QTY_FILLER_RE, ' ')
+    .replace(/[\d؟?!.,،]+/g, ' ');
+  const bare = !residual.split(/\s+/).some((token) => token.length >= 3);
+  return { qty, unit: match[2], bare };
 }
 
 function buildCommand(action, itemId) {
@@ -508,9 +525,9 @@ function matchItemsForOrder({ text, lang, businessId, context = {} }) {
   }
 
   // 2. Try algorithmic Franco-Arabic phonetic recovery
-  // Only run if the text actually contains Franco (Latin) letters/digits AND
-  // the business hasn't disabled Franco recovery.
-  if (/[a-zA-Z0-9]/.test(text) && isFrancoEnabled(businessId)) {
+  // Only run if the text actually contains Latin LETTERS (digits alone are a
+  // quantity, not Arabizi) AND the business hasn't disabled Franco recovery.
+  if (/[a-zA-Z]/.test(text) && isFrancoEnabled(businessId)) {
     const { recoverFranco } = require('./franco');
     const francoText = recoverFranco(text, items);
     if (francoText && francoText !== text) {

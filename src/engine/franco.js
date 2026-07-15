@@ -133,8 +133,12 @@ function shouldAttemptFranco(text) {
 function recoverFranco(text, items) {
   if (!text) return text;
 
-  // 1. Only process if it has Franco characters (Latin characters or digits)
-  if (!/[a-zA-Z0-9]/.test(text)) {
+  // 1. Only process if it has Latin LETTERS. Digits alone are NOT Franco:
+  // Arabizi digits stand for letters INSIDE Latin words ("3ayez"), so a pure
+  // Arabic message with a number ("احتاج كميه 1000 حبه") must never enter —
+  // it used to get phonetically butchered into unrelated item names
+  // ("yara fragrance jivo") and seeded a WRONG product into an order.
+  if (!/[a-zA-Z]/.test(text)) {
     return text;
   }
 

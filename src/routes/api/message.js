@@ -165,7 +165,7 @@ function detectOrdinalIndex(text) {
 // none are named but the message refers back to a prior turn ("an order with
 // them"), fall back to the items we last recommended ([12]) or last showed —
 // that is a PRECISE set, so seedAll tells the order flow to add every one.
-function resolveOrderSeedItems({ text, lang, businessId, context }) {
+function resolveOrderSeedItems({ text, lang, businessId, context, skipExplicit = false }) {
   const raw = String(text || '');
 
   // 1. Ordinal into the list we just showed ("order the first/second one",
@@ -187,9 +187,14 @@ function resolveOrderSeedItems({ text, lang, businessId, context }) {
     }
   }
 
-  // 2. Items explicitly named in THIS message win.
-  const explicitItems = matchItemsForOrder({ text, lang, businessId, context });
-  if (explicitItems.length) return { items: explicitItems, seedAll: false, explicit: true };
+  // 2. Items explicitly named in THIS message win. Skipped for a count-only
+  //    quantity order ("احتاج كميه 1000 حبه") — there is no product name in
+  //    the message, so any "match" here is fuzzy noise and the product in
+  //    view (context, below) is the only honest referent.
+  if (!skipExplicit) {
+    const explicitItems = matchItemsForOrder({ text, lang, businessId, context });
+    if (explicitItems.length) return { items: explicitItems, seedAll: false, explicit: true };
+  }
 
   // 3. "order them / those / both" -> the SET we last recommended/showed.
   if (ORDER_ANAPHOR_RE.test(raw) || ORDER_ANAPHOR_AR_RE.test(raw)) {
@@ -1131,7 +1136,12 @@ router.post('/', tokenValidator, async (req, res) => {
       // looksLikeQuantityOrder and keep their normal lanes.
       const qtyOrder = looksLikeQuantityOrder(text, context);
       if (earlyOrderIntent || qtyOrder) {
-        const earlySeed = resolveOrderSeedItems({ text, lang, businessId: business.id, context });
+        // bare = the message is ONLY a quantity ("احتاج كميه 1000 حبه") —
+        // resolve the item from context alone, never fuzzy-match the residue.
+        const earlySeed = resolveOrderSeedItems({
+          text, lang, businessId: business.id, context,
+          skipExplicit: Boolean(qtyOrder && qtyOrder.bare),
+        });
         if (earlySeed.items.length) {
           const seeds = qtyOrder
             ? earlySeed.items.map((item) => ({ ...item, __qty: qtyOrder.qty }))

@@ -74,7 +74,16 @@ function intentOf(text) {
 }
 // Explicit quantity + need verb = order at that count; price/stock stay put.
 {
-  const { looksLikeQuantityOrder } = require('../src/engine/orderFlow');
+  const { looksLikeQuantityOrder, matchItemsForOrder } = require('../src/engine/orderFlow');
+  const { recoverFranco } = require('../src/engine/franco');
+  const { getBusinessItems } = require('../src/brains/shared/catalogStore');
+  // Count-only quantity orders are `bare` -> seeded from context.last_item,
+  // never fuzzy-matched (the JIVO-pen hallucination regression).
+  check(looksLikeQuantityOrder('احتاج كميه 1000 حبه', {})?.bare === true, 'count-only qty order is bare');
+  check(looksLikeQuantityOrder('عايز 20 قطعه من قلم جيفو', {})?.bare === false, 'qty order naming a product is NOT bare');
+  const arDigits = 'احتاج كميه 1000 حبه';
+  check(recoverFranco(arDigits, getBusinessItems(3)) === arDigits, 'franco skips pure Arabic + digits');
+  check(matchItemsForOrder({ text: arDigits, lang: 'ar', businessId: 3, context: {} }).length === 0, 'no phantom item match from qty-only text');
   check(looksLikeQuantityOrder('محتاج منه 500 حبه', {})?.qty === 500, 'محتاج منه 500 حبه -> order qty 500');
   check(looksLikeQuantityOrder('i want 50 pieces', {})?.qty === 50, 'EN want 50 pieces -> order qty 50');
   check(looksLikeQuantityOrder('500 حبه', { awaiting_qty: true })?.qty === 500, 'bare qty after invite -> order');
