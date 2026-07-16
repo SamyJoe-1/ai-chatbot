@@ -628,23 +628,38 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context, text }) {
     });
   }
 
+  // [7]/[8] resolve item names inside the COUNTRY-scoped pool when the message
+  // names a country ("هل متاح عطر نسائي في الكويت؟") — resolving over the whole
+  // catalog was exactly how a Kuwait availability question got answered with a
+  // Libya product. If the name only resolves OUTSIDE the country, that's an
+  // honest countryMiss, not a match.
+  const detailPool = activeCountries.length
+    ? items.filter((item) => activeCountries.some((c) => countryMatchesItem(item, c)))
+    : items;
+
   if (pipeline.code === 7) {
     // The slot may name several items — resolve each separately so we show a
     // full card per item instead of collapsing to the first match.
     const parts = splitItemSlot(pipeline.item);
     const resolved = [];
     const seen = new Set();
+    let missedInCountry = false;
     for (const part of (parts.length ? parts : [pipeline.item])) {
-      let best = bestItemForName(items, part, locale);
+      let best = bestItemForName(detailPool, part, locale);
       if (!best) {
-        const m = conceptMatchItems({ text: part, lang: locale, items, profile: getBrandProfile(business.id) });
+        const m = conceptMatchItems({ text: part, lang: locale, items: detailPool, profile: getBrandProfile(business.id) });
         best = m[0] || null;
+      }
+      // Resolves outside the requested country but not inside it -> miss.
+      if (!best && activeCountries.length && bestItemForName(items, part, locale)) {
+        missedInCountry = true;
       }
       if (best && !seen.has(best.id)) {
         seen.add(best.id);
         resolved.push(best);
       }
     }
+    if (!resolved.length && missedInCountry) return countryMissPayload();
     if (!resolved.length) {
       // No item named at all (a bare "tell me more" / "الوصف العام" follow-up
       // with nothing to search on) -> use the product already on the table
@@ -670,9 +685,9 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context, text }) {
       const resolvedItems = [];
       const seen = new Set();
       for (const part of detailParts) {
-        let best = bestItemForName(items, part, locale);
+        let best = bestItemForName(detailPool, part, locale);
         if (!best) {
-          const m = conceptMatchItems({ text: part, lang: locale, items, profile: getBrandProfile(business.id) });
+          const m = conceptMatchItems({ text: part, lang: locale, items: detailPool, profile: getBrandProfile(business.id) });
           best = m[0] || null;
         }
         if (best && !seen.has(best.id)) {
@@ -692,7 +707,12 @@ function resolveAiPipeline({ pipeline, brain, business, lang, context, text }) {
     // onto a completely unrelated product that merely shares a prefix
     // ("مكوناته" ~ "مكواة تجعيد شعر..."). Resolve from context instead.
     const itemSlotIsWeak = isGenericItemRef(pipeline.itemForDetail) || looksLikePossessiveFragment(pipeline.itemForDetail, locale);
-    const matches = itemSlotIsWeak ? [] : findItemsByText(items, pipeline.itemForDetail, locale);
+    const matches = itemSlotIsWeak ? [] : findItemsByText(detailPool, pipeline.itemForDetail, locale);
+    // Named product resolves outside the requested country only -> honest miss.
+    if (!matches.length && !itemSlotIsWeak && activeCountries.length
+      && findItemsByText(items, pipeline.itemForDetail, locale).length) {
+      return countryMissPayload();
+    }
     let item = matches[0];
     // No product named this turn ("price?", "and the code?", "الوصف ايه؟") —
     // the classifier's own history window is short and can scroll past the

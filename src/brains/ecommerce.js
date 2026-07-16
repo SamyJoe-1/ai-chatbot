@@ -5,6 +5,7 @@ const { getBusinessItems, getAllBusinessItems } = require('./shared/catalogStore
 const { findMatchingCategories, findScoredItems, uniqueById, uniqueScoredByTitle, detectCountry, detectCountries, detectAnyKnownCountry, countryCanonicalId, countryMatchesItem } = require('./shared/matcher');
 const { getItemThumbnail, buildThumbnailMessages } = require('./shared/thumbnailMessages');
 const { matchFaq, parseFaqList } = require('../engine/faqMatcher');
+const { extractProductCode, displayCode, findByCode, extractSubjectQuery, searchWithinPool } = require('./shared/productSearch');
 
 const FEATURE_SYNONYMS = {
   color: ['color', 'colors', 'لون', 'اللون', 'ألوان', 'الوان'],
@@ -226,7 +227,12 @@ const PATTERNS = {
     //    (I want watches) then flows to product search instead of hours.
     working_hours: [/(ساعات\s*(العمل|عمل|الدوام|عملكم|الفتح|التشغيل|الرسميه|الرسمية)|مواعيد|الدوام|شغالين|تفتح|تقفل|تفتحون|تغلقون|امتى|امتا|الساعة كام|الساعه كام)/],
     location: [/(العنوان|الموقع|وين|فين|أين|اتجاهات|خريطة|مكان|فروعكم|فرعكم)/],
-    brand_info: [/(من انتم|مين انتم|نبذه عنكم|نبذة عنكم|من انتو|ماذا تقدمون|عن المتجر|عن المعرض|مين انت|خدمات|خدمتكم|وش تقدمون|ايش تقدمون|بتقدموا ايه|بتقدموا إيه|بتعملوا ايه|بتعملوا إيه|شغلكم ايه|شغلكم إيه|طبيعه عملكم|طبيعة عملكم|بتبيعوا ايه|بتبيعوا إيه|بتوفروا ايه|بتوفروا إيه|ايه اللي بتقدموه|إيه اللي بتقدموه)/],
+    brand_info: [
+      /(من انتم|مين انتم|نبذه عنكم|نبذة عنكم|من انتو|ماذا تقدمون|عن المتجر|عن المعرض|مين انت|خدمات|خدمتكم|وش تقدمون|ايش تقدمون|بتقدموا ايه|بتقدموا إيه|بتعملوا ايه|بتعملوا إيه|شغلكم ايه|شغلكم إيه|طبيعه عملكم|طبيعة عملكم|بتبيعوا ايه|بتبيعوا إيه|بتوفروا ايه|بتوفروا إيه|ايه اللي بتقدموه|إيه اللي بتقدموه)/,
+      // "ممكن تعرفني بشركتكم ومجال عملكم؟" — introduce-your-company asks.
+      /(عرفني|تعرفني|عرفنا|تعرفنا|عرفيني)[^؟?]{0,12}(شركتكم|بالشركه|الشركه|عنكم|بيكم|نفسك|نفسكم)/,
+      /(مجال\s*(عمل|شغل|نشاط)|نشاطكم|تخصصكم|مجالكم|عن الشركه|بالشركه)/,
+    ],
     // "احنا كنا بنتكلم علي منتج ايه" / "راجع الشات وهتعرف احنا بنتكلم علي انهي
     // منتج" — recall the product under discussion from context instead of asking
     // the customer which product (which loops infuriatingly).
@@ -237,7 +243,12 @@ const PATTERNS = {
     ],
     catalog_general: [/(كتالوج|ايش عندكم|شو عندكم|عندكم ايه|عندك ايه|الكتالوج|وش عندكم)/],
     catalog_general_generic: [/(المنتجات|السوق|الماركت|المتجر|منتجاتكم|كل منتجاتكم|جميع منتجاتكم|منتجاتكو)/],
-    list_categories: [/(كل الاقسام|كل الأقسام|جميع الاقسام|جميع الأقسام|الاقسام الموجودة|الأقسام الموجودة|ايه الاقسام|إيه الأقسام|ايش الاقسام|شو الاقسام|عندكم اقسام ايه|عندكم أقسام ايه|الفئات المتاحة|كل الفئات|جميع الفئات|انواع المنتجات|أنواع المنتجات|التصنيفات)/],
+    list_categories: [
+      /(كل الاقسام|كل الأقسام|جميع الاقسام|جميع الأقسام|الاقسام الموجودة|الأقسام الموجودة|ايه الاقسام|إيه الأقسام|ايش الاقسام|شو الاقسام|عندكم اقسام ايه|عندكم أقسام ايه|الفئات المتاحة|كل الفئات|جميع الفئات|انواع المنتجات|أنواع المنتجات|التصنيفات)/,
+      // "ما هي أقسام المنتجات لديكم في السعودية؟" — any اقسام/فئات question.
+      /(اقسام|الاقسام|فئات|الفئات)\s*(المنتجات|منتجاتكم|البضاعه|البضائع|السلع|عندكم|لديكم)/,
+      /(ما|ايه|ايش|وش|شو)[^؟?]{0,12}(الاقسام|اقسام|الفئات|فئات)/,
+    ],
     order_howto: [
       /كيف[؀-ۿ\s]{0,15}(اطلب|أطلب|الطلب|اعمل طلب|اعمل اوردر|اوردر)/,
       /ازاي[؀-ۿ\s]{0,15}(اطلب|أطلب|الطلب|اعمل اوردر|اعمل طلب)/,
@@ -329,12 +340,24 @@ function matchesAny(text, patterns) {
 // against the item's own category names, so it works across brands without
 // hardcoding any one catalog. Extend as misses show up in the logs.
 const CATEGORY_ALIASES = [
-  { re: /(تجميل|مكياج|ميكب|كوزمتك|مستحضرات)|\b(cosmetics?|make\s?up|skin\s?care)\b/i, keys: ['جمال', 'عناي', 'beauty'] },
+  { re: /(تجميل|مكياج|ميكب|كوزمتك|مستحضرات|بشر[ةه])|\b(cosmetics?|make\s?up|skin\s?care)\b/i, keys: ['جمال', 'عناي', 'beauty'] },
   { re: /(موبايل|جوال|تليفون)|\b(mobiles?|cell\s?phones?)\b/i, keys: ['هواتف', 'phone'] },
   { re: /(ملابس|لبس|هدوم)|\b(clothes|clothing|apparel|wear)\b/i, keys: ['ازياء', 'fashion'] },
-  { re: /(عطور|عطر|برفان)|\b(perfumes?|fragrances?)\b/i, keys: ['عطور', 'perfume'] },
+  { re: /(عطور|عطر|برفان|بارفان)|\b(perfumes?|fragrances?|scents?)\b/i, keys: ['عطور', 'perfume'] },
   { re: /(رياض[ةه]|جيم)|\b(sports?|fitness|gym)\b/i, keys: ['رياض', 'sport'] },
   { re: /(اطفال|بيبي)|\b(kids?|bab(y|ies)|children)\b/i, keys: ['اطفال', 'baby', 'kids'] },
+  // "أجهزة منزلية" resolves literally; these cover the looser spellings.
+  { re: /(اجهز[ةه] منزلي[ةه]|اجهز[ةه] البيت|اجهز[ةه] كهربائي[ةه])|\b(home\s?appliances?|electrical appliances?)\b/i, keys: ['اجهزه منزليه', 'appliance'] },
+  { re: /(ساع[ةه]|ساعات يد)|\b(watch(es)?)\b/i, keys: ['ساعات', 'watch'] },
+  { re: /(شنط|حقائب|حقيب[ةه]|احذي[ةه]|جزم)|\b(bags?|shoes?|footwear|handbags?)\b/i, keys: ['شنط', 'احذيه', 'bags', 'shoes'] },
+  { re: /(صح[ةه]|عافي[ةه]|مكملات|فيتامين)|\b(health|wellness|supplements?|vitamins?)\b/i, keys: ['صحه', 'عافيه', 'health'] },
+  { re: /(مطبخ|ادوات منزلي[ةه]|ادوات المطبخ)|\b(kitchen(ware)?)\b/i, keys: ['مطبخ', 'kitchen'] },
+  { re: /(حديق[ةه]|جنين[ةه]|زراع[ةه])|\b(garden(ing)?)\b/i, keys: ['حديق', 'garden'] },
+  { re: /(مكتب|مكاتب|قرطاسي[ةه])|\b(office|stationery)\b/i, keys: ['مكاتب', 'office'] },
+  { re: /(الكترونيات|إلكترونيات|اجهز[ةه] الكتروني[ةه])|\b(electronics?|gadgets?)\b/i, keys: ['الكترونيات', 'electronic'] },
+  { re: /(العاب|لعب[ةه])|\b(games?|toys?)\b/i, keys: ['العاب', 'game'] },
+  { re: /(معدات)|\b(equipment|tools?)\b/i, keys: ['معدات', 'equipment'] },
+  { re: /(سيار[ةه]|سيارات|عربيات)|\b(car|cars|automotive|auto)\b/i, keys: ['سيارات', 'automotive'] },
 ];
 
 // Resolve a category from an alias word when the literal category matcher
@@ -743,6 +766,10 @@ const STATUS_YESNO_GROUPS = [
     test: (item) => Number(item.available) === 1 || item.available === true,
     // "is it available in <country>?" is a country question, not a stock yes/no.
     skipWhenCountry: true,
+    // "هل متوفر عطور؟" names a CATEGORY — that's a category-availability search,
+    // never a yes/no about whatever stale item happens to sit in context (this
+    // exact hijack answered a perfumes question with a baby organizer).
+    skipWhenCategory: true,
   },
   { key: 'new', re: [/\bnew\b/i], reAr: [/جديد|الجديد/], test: (item) => itemBadge(item).includes('new') },
   { key: 'trending', re: [/\btrending\b/i, /\btrend\b/i], reAr: [/رائج|الرائج|ترند|تريند/], test: (item) => itemBadge(item).includes('trending') },
@@ -878,6 +905,34 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   if (matchesAny(normalizedText, patterns.greeting_how_are_you)) return { intent: 'greeting_how_are_you' };
   if (matchesAny(normalizedText, patterns.greeting_yasta)) return { intent: 'greeting_yasta' };
   if (matchesAny(normalizedText, patterns.thanks) && isPureThanksMessage(normalizedText, patterns.thanks)) return { intent: 'thanks' };
+
+  // --- Product-code lane (deterministic; checked before EVERYTHING else that
+  // could fuzzy-match). A message carrying a code like "SA-BC1004" is a lookup
+  // for exactly that SKU: resolve ONLY by exact metadata.code match. A code
+  // that matches nothing means "this code isn't in our database" — never a
+  // fuzzy substitute product presented as if it were the requested one.
+  const codeAsk = extractProductCode(text);
+  if (codeAsk) {
+    const allRows = getAllBusinessItems(business.id);
+    const codeHit = findByCode(allRows, codeAsk);
+    if (codeHit && codeHit.in_stock) return { intent: 'ecommerce_code_lookup', item: codeHit, code: codeAsk };
+    if (codeHit) return { intent: 'ecommerce_unavailable', item: codeHit };
+    return { intent: 'ecommerce_code_not_found', code: codeAsk };
+  }
+
+  // --- Price-threshold filter ("products under 50 SAR", "بأقل من 50 ريال").
+  // This store publishes no prices (quote-on-request) — claiming a product
+  // meets a price ceiling would be fabricated. Answer honestly instead of
+  // letting the item matcher "find" something and imply it fits the budget.
+  if (!isPriceEnabled(business) || isSourcing(business)) {
+    const PRICE_FILTER_RE = lang === 'ar'
+      ? /(ب?اقل من|ب?ارخص من|تحت|في حدود|بحدود|ب?اكثر من|ب?اغلي من|فوق|يبدا من|ابتداء من)\s*\d/
+      : /\b(under|below|less than|cheaper than|over|above|more than|max(?:imum)?|budget of|around|starting (?:at|from))\s*\$?\d/i;
+    const PRICE_CONTEXT_RE = /(ريال|درهم|دينار|جنيه|دولار|سعر|اسعار|فلوس|sar|aed|usd|kwd|egp|price|cost|\$|€|£)|منتج|product|item/i;
+    if (PRICE_FILTER_RE.test(normalizedText) && PRICE_CONTEXT_RE.test(normalizedText)) {
+      return { intent: 'ecommerce_price_filter' };
+    }
+  }
 
   // "X in every country" ("عطر في كل بلد", "a perfume in each country") -> ONE X
   // per served country, NOT a single item's origin. Must run before the item /
@@ -1035,7 +1090,13 @@ function runDetectIntent({ text, lang, business, context = {} }) {
   const mentionsCountryTopic = /\bcountr(y|ies)\b/i.test(normalizedText)
     || /(^|\s)(دول|دوله|دولة|بلد|بلاد|بلدان)(\s|$|كم|ان)/.test(normalizedText);
   const isProductCountryFilter = /\b(products?|items?)\b/i.test(normalizedText)
-    || /(منتج|منتجات|سلعه|سلعة|سلع|صنف|اصناف|أصناف)/.test(normalizedText);
+    || /(منتج|منتجات|سلعه|سلعة|سلع|صنف|اصناف|أصناف)/.test(normalizedText)
+    // A resolvable CATEGORY named alongside the country ("عندكم ساعات في
+    // الامارات؟") makes it a product query too — "عندكم" is also a
+    // service-area verb, and without this the watches question was answered
+    // with the served-countries list instead of the UAE watches.
+    || categoryMatches.length > 0
+    || Boolean(findCategoryByAlias(normalizedText, items, lang));
   // "best seller / best selling / top seller in <country>" is a HOT-PRODUCT query,
   // not a coverage question — but "seller"/"selling" hit the "sell" service-area
   // verb. Exclude it so it flows to the ecommerce_search_hot handler below.
@@ -1088,9 +1149,20 @@ function runDetectIntent({ text, lang, business, context = {} }) {
 
   // "What categories do you have?" — answered straight from the catalog
   // already loaded above, no AI classification needed for static metadata.
+  // A country named in the SAME message ("أقسام المنتجات لديكم في السعودية")
+  // scopes the list to the categories that country actually stocks.
   if (matchesAny(normalizedText, patterns.list_categories)) {
-    const categories = [...new Set(items.map((item) => getDisplayCategory(item, lang)).filter(Boolean))];
-    return { intent: 'list_categories', categories };
+    const catCountries = detectCountries(text, lang, items);
+    const pool = catCountries.length
+      ? items.filter((i) => catCountries.some((c) => countryMatchesItem(i, c)))
+      : items;
+    const categories = [...new Set(pool.map((item) => getDisplayCategory(item, lang)).filter(Boolean))];
+    return {
+      intent: 'list_categories',
+      categories,
+      country: catCountries.length ? catCountries.join(lang === 'ar' ? '، ' : ', ') : null,
+      countries: catCountries,
+    };
   }
 
   // Contextual or explicit dynamic feature inquiry check. Resolve the item we're
@@ -1108,7 +1180,8 @@ function runDetectIntent({ text, lang, business, context = {} }) {
     // available?") — resolved on THIS product, answered "Yes/No", never the
     // hot-selling list or a raw "hot_selling: false" field dump. Checked first so
     // "is X hot selling?" about a named item doesn't fall through to the LIST.
-    const statusYesNo = detectStatusYesNo(normalizedText, text, lang, itemInContext, categoryMatches.length > 0);
+    const statusYesNo = detectStatusYesNo(normalizedText, text, lang, itemInContext,
+      categoryMatches.length > 0 || Boolean(findCategoryByAlias(normalizedText, items, lang)));
     if (statusYesNo) return statusYesNo;
     const featureInquiry = detectFeatureInquiry(normalizedText, lang, itemInContext);
     if (featureInquiry) return featureInquiry;
@@ -1250,8 +1323,12 @@ function runDetectIntent({ text, lang, business, context = {} }) {
 
   if (activeCountries.length) {
     const filterCountry = (i) => activeCountries.some((c) => countryMatchesItem(i, c));
-    const categoryMatch = categoryMatches.length === 1 ? categoryMatches[0] : null;
+    // Category = a hard filter. Literal name first ("إلكترونيات"), then the
+    // alias table ("أجهزة منزلية" typed loosely, "تجميل" -> الجمال والعناية).
+    const categoryMatch = (categoryMatches.length === 1 ? categoryMatches[0] : null)
+      || findCategoryByAlias(normalizedText, items, lang);
     const basePool = categoryMatch ? categoryMatch.items : items;
+    const countryPool = basePool.filter(filterCountry);
 
     if (matchesHotSelling(normalizedText)) {
       const filtered = basePool.filter(isHotSelling).filter(filterCountry);
@@ -1266,20 +1343,132 @@ function runDetectIntent({ text, lang, business, context = {} }) {
       return { intent: 'ecommerce_search_hot', items: filtered, country: activeCountry, countries: activeCountries, category: categoryMatch?.display };
     }
 
+    // Badge filter inside a country scope ("الجديد في الكويت", "limited items
+    // in UAE") — filter the country pool by the badge, don't let the badge
+    // word leak into subject-keyword search as if it named a product.
+    const countryBadge = detectBadge(normalizedText);
+    if (countryBadge) {
+      const badgeItems = countryPool.filter((i) => itemBadge(i).includes(countryBadge));
+      return { intent: 'ecommerce_badge', items: badgeItems, badge: countryBadge, country: activeCountry, countries: activeCountries };
+    }
+
+    // Alternatives shown alongside an honest "not available in <country>" —
+    // best-sellers from that same country first, then anything else it stocks.
+    const countryWide = items.filter(filterCountry);
+    const buildAlternatives = () => {
+      const pool = countryPool.length ? countryPool : countryWide;
+      const hot = pool.filter(isHotSelling);
+      return [...hot, ...pool.filter((i) => !isHotSelling(i))].slice(0, 4);
+    };
+    const countriesOf = (list) => {
+      const seen = new Set();
+      const out = [];
+      for (const it of list) {
+        const disp = getDisplayCountry(it, lang);
+        if (!disp) continue;
+        const id = countryCanonicalId(getDisplayCountry(it, 'en') || disp);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        out.push(disp);
+      }
+      return out.slice(0, 5);
+    };
+
+    // Subject keywords beyond the country + category ("شعر" in "منتجات للشعر
+    // في العراق", "نسائي" in "عطر نسائي في الكويت") narrow WITHIN the
+    // country-filtered pool — never across countries.
+    const subject = extractSubjectQuery(text, lang, { category: categoryMatch });
+    if (subject.tokens.length) {
+      const hits = searchWithinPool({ tokens: subject.tokens, lang, pool: countryPool });
+      if (hits.length) {
+        const capped = requestedCount ? hits.slice(0, requestedCount) : hits;
+        return {
+          intent: 'ecommerce_country_products',
+          items: capped,
+          country: activeCountry,
+          countries: activeCountries,
+          category: categoryMatch?.display,
+          subjectLabel: subject.label || categoryMatch?.display,
+          asksAvailability: true,
+        };
+      }
+      // Named subject, nothing in that country -> honest miss + same-country
+      // alternatives, and name the countries that DO stock it (if any).
+      const elsewhere = searchWithinPool({ tokens: subject.tokens, lang, pool: basePool.filter((i) => !filterCountry(i)) });
+      return {
+        intent: 'ecommerce_country_miss',
+        country: activeCountry,
+        countries: activeCountries,
+        subjectLabel: subject.label || categoryMatch?.display,
+        alternatives: buildAlternatives(),
+        elsewhereCountries: countriesOf(elsewhere),
+      };
+    }
+
+    if (categoryMatch) {
+      if (countryPool.length) {
+        const capped = requestedCount ? countryPool.slice(0, requestedCount) : countryPool;
+        return {
+          intent: 'ecommerce_country_products',
+          items: capped,
+          country: activeCountry,
+          countries: activeCountries,
+          category: categoryMatch.display,
+          asksAvailability: true,
+        };
+      }
+      // Category exists in the catalog but not in this country.
+      return {
+        intent: 'ecommerce_country_miss',
+        country: activeCountry,
+        countries: activeCountries,
+        subjectLabel: categoryMatch.display,
+        alternatives: buildAlternatives(),
+        elsewhereCountries: countriesOf(categoryMatch.items.filter((i) => !filterCountry(i))),
+      };
+    }
+
     if (countryNamedThisTurn
       || matchesAny(normalizedText, patterns.ecommerce_country_products)
       || tokensCount(normalizedText) <= 3
-      || categoryMatch
       || requestedCount) {
-      const filtered = basePool.filter(filterCountry);
-      if (requestedCount && filtered.length) {
-        const capped = filtered.slice(0, requestedCount);
+      if (requestedCount && countryPool.length) {
+        const capped = countryPool.slice(0, requestedCount);
         if (capped.length === 1) {
           return { intent: 'item_found', item: capped[0], country: activeCountry, countries: activeCountries };
         }
-        return { intent: 'ecommerce_country_products', items: capped, country: activeCountry, countries: activeCountries, category: categoryMatch?.display };
+        return { intent: 'ecommerce_country_products', items: capped, country: activeCountry, countries: activeCountries };
       }
-      return { intent: 'ecommerce_country_products', items: filtered, country: activeCountry, countries: activeCountries, category: categoryMatch?.display };
+      // Bare browse ("what products do you have in Saudi Arabia?"): when the
+      // country stocks SEVERAL categories, ask WHICH category first (with the
+      // real per-country category chips) instead of dumping 6 arbitrary items
+      // out of hundreds. A single-category country (e.g. Libya = perfumes
+      // only) skips the question and lists directly.
+      const catCounts = new Map();
+      for (const it of countryPool) {
+        const disp = getDisplayCategory(it, lang);
+        if (!disp) continue;
+        catCounts.set(disp, (catCounts.get(disp) || 0) + 1);
+      }
+      const countryCategories = [...catCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => ({ name, count }));
+      if (countryCategories.length > 1) {
+        return {
+          intent: 'ecommerce_country_categories',
+          country: activeCountry,
+          countries: activeCountries,
+          categories: countryCategories,
+          total: countryPool.length,
+        };
+      }
+      return {
+        intent: 'ecommerce_country_products',
+        items: countryPool,
+        country: activeCountry,
+        countries: activeCountries,
+        asksAvailability: true,
+      };
     }
   }
 
@@ -1780,25 +1969,127 @@ function buildResponse(intentResult, lang, business) {
       break;
     }
 
+    // Exact product-code hit ("SA-BC1004") — confirm availability THEN show the
+    // full card. The confirmation line is the direct answer to "is it still
+    // available?", the card is the proof.
+    case 'ecommerce_code_lookup': {
+      const item = intentResult.item;
+      const codeShown = (item.metadata || {}).code
+        ? String(item.metadata.code).trim()
+        : displayCode(intentResult.code);
+      const card = buildResponse({ intent: 'item_found', item }, lang, business);
+      const confirmLine = locale === 'ar'
+        ? `نعم ✅ المنتج بالكود **${codeShown}** ما زال متوفراً لدينا:`
+        : `Yes ✅ the product with code **${codeShown}** is still available:`;
+      card.text = `${confirmLine}\n\n${card.text}`;
+      return card;
+    }
+
+    // A code that matches NOTHING — say the CODE isn't in the database (the
+    // honest answer), never "the product is unavailable" (which asserts
+    // knowledge about a product we can't even identify).
+    case 'ecommerce_code_not_found': {
+      const codeShown = displayCode(intentResult.code);
+      payload.text = locale === 'ar'
+        ? `الكود **${codeShown}** غير موجود في قاعدة بياناتنا. تأكد من كتابة الكود بشكل صحيح، أو أرسل لي اسم المنتج وسأبحث عنه لك فوراً.`
+        : `The code **${codeShown}** isn't in our database. Please double-check the code, or send me the product name and I'll look it up for you right away.`;
+      addContactButton();
+      payload.suggestions = suggestions.slice(0, 3);
+      break;
+    }
+
+    // Price-threshold ask ("منتجات بأقل من 50 ريال") in a store with no public
+    // prices — we can't honestly filter by price, so say exactly that.
+    case 'ecommerce_price_filter':
+      payload.text = locale === 'ar'
+        ? 'لا نعرض أسعاراً ثابتة للمنتجات هنا — التسعير بالجملة يعتمد على الكمية والسوق، لذلك لا يمكنني تحديد منتجات حسب سعر معين. أخبرني بالمنتج والكمية التي تحتاجها وسنوافيك بأفضل عرض سعر.'
+        : "We don't publish fixed prices here — wholesale pricing depends on quantity and market, so I can't filter products by a price threshold. Tell me the product and quantity you need and we'll get you the best quote.";
+      addContactButton();
+      payload.suggestions = suggestions.slice(0, 3);
+      break;
+
+    // Bare "what products do you have in <country>?" — confirm availability,
+    // then ask WHICH category (with that country's real category chips) instead
+    // of dumping 6 arbitrary items out of hundreds.
+    case 'ecommerce_country_categories': {
+      const cats = Array.isArray(intentResult.categories) ? intentResult.categories : [];
+      const heading = locale === 'ar'
+        ? `نعم ✅ لدينا ${intentResult.total} منتج متوفر في ${intentResult.country}.\nما هي الفئة التي تبحث عنها؟ هذه الأقسام المتوفرة هناك:`
+        : `Yes ✅ we have ${intentResult.total} products available in ${intentResult.country}.\nWhich category are you looking for? Here's what's available there:`;
+      const lines = cats.map((c) => `- ${c.name} (${c.count})`);
+      payload.text = [heading, ...lines].join('\n');
+      payload.suggestions = cats.slice(0, 8).map((c) => c.name);
+      payload.context_update.last_country = intentResult.countries || intentResult.country;
+      addMarketplaceButton();
+      break;
+    }
+
+    // Honest per-country miss: the requested thing isn't stocked in that
+    // country — say so plainly, offer sourcing, name where it IS stocked, and
+    // show real alternatives from the SAME country.
+    case 'ecommerce_country_miss': {
+      const subject = intentResult.subjectLabel;
+      const lines = [];
+      lines.push(locale === 'ar'
+        ? `${subject ? `**${subject}**` : 'هذا المنتج'} غير متوفر حالياً في ${intentResult.country}، لكن يمكننا توفيره لك من خلال شبكة موردينا — تواصل معنا.`
+        : `${subject ? `**${subject}**` : 'That product'} isn't currently available in ${intentResult.country}, but we can source it for you through our supplier network — contact us.`);
+      if (Array.isArray(intentResult.elsewhereCountries) && intentResult.elsewhereCountries.length) {
+        const list = intentResult.elsewhereCountries.join(locale === 'ar' ? '، ' : ', ');
+        lines.push(locale === 'ar'
+          ? `علماً بأنه متوفر لدينا حالياً في: ${list}.`
+          : `Note: we do currently have it available in: ${list}.`);
+      }
+      const alternatives = Array.isArray(intentResult.alternatives) ? intentResult.alternatives : [];
+      if (alternatives.length) {
+        const altHeading = locale === 'ar'
+          ? `وهذه أفضل المنتجات المتوفرة لدينا حالياً في ${intentResult.country}:`
+          : `Meanwhile, here are our top available products in ${intentResult.country}:`;
+        const introText = lines.join('\n\n');
+        applyItemList(alternatives, altHeading);
+        // applyItemList set payload.text/messages to the alternatives; prepend
+        // the honest miss + elsewhere note as the leading bubble.
+        if (Array.isArray(payload.messages) && payload.messages.length) {
+          payload.messages = [{ text: introText, thumbnail: null }, ...payload.messages];
+          payload.text = `${introText}\n\n${payload.text}`;
+        } else {
+          payload.text = `${introText}\n\n${payload.text}`;
+        }
+        payload.suggestions = alternatives.slice(0, 3).map((item) => getDisplayTitle(item, locale));
+      } else {
+        payload.text = lines.join('\n\n');
+        payload.suggestions = suggestions.slice(0, 3);
+      }
+      addContactButton();
+      payload.context_update.last_country = intentResult.countries || intentResult.country;
+      break;
+    }
+
     case 'ecommerce_country_products':
       if (intentResult.items && intentResult.items.length > 0) {
-        const heading = intentResult.category
+        // Per the brand's requested framing: open with an explicit availability
+        // confirmation ("نعم، متوفر لدينا...") before the list.
+        const subjectPart = intentResult.subjectLabel
+          ? (locale === 'ar' ? `منتجات ${intentResult.subjectLabel}` : `${intentResult.subjectLabel} products`)
+          : (intentResult.category
+            ? (locale === 'ar' ? `منتجات ${intentResult.category}` : `${intentResult.category} products`)
+            : null);
+        const heading = subjectPart
           ? (locale === 'ar'
-            ? `إليك منتجات ${intentResult.category} المتوفرة في ${intentResult.country}:`
-            : `Here are the ${intentResult.category} products available in ${intentResult.country}:`)
+            ? `نعم ✅ متوفر لدينا ${subjectPart} في ${intentResult.country} — إليك المنتجات المتاحة:`
+            : `Yes ✅ we do have ${subjectPart} available in ${intentResult.country} — here they are:`)
           : (locale === 'ar'
-            ? `إليك المنتجات المتوفرة في ${intentResult.country}:`
-            : `Here are the products available in ${intentResult.country}:`);
+            ? `نعم ✅ هذه المنتجات المتوفرة لدينا في ${intentResult.country}:`
+            : `Yes ✅ here are the products we have available in ${intentResult.country}:`);
         applyItemList(intentResult.items.slice(0, 6), heading, intentResult.items.length);
         payload.suggestions = intentResult.items.slice(0, 4).map((item) => getDisplayTitle(item, locale));
       } else {
         payload.text = intentResult.category
           ? (locale === 'ar'
-            ? `لم نجد منتجات ${intentResult.category} متوفرة في ${intentResult.country} حالياً، لكن يمكننا توفير ما تحتاجه من شبكتنا — تواصل معنا.`
-            : `We couldn't find ${intentResult.category} products in ${intentResult.country} right now, but we can source what you need from our network — contact us.`)
+            ? `منتجات ${intentResult.category} غير متوفرة حالياً في ${intentResult.country}، لكن يمكننا توفير ما تحتاجه من شبكتنا — تواصل معنا.`
+            : `${intentResult.category} products aren't currently available in ${intentResult.country}, but we can source what you need from our network — contact us.`)
           : (locale === 'ar'
-            ? `لم نجد منتجات متوفرة في ${intentResult.country} حالياً، لكن يمكننا توفير ما تحتاجه من شبكتنا — تواصل معنا.`
-            : `We couldn't find products in ${intentResult.country} right now, but we can source what you need from our network — contact us.`);
+            ? `لا توجد منتجات متوفرة حالياً في ${intentResult.country}، لكن يمكننا توفير ما تحتاجه من شبكتنا — تواصل معنا.`
+            : `We don't currently have products available in ${intentResult.country}, but we can source what you need from our network — contact us.`);
         addContactButton();
       }
       payload.context_update.last_country = intentResult.countries || intentResult.country;
@@ -2039,11 +2330,22 @@ function buildResponse(intentResult, lang, business) {
       break;
     case 'list_categories':
       if (intentResult.categories && intentResult.categories.length > 0) {
-        const heading = locale === 'ar' ? 'هذه هي الأقسام المتوفرة لدينا:' : 'Here are the categories we carry:';
+        const heading = intentResult.country
+          ? (locale === 'ar'
+            ? `هذه أقسام المنتجات المتوفرة لدينا في ${intentResult.country}:`
+            : `Here are the product categories we carry in ${intentResult.country}:`)
+          : (locale === 'ar' ? 'هذه هي الأقسام المتوفرة لدينا:' : 'Here are the categories we carry:');
         payload.text = [heading, ...intentResult.categories.map((name) => `- ${name}`)].join('\n');
-        payload.suggestions = intentResult.categories.slice(0, 4);
+        payload.suggestions = intentResult.categories.slice(0, 8);
+        if (intentResult.countries && intentResult.countries.length) {
+          payload.context_update.last_country = intentResult.countries;
+        }
       } else {
-        payload.text = locale === 'ar' ? 'لا توجد أقسام مضافة حالياً.' : 'No categories are listed yet.';
+        payload.text = intentResult.country
+          ? (locale === 'ar'
+            ? `لا توجد أقسام متوفرة حالياً في ${intentResult.country}، لكن يمكننا توفير ما تحتاجه من شبكتنا — تواصل معنا.`
+            : `No categories are currently stocked in ${intentResult.country}, but we can source what you need — contact us.`)
+          : (locale === 'ar' ? 'لا توجد أقسام مضافة حالياً.' : 'No categories are listed yet.');
       }
       addMarketplaceButton();
       break;
@@ -2088,12 +2390,46 @@ function buildResponse(intentResult, lang, business) {
       }
       break;
     case 'brand_info': {
+      const bizItems = getBusinessItems(business.id);
+      const cats = [...new Set(bizItems.map((i) => getDisplayCategory(i, locale)).filter(Boolean))];
+      if (sourcing) {
+        // A sourcing brand's introduction must lead with WHAT THE COMPANY DOES —
+        // supplying ready products + sourcing anything on request — not just a
+        // corporate blurb. Countries and categories come from real catalog data.
+        const served = getServedCountries(bizItems, locale);
+        const servedLine = served.join(locale === 'ar' ? '، ' : ', ');
+        const name = locale === 'ar' ? (business.name_ar || business.name) : business.name;
+        if (locale === 'ar') {
+          payload.text = [
+            `نحن **${name}** — شركة متخصصة في توفير المنتجات وخدمات التوريد (Sourcing) للتجار والمسوقين وأصحاب المتاجر الإلكترونية.`,
+            'خدماتنا الأساسية:',
+            `• توريد منتجات جاهزة ومتوفرة للتوريد الفوري داخل: ${servedLine}.`,
+            '• البحث عن أي منتج تحتاجه وتوفيره لك من شبكة موردينا، حتى لو لم يكن معروضاً لدينا.',
+            '• دعم البيع بالجملة والدروبشيبينغ وإعادة البيع.',
+            cats.length ? `ونغطي أقساماً متعددة منها: ${cats.slice(0, 8).join('، ')}.` : '',
+            'اسألني عن أي قسم أو منتج أو دولة وسأساعدك فوراً!',
+          ].filter(Boolean).join('\n');
+        } else {
+          payload.text = [
+            `We are **${business.name}** — a product supply & sourcing company serving e-commerce sellers, marketers, and online store owners.`,
+            'Our core services:',
+            `• Ready-to-supply products available for immediate sourcing in: ${servedLine}.`,
+            "• Sourcing any product you need through our supplier network — even if it's not listed with us.",
+            '• Support for wholesale, dropshipping, and reselling.',
+            cats.length ? `We cover categories like: ${cats.slice(0, 8).join(', ')}.` : '',
+            'Ask me about any category, product, or country and I’ll help right away!',
+          ].filter(Boolean).join('\n');
+        }
+        payload.suggestions = cats.slice(0, 4);
+        addMarketplaceButton();
+        addContactButton();
+        break;
+      }
       const about = locale === 'ar'
         ? (business.about_ar || `نحن ${business.name_ar || business.name}. تواصل معنا إذا أردت معرفة المزيد.`)
         : (business.about_en || `We are ${business.name}. Contact us if you want to know more.`);
       // "What are your services?" deserves a concrete follow-through, not just the
       // corporate blurb — point them at the real categories they can browse/order.
-      const cats = [...new Set(getBusinessItems(business.id).map((i) => getDisplayCategory(i, locale)).filter(Boolean))];
       if (cats.length) {
         const catLine = locale === 'ar'
           ? `\n\nونوفّر منتجات في أقسام متعددة منها: ${cats.slice(0, 8).join('، ')}. اسألني عن أي قسم أو منتج وأساعدك فوراً.`

@@ -258,6 +258,19 @@ const ALWAYS_LOCAL_INTENTS = new Set([
   // "can you provide <category>?" -> yes + the category's real products from
   // the catalog, not a products-less AI "yes we can source anything" reply.
   'ecommerce_capability_category',
+  // Product-code lookups resolve ONLY by exact metadata.code match — a fuzzy
+  // AI classification here is exactly what showed the wrong product for a code.
+  'ecommerce_code_lookup', 'ecommerce_code_not_found',
+  // Price-threshold asks in a no-public-prices store: the honest "we can't
+  // filter by price" answer is deterministic; the AI would fabricate a match.
+  'ecommerce_price_filter',
+  // Country-scoped results are HARD-filtered locally (country + category +
+  // subject keywords). Letting the classifier re-answer these is what used to
+  // surface wrong-country products ("عطر في الكويت" answered with a Libya item).
+  'ecommerce_country_products', 'ecommerce_country_categories', 'ecommerce_country_miss',
+  // A named product that exists but is out of stock -> deterministic
+  // "we'll source it" reply (also the code-lane unavailable path).
+  'ecommerce_unavailable',
 ]);
 
 // Attach a "Contact us" button (+ a short invite line) to a can't-help reply so
@@ -419,6 +432,15 @@ router.post('/', tokenValidator, async (req, res) => {
     // overwrites the session language. For these, and for the phone step, trust
     // the language the customer already established in the session instead.
     if ((session.phase === 'collect_phone' || isInternalOrderCommand(text)) && session.language) {
+      lang = session.language === 'ar' ? 'ar' : 'en';
+    }
+
+    // A message that is essentially JUST a product code ("QT-BC1001") carries
+    // no language signal — detectLanguage reads the Latin code as English and
+    // the bot answered an Arabic conversation in English. Keep the session's
+    // established language for bare-code lookups.
+    const { isBareProductCode } = require('../../brains/shared/productSearch');
+    if (session.language && isBareProductCode(text)) {
       lang = session.language === 'ar' ? 'ar' : 'en';
     }
 

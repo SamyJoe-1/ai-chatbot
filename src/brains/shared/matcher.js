@@ -167,21 +167,32 @@ function findMatchingCategories({ text, lang, items, getCategoryVariants, getCat
       const variantTokens = tokenize(variant).map(stripArabicArticle);
       const strippedVariant = variantTokens.join(' ');
 
-      if (normalizedText.includes(variant) || normalizedText.includes(strippedVariant) || categoryOverlapScore(tokens, variantTokens) >= 0.5) {
+      // Track HOW the category matched: a literal substring hit is far
+      // stronger evidence than a fuzzy token hit. When any category matches
+      // literally, fuzzy-only matches are dropped below — otherwise a message
+      // naming "الجمال والعناية" exactly ALSO pulls in "الصحة والعافية"
+      // (والعناية ~ والعافية is within typo distance) and the single clear
+      // category turns into a bogus ambiguity.
+      const exactHit = normalizedText.includes(variant) || normalizedText.includes(strippedVariant);
+      if (exactHit || categoryOverlapScore(tokens, variantTokens) >= 0.5) {
         const existing = categoryMap.get(variant) || {
           key: variant,
           display: getCategoryDisplay(item, lang),
           items: [],
+          exact: false,
         };
+        existing.exact = existing.exact || exactHit;
         existing.items.push(item);
         categoryMap.set(variant, existing);
       }
     }
   }
 
-  return Array.from(categoryMap.values())
+  const all = Array.from(categoryMap.values())
     .map((entry) => ({ ...entry, items: uniqueByTitle(uniqueById(entry.items), lang) }))
     .filter((entry) => entry.items.length);
+  const exactOnly = all.filter((entry) => entry.exact);
+  return exactOnly.length ? exactOnly : all;
 }
 
 function uniqueByTitle(items, lang) {
@@ -631,6 +642,39 @@ function detectAnyKnownCountry(text, lang) {
   return null;
 }
 
+// Every normalized single-word key that names a country or region across the
+// alias groups ("saudi", "السعوديه", "ksa", "خليج", ...). Lets a caller strip
+// country words out of a product-subject query ("عطر نسائي في الكويت" ->
+// subject must be "عطر نسائي", never "الكويت").
+const COUNTRY_TOKEN_KEYS = (() => {
+  const keys = new Set();
+  const addKey = (alias) => {
+    const key = countryKey(alias);
+    if (!key) return;
+    keys.add(key);
+    for (const part of key.split(' ')) {
+      if (part.length >= 4) keys.add(part);
+    }
+  };
+  for (const group of COUNTRY_ALIAS_GROUPS) group.forEach(addKey);
+  for (const region of REGION_GROUPS) region.aliasKeys.forEach((k) => keys.add(k));
+  return keys;
+})();
+
+function isCountryToken(token) {
+  const key = countryKey(token);
+  if (!key) return false;
+  if (COUNTRY_TOKEN_KEYS.has(key)) return true;
+  // "بالسعوديه"/"للكويت" — attached preposition before the article.
+  for (const p of ['ب', 'ل', 'لل', 'بال', 'وال']) {
+    if (key.startsWith(p)) {
+      const rest = countryKey(key.slice(p.length));
+      if (rest && COUNTRY_TOKEN_KEYS.has(rest)) return true;
+    }
+  }
+  return false;
+}
+
 function countryMatchesItem(item, targetCountry) {
   let meta = item.metadata || {};
   if (typeof meta === 'string') {
@@ -656,4 +700,5 @@ module.exports = {
   detectAnyKnownCountry,
   countryCanonicalId,
   countryMatchesItem,
+  isCountryToken,
 };
